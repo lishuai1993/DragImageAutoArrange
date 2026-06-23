@@ -1,15 +1,80 @@
-[2026-06-23T03:01:06.121Z] [INFO] Plugin loading {"version":"1.0.0"}
-[2026-06-23T03:01:06.121Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
-[2026-06-23T03:01:06.121Z] [INFO] Reading Mode processor registered
-[2026-06-23T03:01:06.121Z] [INFO] Live Preview extension registered
-[2026-06-23T03:01:06.121Z] [INFO] Plugin loaded successfully
-[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview StateField create
-[2026-06-23T03:01:06.222Z] [DEBUG] detectImageGroups start {"lineCount":4,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T03:01:06.222Z] [DEBUG] detectImageGroups result {"groupCount":1,"groups":[{"lineStart":1,"lineEnd":4,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}]}
-[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview buildDecorations {"groupCount":1,"enabled":true,"docLength":93,"docLines":4}
-[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":4,"lineStart1":2,"lineEnd1":4,"lineCount":4,"from":1,"to":93,"docLength":93,"imageCount":3}
-[2026-06-23T03:01:06.222Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":1,"lineEnd":4}
-[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":1}
-[2026-06-23T03:01:06.226Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
-[2026-06-23T03:01:06.226Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":false,"enableResize":false}}
-[2026-06-23T03:01:06.270Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":886.6368408203125,"rowHeight":419,"flexGrows":[1,1.15,1],"imageCount":3}
+[2026-06-23T07:57:15.587Z] [INFO] Plugin loading {"version":"1.0.0"}
+[2026-06-23T07:57:15.587Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
+[2026-06-23T07:57:15.587Z] [INFO] Reading Mode processor registered
+[2026-06-23T07:57:15.587Z] [INFO] Live Preview extension registered
+[2026-06-23T07:57:15.587Z] [INFO] Plugin loaded successfully
+[2026-06-23T07:57:15.687Z] [DEBUG] LivePreview StateField create
+[2026-06-23T07:57:15.688Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-23T07:57:15.688Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}]}
+[2026-06-23T07:57:15.688Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":166,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]"]}]}
+[2026-06-23T07:57:15.688Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":63,"docLength":166,"imageCount":2}
+[2026-06-23T07:57:15.688Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
+[2026-06-23T07:57:15.688Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":70,"to":163,"docLength":166,"imageCount":3}
+[2026-06-23T07:57:15.688Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
+[2026-06-23T07:57:15.688Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-23T07:57:15.693Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
+[2026-06-23T07:57:15.693Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-23T07:57:15.694Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-23T07:57:15.694Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-23T07:57:15.744Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":197,"flexGrows":[2,2,1],"imageCount":3}
+[2026-06-23T07:57:15.744Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":461,"flexGrows":[1,1.15],"imageCount":2}
+[2026-06-23T07:57:19.598Z] [INFO] LivePreview drag reorder {"fromIndex":2,"toIndex":1,"fromLine":12,"toLine":11,"minLine":10,"maxLine":12,"fromPos":70,"toPos":163,"docLength":166,"docLines":17,"before":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]"],"after":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]",""],"originalLength":93,"insertLength":93}
+[2026-06-23T07:57:19.598Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-23T07:57:19.598Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}]}
+[2026-06-23T07:57:19.598Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":166,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
+[2026-06-23T07:57:19.598Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":63,"docLength":166,"imageCount":2}
+[2026-06-23T07:57:19.598Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
+[2026-06-23T07:57:19.598Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":70,"to":163,"docLength":166,"imageCount":3}
+[2026-06-23T07:57:19.598Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
+[2026-06-23T07:57:19.598Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-23T07:57:19.600Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-23T07:57:19.600Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}
+[2026-06-23T07:57:19.600Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-23T07:57:19.600Z] [DEBUG] LivePreview post-reorder doc {"docLines":17,"docLength":166,"docPreview":"\n![[图片并排测试-1782121567403.webp]]\n![[图片并排测试-1782122225593.webp]]\n\n\n\n\n\n\n\n![[图片并排测试-1782184100492.webp]]\n![[图片并排测试-1782121567403.webp]]\n![[图片并排测试-1782184100492.webp]]\n\n\n\n"}
+[2026-06-23T07:57:19.604Z] [DEBUG] LivePreview post-reorder DOM check {"embedCount":0,"cmLineCount":10,"embeds":[]}
+[2026-06-23T07:57:19.606Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":197,"flexGrows":[2,1,2],"imageCount":3}
+[2026-06-23T07:57:23.256Z] [INFO] LivePreview drag reorder {"fromIndex":2,"toIndex":1,"fromLine":12,"toLine":11,"minLine":10,"maxLine":12,"fromPos":70,"toPos":163,"docLength":166,"docLines":17,"before":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]"],"after":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]",""],"originalLength":93,"insertLength":93}
+[2026-06-23T07:57:23.256Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-23T07:57:23.257Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}]}
+[2026-06-23T07:57:23.257Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":166,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]"]}]}
+[2026-06-23T07:57:23.257Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":63,"docLength":166,"imageCount":2}
+[2026-06-23T07:57:23.257Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
+[2026-06-23T07:57:23.257Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":70,"to":163,"docLength":166,"imageCount":3}
+[2026-06-23T07:57:23.257Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
+[2026-06-23T07:57:23.257Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-23T07:57:23.258Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-23T07:57:23.259Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-23T07:57:23.259Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-23T07:57:23.259Z] [DEBUG] LivePreview post-reorder doc {"docLines":17,"docLength":166,"docPreview":"\n![[图片并排测试-1782121567403.webp]]\n![[图片并排测试-1782122225593.webp]]\n\n\n\n\n\n\n\n![[图片并排测试-1782184100492.webp]]\n![[图片并排测试-1782184100492.webp]]\n![[图片并排测试-1782121567403.webp]]\n\n\n\n"}
+[2026-06-23T07:57:23.262Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":197,"flexGrows":[2,2,1],"imageCount":3}
+[2026-06-23T07:57:23.267Z] [DEBUG] LivePreview post-reorder DOM check {"embedCount":0,"cmLineCount":10,"embeds":[]}
+[2026-06-23T07:57:26.064Z] [INFO] LivePreview drag reorder {"fromIndex":1,"toIndex":0,"fromLine":2,"toLine":1,"minLine":1,"maxLine":2,"fromPos":1,"toPos":63,"docLength":166,"docLines":17,"before":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782122225593.webp]]"],"after":["![[图片并排测试-1782122225593.webp]]","![[图片并排测试-1782121567403.webp]]",""],"originalLength":62,"insertLength":62}
+[2026-06-23T07:57:26.064Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-23T07:57:26.064Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}]}
+[2026-06-23T07:57:26.064Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":166,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp]]","![[图片并排测试-1782121567403.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]"]}]}
+[2026-06-23T07:57:26.064Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":63,"docLength":166,"imageCount":2}
+[2026-06-23T07:57:26.064Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
+[2026-06-23T07:57:26.064Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":70,"to":163,"docLength":166,"imageCount":3}
+[2026-06-23T07:57:26.064Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
+[2026-06-23T07:57:26.065Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-23T07:57:26.066Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-23T07:57:26.066Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-23T07:57:26.066Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-23T07:57:26.067Z] [DEBUG] LivePreview post-reorder doc {"docLines":17,"docLength":166,"docPreview":"\n![[图片并排测试-1782122225593.webp]]\n![[图片并排测试-1782121567403.webp]]\n\n\n\n\n\n\n\n![[图片并排测试-1782184100492.webp]]\n![[图片并排测试-1782184100492.webp]]\n![[图片并排测试-1782121567403.webp]]\n\n\n\n"}
+[2026-06-23T07:57:26.069Z] [DEBUG] LivePreview post-reorder DOM check {"embedCount":0,"cmLineCount":10,"embeds":[]}
+[2026-06-23T07:57:26.070Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":461,"flexGrows":[1.15,1],"imageCount":2}
+[2026-06-23T07:57:28.079Z] [INFO] LivePreview drag reorder {"fromIndex":2,"toIndex":1,"fromLine":12,"toLine":11,"minLine":10,"maxLine":12,"fromPos":70,"toPos":163,"docLength":166,"docLines":17,"before":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]"],"after":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]",""],"originalLength":93,"insertLength":93}
+[2026-06-23T07:57:28.079Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-23T07:57:28.079Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}]}
+[2026-06-23T07:57:28.079Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":166,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp]]","![[图片并排测试-1782121567403.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
+[2026-06-23T07:57:28.079Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":63,"docLength":166,"imageCount":2}
+[2026-06-23T07:57:28.079Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
+[2026-06-23T07:57:28.079Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":70,"to":163,"docLength":166,"imageCount":3}
+[2026-06-23T07:57:28.079Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
+[2026-06-23T07:57:28.079Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-23T07:57:28.080Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-23T07:57:28.080Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}
+[2026-06-23T07:57:28.080Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-23T07:57:28.080Z] [DEBUG] LivePreview post-reorder doc {"docLines":17,"docLength":166,"docPreview":"\n![[图片并排测试-1782122225593.webp]]\n![[图片并排测试-1782121567403.webp]]\n\n\n\n\n\n\n\n![[图片并排测试-1782184100492.webp]]\n![[图片并排测试-1782121567403.webp]]\n![[图片并排测试-1782184100492.webp]]\n\n\n\n"}
+[2026-06-23T07:57:28.083Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":197,"flexGrows":[2,1,2],"imageCount":3}
+[2026-06-23T07:57:28.084Z] [DEBUG] LivePreview post-reorder DOM check {"embedCount":0,"cmLineCount":10,"embeds":[]}

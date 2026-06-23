@@ -9,6 +9,7 @@ import {
   StateField,
   Prec,
 } from "@codemirror/state";
+import { editorLivePreviewField } from "obsidian";
 import { detectImageGroups } from "./imageDetector";
 import type { ImageGroup } from "./imageDetector";
 import { ImageRowWidget, ImageRowOptions } from "./imageRowWidget";
@@ -16,13 +17,13 @@ import { DragImageSettings } from "./settings";
 import { logger } from "./logger";
 
 /**
- * CodeMirror Widget that renders a static flex row of images.
- * Interactive features (drag, resize, divider) are Reading Mode only.
+ * CodeMirror Widget that renders a flex row of images with interactive features.
  */
 class StaticImageRowWidget extends WidgetType {
   private group: ImageGroup;
   private options: ImageRowOptions;
   private innerWidget: ImageRowWidget | null = null;
+  private editorView: EditorView | null = null;
 
   constructor(group: ImageGroup, options: ImageRowOptions) {
     super();
@@ -47,14 +48,28 @@ class StaticImageRowWidget extends WidgetType {
     return true;
   }
 
-  toDOM(_view: EditorView): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     try {
       logger.debug("StaticImageRowWidget toDOM", {
         imageCount: this.group.images.length,
         files: this.group.images.map((i) => i.fileName),
       });
+      this.editorView = view;
       this.innerWidget = new ImageRowWidget(this.group, this.options);
-      return this.innerWidget.build();
+      const el = this.innerWidget.build();
+
+      // Notify CodeMirror when the widget height changes after images load
+      this.innerWidget.onLayoutChange = () => {
+        this.editorView?.requestMeasure();
+      };
+
+      // Set up drag reorder within this row
+      this.innerWidget.onReorder((fromIndex, toIndex) => {
+        this.handleReorder(fromIndex, toIndex);
+      });
+      this.innerWidget.enableDragReorder();
+
+      return el;
     } catch (e) {
       logger.error("StaticImageRowWidget toDOM error", { error: String(e) });
       const fallback = document.createElement("span");
@@ -63,14 +78,107 @@ class StaticImageRowWidget extends WidgetType {
     }
   }
 
+  private handleReorder(fromIndex: number, toIndex: number): void {
+    if (!this.editorView) return;
+    const view = this.editorView;
+    const images = this.group.images;
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || fromIndex >= images.length ||
+        toIndex < 0 || toIndex >= images.length) return;
+
+    const fromLine = images[fromIndex].line;
+    const toLine = images[toIndex].line;
+
+    // These lines are always consecutive in a group
+    const minLine = this.group.lineStart;
+    const maxLine = this.group.lineEnd - 1;
+
+    const doc = view.state.doc;
+    const fromPos = doc.line(minLine + 1).from;
+    const toPos = maxLine + 2 <= doc.lines
+      ? doc.line(maxLine + 2).from
+      : doc.length;
+
+    // Read the original text range including all newlines, then reorder
+    // the lines in-place to preserve the exact newline structure.
+    const originalText = doc.sliceString(fromPos, toPos);
+    const originalLines = originalText.split("\n");
+
+    // Reorder within the group lines (local indices)
+    const localFrom = fromLine - minLine;
+    const localTo = toLine - minLine;
+
+    const [moved] = originalLines.splice(localFrom, 1);
+    const insertAt = fromIndex < toIndex
+      ? (localTo - (fromLine < toLine ? 1 : 0)) + 1
+      : localTo;
+    originalLines.splice(insertAt, 0, moved);
+
+    const insert = originalLines.join("\n");
+
+    logger.info("LivePreview drag reorder", {
+      fromIndex, toIndex, fromLine, toLine,
+      minLine, maxLine, fromPos, toPos, docLength: doc.length,
+      docLines: doc.lines,
+      before: images.map(i => i.raw),
+      after: originalLines,
+      originalLength: originalText.length,
+      insertLength: insert.length,
+    });
+
+    view.dispatch({
+      changes: { from: fromPos, to: toPos, insert },
+    });
+
+    const newDoc = view.state.doc.toString();
+    logger.debug("LivePreview post-reorder doc", {
+      docLines: view.state.doc.lines,
+      docLength: view.state.doc.length,
+      docPreview: newDoc.substring(0, 500),
+    });
+
+    // Diagnostic: check DOM for leaked Obsidian image embeds after reorder
+    const capturedView = view;
+    requestAnimationFrame(() => {
+      try {
+        const allEmbeds = capturedView.dom.querySelectorAll(
+          ".internal-embed.image-embed"
+        );
+        const embedInfo: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < allEmbeds.length; i++) {
+          const el = allEmbeds[i] as HTMLElement;
+          const rect = el.getBoundingClientRect();
+          const img = el.querySelector("img");
+          embedInfo.push({
+            offsetHeight: el.offsetHeight,
+            offsetWidth: el.offsetWidth,
+            rectTop: rect.top,
+            rectBottom: rect.bottom,
+            display: window.getComputedStyle(el).display,
+            imgSrc: img?.getAttribute("src")?.substring(0, 80) || "",
+            parentTag: el.parentElement?.tagName || "",
+            parentClass: el.parentElement?.className?.substring(0, 60) || "",
+          });
+        }
+        logger.debug("LivePreview post-reorder DOM check", {
+          embedCount: allEmbeds.length,
+          cmLineCount: capturedView.dom.querySelectorAll(".cm-line").length,
+          embeds: embedInfo,
+        });
+      } catch (err) {
+        logger.debug("LivePreview post-reorder DOM check error", {
+          error: String(err),
+        });
+      }
+    });
+  }
+
   updateDOM(_element: HTMLElement, _view: EditorView): boolean {
     return false;
   }
 
   ignoreEvent(event: Event): boolean {
-    return event.type === "dragstart" || event.type === "dragover" ||
-           event.type === "dragend"   || event.type === "drop" ||
-           event.type === "dragleave" || event.type === "dragenter";
+    return event.type.startsWith("drag");
   }
 
   destroy(): void {
@@ -94,17 +202,19 @@ function buildDecorations(
       return Decoration.none;
     }
 
+    // Skip in source mode: editorLivePreviewField is only present/true in Live Preview
+    if (!state.field(editorLivePreviewField, false)) {
+      logger.debug("LivePreview decorations skipped (source mode)");
+      return Decoration.none;
+    }
+
     const doc = state.doc.toString();
     if (!doc) return Decoration.none;
 
     const settings = getSettings();
     const baseOptions = getOptions();
 
-    const staticOptions: ImageRowOptions = {
-      ...baseOptions,
-      enableDividers: false,
-      enableResize: false,
-    };
+    const options = baseOptions;
 
     const groups = detectImageGroups(
       doc,
@@ -117,6 +227,13 @@ function buildDecorations(
       enabled: isEnabled(),
       docLength: doc.length,
       docLines: state.doc.lines,
+      groups: groups.map(g => ({
+        lineStart: g.lineStart,
+        lineEnd: g.lineEnd,
+        count: g.images.length,
+        files: g.images.map(i => i.fileName),
+        raws: g.images.map(i => i.raw),
+      })),
     });
 
     const builder = new RangeSetBuilder<Decoration>();
@@ -128,7 +245,7 @@ function buildDecorations(
 
         const lineCount = state.doc.lines;
         const lineStart1 = group.lineStart + 1;
-        const lineEnd1 = group.lineEnd;
+        const lineEnd1 = group.lineEnd; // 0-indexed exclusive == last line in 1-indexed
 
         if (lineStart1 > lineCount || lineEnd1 > lineCount) {
           logger.debug("LivePreview skipping group (out of range)", {
@@ -163,8 +280,9 @@ function buildDecorations(
           from,
           to,
           Decoration.replace({
-            widget: new StaticImageRowWidget(group, staticOptions),
+            widget: new StaticImageRowWidget(group, options),
             block: true,
+            inclusive: true,
           })
         );
         decorationAdded = true;
@@ -200,7 +318,6 @@ export function createLivePreviewPlugin(
     },
     update(_oldDecos, tr) {
       if (tr.docChanged) {
-        logger.debug("LivePreview StateField recomputing (docChanged)");
         return buildDecorations(tr.state, getOptions, getSettings, isEnabled);
       }
       return _oldDecos;

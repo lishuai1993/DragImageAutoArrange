@@ -37,6 +37,7 @@ export class ImageRowWidget {
   private loadedMetas: Map<number, ImageMeta> = new Map();
   private rowHeight: number;
   private flexGrows: number[] = [];
+  onLayoutChange: (() => void) | null = null;
 
   constructor(group: ImageGroup, options: ImageRowOptions) {
     this.group = group;
@@ -121,7 +122,7 @@ export class ImageRowWidget {
     img.style.display = "block";
     img.style.width = "100%";
     img.style.height = "100%";
-    img.style.objectFit = "cover";
+    img.style.objectFit = "contain";
     img.draggable = false; // We handle drag on the item level
     img.dataset.index = String(index);
 
@@ -183,6 +184,8 @@ export class ImageRowWidget {
     let startX = 0;
     let startLeftFlex = 0;
     let startRightFlex = 0;
+    let currentOnMove: ((e: MouseEvent) => void) | null = null;
+    let currentOnUp: (() => void) | null = null;
 
     divider.onmousedown = (e) => {
       dragging = true;
@@ -192,40 +195,49 @@ export class ImageRowWidget {
       startLeftFlex = parseFloat(leftItem?.style.flexGrow || "1");
       startRightFlex = parseFloat(rightItem?.style.flexGrow || "1");
       e.preventDefault();
+
+      // Register fresh listeners for each drag session
+      if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+      if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
+
+      currentOnMove = (ev: MouseEvent) => {
+        if (!dragging) return;
+        const dx = ev.clientX - startX;
+        if (Math.abs(dx) < 3) return;
+
+        const leftItem = this.itemEls[leftIndex];
+        const rightItem = this.itemEls[leftIndex + 1];
+        if (!leftItem || !rightItem) return;
+
+        const sensitivity = 0.5;
+        const newLeft = Math.max(0.1, startLeftFlex + dx * sensitivity * 0.01);
+        const total = startLeftFlex + startRightFlex;
+        const newRight = Math.max(0.1, total - newLeft);
+
+        leftItem.style.flexGrow = String(newLeft);
+        rightItem.style.flexGrow = String(newRight);
+
+        if (this.dividerDragCallback) {
+          const ratio = newLeft / (newLeft + newRight);
+          this.dividerDragCallback(leftIndex, ratio);
+        }
+      };
+
+      currentOnUp = () => {
+        dragging = false;
+        document.removeEventListener("mousemove", currentOnMove!);
+        document.removeEventListener("mouseup", currentOnUp!);
+        currentOnMove = null;
+        currentOnUp = null;
+      };
+
+      document.addEventListener("mousemove", currentOnMove);
+      document.addEventListener("mouseup", currentOnUp, { once: true });
     };
-
-    const onMove = (e: MouseEvent) => {
-      if (!dragging) return;
-      const dx = e.clientX - startX;
-      if (Math.abs(dx) < 3) return;
-
-      const leftItem = this.itemEls[leftIndex];
-      const rightItem = this.itemEls[leftIndex + 1];
-      if (!leftItem || !rightItem) return;
-
-      const sensitivity = 0.5;
-      const newLeft = Math.max(0.1, startLeftFlex + dx * sensitivity * 0.01);
-      const total = startLeftFlex + startRightFlex;
-      const newRight = Math.max(0.1, total - newLeft);
-
-      leftItem.style.flexGrow = String(newLeft);
-      rightItem.style.flexGrow = String(newRight);
-
-      if (this.dividerDragCallback) {
-        const ratio = newLeft / (newLeft + newRight);
-        this.dividerDragCallback(leftIndex, ratio);
-      }
-    };
-
-    const onUp = () => {
-      dragging = false;
-    };
-
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp, { once: true });
 
     divider._destroy = () => {
-      document.removeEventListener("mousemove", onMove);
+      if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+      if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
     };
 
     return divider;
@@ -275,6 +287,8 @@ export class ImageRowWidget {
       let dragging = false;
       let startX = 0;
       let startFlex = 0;
+      let currentOnMove: ((e: MouseEvent) => void) | null = null;
+      let currentOnUp: (() => void) | null = null;
 
       handle.onmousedown = (e) => {
         dragging = true;
@@ -282,29 +296,38 @@ export class ImageRowWidget {
         startFlex = parseFloat(item.style.flexGrow || "1");
         e.preventDefault();
         e.stopPropagation();
-      };
 
-      const onMove = (e: MouseEvent) => {
-        if (!dragging) return;
-        const dx = e.clientX - startX;
-        if (Math.abs(dx) < 3) return;
-        const newFlex = Math.max(0.1, startFlex + dx * 0.01);
-        item.style.flexGrow = String(newFlex);
-      };
+        // Register fresh listeners for each drag session
+        if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+        if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
 
-      const onUp = () => {
-        dragging = false;
-        const finalFlex = parseFloat(item.style.flexGrow || "1");
-        if (this.resizeEndCallback) {
-          this.resizeEndCallback(index, finalFlex);
-        }
-      };
+        currentOnMove = (ev: MouseEvent) => {
+          if (!dragging) return;
+          const dx = ev.clientX - startX;
+          if (Math.abs(dx) < 3) return;
+          const newFlex = Math.max(0.1, startFlex + dx * 0.01);
+          item.style.flexGrow = String(newFlex);
+        };
 
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp, { once: true });
+        currentOnUp = () => {
+          dragging = false;
+          const finalFlex = parseFloat(item.style.flexGrow || "1");
+          if (this.resizeEndCallback) {
+            this.resizeEndCallback(index, finalFlex);
+          }
+          document.removeEventListener("mousemove", currentOnMove!);
+          document.removeEventListener("mouseup", currentOnUp!);
+          currentOnMove = null;
+          currentOnUp = null;
+        };
+
+        document.addEventListener("mousemove", currentOnMove);
+        document.addEventListener("mouseup", currentOnUp, { once: true });
+      };
 
       handle._destroy = () => {
-        document.removeEventListener("mousemove", onMove);
+        if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+        if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
       };
 
       item.appendChild(handle);
@@ -334,6 +357,11 @@ export class ImageRowWidget {
 
     if (allLoaded) {
       const containerWidth = this.container.getBoundingClientRect().width;
+      // Element not in DOM yet — retry after layout
+      if (containerWidth === 0) {
+        requestAnimationFrame(() => this.applyLayout());
+        return;
+      }
       const result = computeUniformHeight(
         metas,
         containerWidth,
@@ -357,6 +385,7 @@ export class ImageRowWidget {
         flexGrows: grows,
         imageCount: metas.length,
       });
+      this.onLayoutChange?.();
     } else {
       // Use a sensible default until images load
       this.container.style.height = `${this.options.defaultRowHeight}px`;

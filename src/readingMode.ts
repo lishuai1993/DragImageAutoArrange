@@ -15,11 +15,17 @@ export function createReadingModeProcessor(
   enabled: () => boolean
 ) {
   return (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+    // Always log entry so we can tell if the processor is invoked at all
+    const allEmbeds = el.querySelectorAll(".internal-embed.image-embed");
+    logger.debug("ReadingMode processor invoked", {
+      sourcePath: ctx.sourcePath,
+      embedCount: allEmbeds.length,
+      enabled: enabled(),
+    });
+
     if (!enabled()) return;
 
-    const embeds = Array.from(
-      el.querySelectorAll<HTMLElement>(".internal-embed.image-embed")
-    );
+    const embeds = Array.from(allEmbeds) as HTMLElement[];
     if (embeds.length === 0) return;
 
     // --- Step 1: Group consecutive embeds ---
@@ -137,7 +143,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     b.style.cssText = `flex:1 1 0;overflow:hidden;min-width:50px;position:relative;margin:0;padding:0;`;
     const imgs = Array.from(b.querySelectorAll<HTMLImageElement>("img"));
     for (const img of imgs) {
-      img.style.cssText = "width:100%;height:100%;object-fit:cover;display:block;";
+      img.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;";
     }
     row.appendChild(b);
   }
@@ -166,9 +172,14 @@ function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLElement[]
 
     block.setAttribute("draggable", "true");
     block.classList.add("diaa-draggable");
+    // Prevent native image drag from overriding our block-level drag
+    for (const img of Array.from(block.querySelectorAll("img"))) {
+      img.setAttribute("draggable", "false");
+    }
     draggableCount++;
 
     block.addEventListener("dragstart", (e) => {
+      logger.debug("ReadingMode dragstart", { sourcePath });
       dragSrcEl = block;
       block.classList.add(CLASSES.dragging);
       e.dataTransfer!.effectAllowed = "move";

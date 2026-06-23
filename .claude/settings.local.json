@@ -6,7 +6,8 @@
       "Bash(node esbuild.config.mjs production)",
       "Bash(dir /s /b \"D:\\\\lishuai\\\\知识仓库\\\\.obsidian\\\\plugins\")",
       "Bash(dir *)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(npm run *)"
     ]
   }
 }
