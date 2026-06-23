@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(node esbuild.config.mjs production)",
+      "Bash(dir /s /b \"D:\\\\lishuai\\\\知识仓库\\\\.obsidian\\\\plugins\")",
+      "Bash(dir *)",
+      "Bash(powershell *)"
+    ]
+  }
+}

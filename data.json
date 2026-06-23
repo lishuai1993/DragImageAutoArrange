@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "defaultRowHeight": 200,
+  "maxImagesPerRow": 10,
+  "gapSize": 4,
+  "enableDragReorder": true,
+  "enableResize": true,
+  "enableDividers": true,
+  "imageExtensions": "png,jpg,jpeg,gif,webp,svg,bmp,avif"
+}

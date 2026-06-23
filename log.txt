@@ -1,0 +1,15 @@
+[2026-06-23T03:01:06.121Z] [INFO] Plugin loading {"version":"1.0.0"}
+[2026-06-23T03:01:06.121Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
+[2026-06-23T03:01:06.121Z] [INFO] Reading Mode processor registered
+[2026-06-23T03:01:06.121Z] [INFO] Live Preview extension registered
+[2026-06-23T03:01:06.121Z] [INFO] Plugin loaded successfully
+[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview StateField create
+[2026-06-23T03:01:06.222Z] [DEBUG] detectImageGroups start {"lineCount":4,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-23T03:01:06.222Z] [DEBUG] detectImageGroups result {"groupCount":1,"groups":[{"lineStart":1,"lineEnd":4,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}]}
+[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview buildDecorations {"groupCount":1,"enabled":true,"docLength":93,"docLines":4}
+[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":4,"lineStart1":2,"lineEnd1":4,"lineCount":4,"from":1,"to":93,"docLength":93,"imageCount":3}
+[2026-06-23T03:01:06.222Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":1,"lineEnd":4}
+[2026-06-23T03:01:06.222Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":1}
+[2026-06-23T03:01:06.226Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-23T03:01:06.226Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":false,"enableResize":false}}
+[2026-06-23T03:01:06.270Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":886.6368408203125,"rowHeight":419,"flexGrows":[1,1.15,1],"imageCount":3}

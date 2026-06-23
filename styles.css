@@ -1,0 +1,189 @@
+/* Drag Image Auto Arrange — Flex Row Layout */
+
+.drag-img-row {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  margin: 4px 0;
+  border-radius: 4px;
+}
+
+.drag-img-row:hover {
+  outline: 1px solid rgba(74, 158, 255, 0.15);
+}
+
+/* Individual image item within a row */
+.drag-img-item {
+  flex: 1 1 0;
+  position: relative;
+  overflow: hidden;
+  min-width: 50px;
+  cursor: grab;
+  transition: filter 0.15s;
+}
+
+.drag-img-item:hover {
+  filter: brightness(0.95);
+}
+
+.drag-img-item:active {
+  cursor: grabbing;
+}
+
+.drag-img-item.drag-img-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+/* The actual <img> element */
+.drag-img-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* Placeholder for broken/missing images */
+.drag-img-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background-color: #f0f0f0;
+  color: #999;
+  font-size: 12px;
+  text-align: center;
+  min-height: 80px;
+}
+
+/* Draggable divider between images */
+.drag-img-divider {
+  flex: 0 0 auto;
+  width: 4px;
+  align-self: stretch;
+  cursor: col-resize;
+  background-color: transparent;
+  transition: background-color 0.15s;
+  z-index: 3;
+  border-radius: 2px;
+}
+
+.drag-img-divider:hover {
+  background-color: #4a9eff;
+}
+
+/* Resize handles on image corners */
+.drag-img-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #4a9eff;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+  border: 1px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.drag-img-item:hover .drag-img-resize-handle {
+  opacity: 1;
+}
+
+/* Drop indicator during drag reorder */
+.drag-img-item.drag-img-drop-before {
+  border-left: 3px solid #4a9eff;
+}
+
+.drag-img-item.drag-img-drop-after {
+  border-right: 3px solid #4a9eff;
+}
+
+/* === Reading Mode specific === */
+
+/* When images are in a flex row, remove default Obsidian margins */
+.markdown-preview-view .drag-img-row p,
+.markdown-reading-view .drag-img-row p,
+.markdown-preview-view .drag-img-row .internal-embed,
+.markdown-reading-view .drag-img-row .internal-embed {
+  margin: 0;
+  padding: 0;
+}
+
+/* Ensure images in the row fill their containers */
+.markdown-preview-view .drag-img-row img,
+.markdown-reading-view .drag-img-row img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Draggable standalone images in Reading Mode */
+.markdown-reading-view .diaa-draggable,
+.markdown-preview-view .diaa-draggable {
+  cursor: grab;
+  transition: opacity 0.15s, box-shadow 0.15s;
+  border-radius: 4px;
+}
+
+.markdown-reading-view .diaa-draggable:hover,
+.markdown-preview-view .diaa-draggable:hover {
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
+}
+
+.markdown-reading-view .diaa-draggable.drag-img-dragging,
+.markdown-preview-view .diaa-draggable.drag-img-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+/* Drop indicator for drag-to-merge in Reading Mode */
+.diaa-drop-indicator {
+  pointer-events: none;
+  animation: diaa-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes diaa-pulse {
+  from { opacity: 0.6; }
+  to   { opacity: 1; }
+}
+
+/* === Live Preview specific === */
+
+/* Make our custom widgets sit well within CodeMirror lines */
+.cm-content .drag-img-row {
+  margin: 2px 0;
+}
+
+/* Ensure the CodeMirror embed block styles don't interfere */
+.cm-embed-block .drag-img-row {
+  pointer-events: auto;
+}
+
+/* === Mobile responsiveness === */
+
+@media (max-width: 768px) {
+  .drag-img-row {
+    flex-wrap: wrap;
+    height: auto !important;
+  }
+
+  .drag-img-item {
+    flex: 1 1 45% !important;
+    min-width: 120px;
+  }
+
+  .drag-img-divider {
+    display: none;
+  }
+
+  .drag-img-resize-handle {
+    display: none !important;
+  }
+}
