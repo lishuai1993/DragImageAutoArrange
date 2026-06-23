@@ -8,6 +8,7 @@ import {
   RangeSetBuilder,
   StateField,
   Prec,
+  Annotation,
 } from "@codemirror/state";
 import { editorLivePreviewField } from "obsidian";
 import { detectImageGroups } from "./imageDetector";
@@ -42,6 +43,7 @@ class StaticImageRowWidget extends WidgetType {
     if (a.images.length !== b.images.length) return false;
     if (a.lineStart !== b.lineStart) return false;
     if (a.lineEnd !== b.lineEnd) return false;
+    if (this.options.snapSensitivity !== other.options.snapSensitivity) return false;
     for (let i = 0; i < a.images.length; i++) {
       if (a.images[i].raw !== b.images[i].raw) return false;
     }
@@ -68,6 +70,11 @@ class StaticImageRowWidget extends WidgetType {
         this.handleReorder(fromIndex, toIndex);
       });
       this.innerWidget.enableDragReorder();
+
+      // Persist flex-grow changes back to markdown on drag end
+      this.innerWidget.onPersist(() => {
+        this.persistFlexGrows();
+      });
 
       return el;
     } catch (e) {
@@ -186,6 +193,41 @@ class StaticImageRowWidget extends WidgetType {
     this.innerWidget?.destroy();
     this.innerWidget = null;
   }
+
+  /** Write current flex-grow values back to markdown as ![[file|width]]. */
+  private persistFlexGrows(): void {
+    if (!this.editorView || !this.innerWidget) return;
+
+    const view = this.editorView;
+    const images = this.group.images;
+    const grows = this.innerWidget.getCurrentFlexGrows();
+
+    // Collect line-level changes (descending order so positions stay valid)
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    for (let i = 0; i < grows.length && i < images.length; i++) {
+      const newLine = updateImageLineWidth(images[i].raw, grows[i]);
+      if (newLine === images[i].raw) continue;
+
+      const line = images[i].line + 1; // 1-indexed
+      const pos = view.state.doc.line(line).from;
+      changes.push({ from: pos, to: pos + images[i].raw.length, insert: newLine });
+    }
+
+    if (changes.length === 0) return;
+
+    // Apply from bottom to top so earlier positions stay valid
+    changes.sort((a, b) => b.from - a.from);
+    view.dispatch({ changes });
+  }
+}
+
+/** Replace or remove the |width parameter in an image embed line. */
+function updateImageLineWidth(raw: string, flexGrow: number): string {
+  const widthValue = Math.round(flexGrow * 100);
+  // Strip existing |width parameter
+  let out = raw.replace(/\|(\d+)(\]\])/, "$2");
+  if (widthValue === 100) return out; // default → omit
+  return out.replace(/\]\]/, `|${widthValue}]]`);
 }
 
 // ── State field for decorations ─────────────────────────────────
@@ -306,6 +348,9 @@ function buildDecorations(
   }
 }
 
+/** Dispatch this annotation to force a decoration rebuild (e.g. after settings change). */
+export const settingsChanged = Annotation.define<boolean>();
+
 export function createLivePreviewPlugin(
   getOptions: () => ImageRowOptions,
   getSettings: () => DragImageSettings,
@@ -317,7 +362,7 @@ export function createLivePreviewPlugin(
       return buildDecorations(state, getOptions, getSettings, isEnabled);
     },
     update(_oldDecos, tr) {
-      if (tr.docChanged) {
+      if (tr.docChanged || tr.annotation(settingsChanged)) {
         return buildDecorations(tr.state, getOptions, getSettings, isEnabled);
       }
       return _oldDecos;

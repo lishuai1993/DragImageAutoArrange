@@ -7,7 +7,9 @@
       "Bash(dir /s /b \"D:\\\\lishuai\\\\知识仓库\\\\.obsidian\\\\plugins\")",
       "Bash(dir *)",
       "Bash(powershell *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Read(//d/work/custom/.obsidian/plugins/obsidian-DragImageAutoArrange/**)",
+      "Read(//d/work/custom/.obsidian/**)"
     ]
   }
 }

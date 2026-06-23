@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { createLivePreviewPlugin } from "./livePreview";
+import { createLivePreviewPlugin, settingsChanged } from "./livePreview";
 import { ImageRowOptions } from "./imageRowWidget";
 import { logger } from "./logger";
 
@@ -19,6 +19,7 @@ export default class DragImageAutoArrangePlugin
     defaultRowHeight: 200,
     maxImagesPerRow: 10,
     gapSize: 4,
+    snapSensitivity: 3,
     enableDragReorder: true,
     enableResize: true,
     enableDividers: true,
@@ -111,6 +112,13 @@ export default class DragImageAutoArrangePlugin
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    // Notify Live Preview editors so they rebuild decorations with fresh options
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const cm = (leaf.view as any)?.editor?.cm;
+      if (cm?.dispatch) {
+        cm.dispatch({ annotations: [settingsChanged.of(true)] });
+      }
+    });
   }
 
   private buildImageRowOptions(): ImageRowOptions {
@@ -121,6 +129,7 @@ export default class DragImageAutoArrangePlugin
       gap: this.settings.gapSize,
       enableDividers: this.settings.enableDividers,
       enableResize: this.settings.enableResize,
+      snapSensitivity: this.settings.snapSensitivity,
       getResourcePath: (fileName: string) => {
         const url = this.resolveImagePath(fileName, sourcePath);
         if (!url) {

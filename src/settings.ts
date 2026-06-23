@@ -6,6 +6,7 @@ export interface DragImageSettings {
   defaultRowHeight: number;
   maxImagesPerRow: number;
   gapSize: number;
+  snapSensitivity: number;
   enableDragReorder: boolean;
   enableResize: boolean;
   enableDividers: boolean;
@@ -86,6 +87,20 @@ export class DragImageSettingTab extends PluginSettingTab {
           .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.gapSize = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Snap sensitivity")
+      .setDesc("When dragging a divider or resize handle, snap into place when the height difference between adjacent images falls within this percentage of their equilibrium (equal) height. Set to 0 to disable snapping.")
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 10, 1)
+          .setValue(this.plugin.settings.snapSensitivity)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.snapSensitivity = value;
             await this.plugin.saveSettings();
           })
       );

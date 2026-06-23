@@ -10,22 +10,19 @@
   border-radius: 4px;
 }
 
-.drag-img-row:hover {
-  outline: 1px solid rgba(74, 158, 255, 0.15);
-}
-
 /* Individual image item within a row */
 .drag-img-item {
   flex: 1 1 0;
   position: relative;
   overflow: hidden;
   min-width: 50px;
+  min-height: 0;
+  flex-shrink: 0;
   cursor: grab;
-  transition: filter 0.15s;
 }
 
 .drag-img-item:hover {
-  opacity: 0.88;
+  background-color: rgba(74, 158, 255, 0.06);
 }
 
 .drag-img-item:active {
@@ -43,6 +40,7 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: top;
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -77,6 +75,20 @@
   background-color: #4a9eff;
 }
 
+.drag-img-divider-active {
+  background-color: #4a9eff !important;
+}
+
+.drag-img-divider-snap {
+  background-color: #f59e0b !important;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+}
+
+/* Snap highlight on image items */
+.drag-img-item.drag-img-snap {
+  box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.7);
+}
+
 /* Resize handles on image corners */
 .drag-img-resize-handle {
   position: absolute;
@@ -84,15 +96,14 @@
   height: 8px;
   border-radius: 50%;
   background-color: #4a9eff;
-  opacity: 0;
-  transition: opacity 0.15s;
+  visibility: hidden;
   z-index: 2;
   border: 1px solid white;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .drag-img-item:hover .drag-img-resize-handle {
-  opacity: 1;
+  visibility: visible;
 }
 
 /* Drop indicator during drag reorder */

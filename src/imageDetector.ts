@@ -6,6 +6,8 @@ export interface ImageEmbed {
   raw: string;
   fileName: string;
   explicitWidth: number | null;
+  /** flex-grow from |width in markdown (true) vs computed from aspect ratio (false) */
+  hasExplicitWidth: boolean;
   flexGrow: number;
 }
 
@@ -41,6 +43,7 @@ export function parseImageLine(
     raw: line,
     fileName,
     explicitWidth,
+    hasExplicitWidth: explicitWidth !== null,
     flexGrow: explicitWidth ? explicitWidth / 100 : 1,
   };
 }

@@ -3,6 +3,7 @@
   "defaultRowHeight": 200,
   "maxImagesPerRow": 10,
   "gapSize": 4,
+  "snapSensitivity": 6,
   "enableDragReorder": true,
   "enableResize": true,
   "enableDividers": true,

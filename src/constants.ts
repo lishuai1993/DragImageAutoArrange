@@ -9,6 +9,9 @@ export const CLASSES = {
   dropIndicator: `${CSS_PREFIX}-drop-indicator`,
   dragging: `${CSS_PREFIX}-dragging`,
   placeholder: `${CSS_PREFIX}-placeholder`,
+  dividerActive: `${CSS_PREFIX}-divider-active`,
+  dividerSnap: `${CSS_PREFIX}-divider-snap`,
+  itemSnap: `${CSS_PREFIX}-snap`,
 } as const;
 
 export const DEFAULT_SETTINGS = {
@@ -16,6 +19,7 @@ export const DEFAULT_SETTINGS = {
   defaultRowHeight: 200,
   maxImagesPerRow: 10,
   gapSize: 4,
+  snapSensitivity: 3,
   enableDragReorder: true,
   enableResize: true,
   enableDividers: true,
