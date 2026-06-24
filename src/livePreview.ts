@@ -372,21 +372,37 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   updateDOM(_element: HTMLElement, view: EditorView): boolean {
-    // Re-read flex-grows from editor text (persistFlexGrows may have
-    // updated them).  Returning true tells CodeMirror the existing DOM
-    // is still good — no rebuild, no flash.
-    if (this.innerWidget && this.group) {
-      const doc = view.state.doc;
-      const grows: number[] = [];
-      for (let line = this.group.lineStart; line < this.group.lineEnd; line++) {
-        const text = doc.line(line + 1).text;
-        const match = text.match(/\|(\d+)(?:\]\]|\|)/);
-        const flex = match ? parseInt(match[1], 10) / 100 : 1;
-        grows.push(flex);
-      }
-      if (grows.length === this.group.images.length) {
-        this.innerWidget.updateFlexGrows(grows);
-      }
+    if (!this.innerWidget || !this.group) return false;
+
+    const doc = view.state.doc;
+
+    // Detect whether the image group at this position has changed
+    // composition (count or file names). If so, return false to force
+    // CodeMirror to destroy+recreate the widget.
+    const imgRegex = /^[\s]*!\[\[([^\]]+)\]\]/;
+    const currentFiles: string[] = [];
+    for (let i = this.group.lineStart; i < doc.lines; i++) {
+      const text = doc.line(i + 1).text;
+      const match = text.match(imgRegex);
+      if (!match) break;
+      currentFiles.push(match[1].split("|")[0]);
+    }
+
+    if (currentFiles.length !== this.group.images.length) return false;
+    for (let i = 0; i < currentFiles.length; i++) {
+      if (currentFiles[i] !== this.group.images[i].fileName) return false;
+    }
+
+    // Group composition unchanged: just sync flex-grows, no DOM rebuild
+    const grows: number[] = [];
+    for (let line = this.group.lineStart; line < this.group.lineEnd; line++) {
+      const text = doc.line(line + 1).text;
+      const match = text.match(/\|(\d+)(?:\]\]|\|)/);
+      const flex = match ? parseInt(match[1], 10) / 100 : 1;
+      grows.push(flex);
+    }
+    if (grows.length === this.group.images.length) {
+      this.innerWidget.updateFlexGrows(grows);
     }
     return true;
   }
@@ -404,15 +420,6 @@ class StaticImageRowWidget extends WidgetType {
     logger.debug("StaticImageRowWidget destroyed");
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = null;
-    // Defer: view.dispatch() inside a CodeMirror update cycle (e.g. mode
-    // switch, decoration removal) throws and corrupts decorations.
-    // Capture state before teardown; dispatch in next event-loop tick.
-    if (this.editorView && this.innerWidget) {
-      const view = this.editorView;
-      const images = [...this.group.images];
-      const grows = this.innerWidget.getCurrentFlexGrows();
-      setTimeout(() => applyFlexGrowChanges(view, images, grows), 0);
-    }
     this.innerWidget?.destroy();
     this.innerWidget = null;
   }

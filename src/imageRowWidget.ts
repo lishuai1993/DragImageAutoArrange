@@ -106,6 +106,7 @@ export class ImageRowWidget {
     this.container.style.alignItems = "flex-start";
     this.container.style.gap = `${this.options.gap}px`;
     this.container.style.width = "100%";
+    this.container.style.overflow = "hidden";
 
     // Top hover bar (visual indicator only — pointer-events: none so it
     // never blocks resize handles at the top edge of images).
@@ -177,17 +178,16 @@ export class ImageRowWidget {
   private buildImageItem(image: ImageEmbed, index: number): HTMLElement {
     const item = document.createElement("div");
     item.className = CLASSES.imageItem;
-    item.style.flex = `${image.flexGrow} 0 0%`;
+    item.style.flex = `${image.flexGrow} 1 0%`;
     item.style.position = "relative";
+    item.style.overflow = "hidden";
     item.style.minWidth = "50px";
     item.style.minHeight = "0";
     item.style.height = "100%";
-    item.style.transform = "translateZ(0)";
     item.dataset.index = String(index);
 
     const img = document.createElement("img");
     img.className = CLASSES.imageInner;
-    img.src = this.options.getResourcePath(image.fileName);
     img.alt = image.fileName;
     img.style.display = "block";
     img.style.width = "100%";
@@ -196,29 +196,36 @@ export class ImageRowWidget {
     img.style.objectPosition = "left top";
     img.dataset.index = String(index);
 
-    img.onload = () => {
-      this.loadedMetas.set(index, {
-        naturalWidth: img.naturalWidth,
-        naturalHeight: img.naturalHeight,
-      });
+    // Set onload BEFORE src so cached images don't fire synchronously
+    // before the handler is registered.
+    const handleLoad = () => {
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+      logger.debug("ImageRowWidget img onload", { index, file: image.fileName, naturalWidth: nw, naturalHeight: nh, complete: img.complete });
+      this.loadedMetas.set(index, { naturalWidth: nw, naturalHeight: nh });
       this.applyLayout();
-      // Defer handle position update until after browser reflow
       requestAnimationFrame(() => this.updateHandlePositions(index));
     };
 
+    img.onload = handleLoad;
+
     img.onerror = () => {
-      logger.warn("Image load failed in widget", {
-        fileName: image.fileName,
-        index,
-        src: img.src,
-      });
-      this.loadedMetas.set(index, {
-        naturalWidth: 400,
-        naturalHeight: 300,
-      });
+      logger.warn("Image load failed in widget", { fileName: image.fileName, index, src: img.src.substring(0, 80) });
+      this.loadedMetas.set(index, { naturalWidth: 400, naturalHeight: 300 });
       img.style.backgroundColor = "#f0f0f0";
       img.alt = `[Not found: ${image.fileName}]`;
+      this.applyLayout();
     };
+
+    img.src = this.options.getResourcePath(image.fileName);
+
+    // Guard: if the image was already cached and the browser didn't fire
+    // onload despite being set before src (Electron/Chromium edge case),
+    // handle it here.
+    if (img.complete && img.naturalWidth > 0) {
+      logger.debug("ImageRowWidget img already complete", { index, file: image.fileName, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+      handleLoad();
+    }
 
     item.appendChild(img);
     this.imageEls.push(img);
@@ -470,6 +477,8 @@ export class ImageRowWidget {
       let totalG = 0;
       let startFlex = 0;
       let startWidth = 0;
+      let startHeight = 0;
+      let maxHeight = 2000;
       let scale = 1;
       let nItems = 0;
 
@@ -494,6 +503,17 @@ export class ImageRowWidget {
         }
         startFlex = grows[index];
         startWidth = (startFlex / totalG) * AW;
+        startHeight = parseFloat(this.container!.style.height || "0");
+
+        // For single-image rows, cap height at the point where the image
+        // fills the full container width — beyond that the image won't grow.
+        if (nItems === 1) {
+          const meta = this.loadedMetas.get(index);
+          if (meta && meta.naturalWidth > 0) {
+            const aspect = meta.naturalWidth / meta.naturalHeight;
+            maxHeight = aspect > 0 ? Math.round(AW / aspect) : 2000;
+          }
+        }
 
         // Scale: image-content width to item-width ratio.
         // When object-fit:contain makes the image narrower than the item,
@@ -509,7 +529,35 @@ export class ImageRowWidget {
         currentOnMove = (ev: MouseEvent) => {
           if (!dragging) return;
 
-          // Width-based feedforward: dx → target width → flex-grow.
+          // ── Single-image row: direct height scaling (flex-grow is meaningless) ──
+          if (nItems === 1) {
+            const dx = ev.clientX - e.clientX;
+            const dy = ev.clientY - e.clientY;
+
+            const xSign = hd.relX < 0.5 ? -1 : 1;
+            const ySign = hd.relY < 0.5 ? -1 : 1;
+
+            // Weighted blend of dx/dy based on handle position.
+            // Edge handles track the perpendicular axis only;
+            // corner handles average both axes. This eliminates
+            // the discontinuous jump that a binary dominant-axis switch causes.
+            const wx = 2 * Math.abs(hd.relX - 0.5);
+            const wy = 2 * Math.abs(hd.relY - 0.5);
+            const SENS = 1;
+            const delta = wx + wy > 0
+              ? (dx * xSign * wx + dy * ySign * wy) / (wx + wy) * SENS
+              : 0;
+
+            const newHeight = Math.max(50, Math.min(maxHeight, Math.round(startHeight + delta)));
+            const h = `${newHeight}px`;
+            this.container!.style.height = h;
+            this.itemEls[0].style.height = h;
+            this.imageEls[0].style.height = h;
+            this.updateHandlePositions(0);
+            return;
+          }
+
+          // ── Multi-image row: width-based feedforward ──
           // Dampened by SENS to avoid hypersensitive scaling on tall images.
           const SENS = 0.4;
           const sign = hd.relX < 0.5 ? -1 : 1;
@@ -574,8 +622,9 @@ export class ImageRowWidget {
           dragging = false;
           item.classList.remove(CLASSES.resizing);
           item.classList.remove(CLASSES.itemSnap);
+
           const finalFlex = parseFloat(item.style.flexGrow || "1");
-          logger.debug("resize-mouseup", { index, finalFlex, timestamp: Date.now() });
+          logger.debug("resize-mouseup", { index, finalFlex, nItems, timestamp: Date.now() });
           if (this.resizeEndCallback) {
             this.resizeEndCallback(index, finalFlex);
           }
@@ -621,6 +670,7 @@ export class ImageRowWidget {
     }
 
     const allLoaded = metas.every((m) => m.naturalWidth > 0);
+    logger.debug("ImageRowWidget applyLayout", { allLoaded, hasExplicitWidth: this.group.images.some((img) => img.hasExplicitWidth), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
 
     if (allLoaded) {
       // When flex-grows were loaded from markdown |width, use the current
@@ -684,7 +734,10 @@ export class ImageRowWidget {
     if (!this.container || this.itemEls.length === 0) return;
 
     const containerWidth = this.container.getBoundingClientRect().width;
-    if (containerWidth === 0) return;
+    if (containerWidth === 0) {
+      requestAnimationFrame(() => this.recalculateRowHeight());
+      return;
+    }
 
     // Guard: all images must be loaded (we need natural dimensions)
     for (let i = 0; i < this.group.images.length; i++) {
@@ -711,11 +764,14 @@ export class ImageRowWidget {
       maxHeight = Math.max(maxHeight, h);
     }
 
+    const upperClamp = n === 1 ? 2000 : this.options.defaultRowHeight * 3;
     const clamped = Math.max(
       50,
-      Math.min(this.options.defaultRowHeight * 3, Math.round(maxHeight))
+      Math.min(upperClamp, Math.round(maxHeight))
     );
     this.rowHeight = clamped;
+
+    logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, availableWidth, grows, totalGrow, maxHeight, clampedRowHeight: clamped, imageCount: n });
 
     const h = `${clamped}px`;
     this.container.style.height = h;
