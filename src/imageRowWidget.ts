@@ -18,6 +18,7 @@ export type ResizeCallback = (imageIndex: number, newFlexGrow: number) => void;
 export type ResizeEndCallback = (imageIndex: number, newFlexGrow: number) => void;
 export type DividerDragCallback = (leftIndex: number, ratio: number) => void;
 export type PersistCallback = () => void;
+export type MergeExternalCallback = (insertAtIndex: number, dataTransfer: string) => void;
 
 /**
  * Builds and manages the DOM for a flex row of images.
@@ -36,6 +37,7 @@ export class ImageRowWidget {
   private resizeEndCallback: ResizeEndCallback | null = null;
   private dividerDragCallback: DividerDragCallback | null = null;
   private persistCallback: PersistCallback | null = null;
+  private mergeExternalCallback: MergeExternalCallback | null = null;
 
   private loadedMetas: Map<number, ImageMeta> = new Map();
   private rowHeight: number;
@@ -63,6 +65,9 @@ export class ImageRowWidget {
   onPersist(cb: PersistCallback): void {
     this.persistCallback = cb;
   }
+  onMergeExternal(cb: MergeExternalCallback): void {
+    this.mergeExternalCallback = cb;
+  }
   getCurrentFlexGrows(): number[] {
     return this.itemEls.map((el) => parseFloat(el.style.flexGrow || "1"));
   }
@@ -84,6 +89,8 @@ export class ImageRowWidget {
 
     this.container = document.createElement("div");
     this.container.className = CLASSES.row;
+    this.container.dataset.lineStart = String(this.group.lineStart);
+    this.container.dataset.lineEnd = String(this.group.lineEnd);
     this.container.style.display = "flex";
     this.container.style.alignItems = "flex-start";
     this.container.style.gap = `${this.options.gap}px`;
@@ -135,7 +142,6 @@ export class ImageRowWidget {
     img.style.height = "100%";
     img.style.objectFit = "contain";
     img.style.objectPosition = "top";
-    img.draggable = false; // We handle drag on the item level
     img.dataset.index = String(index);
 
     img.onload = () => {
@@ -593,8 +599,19 @@ export class ImageRowWidget {
       item.ondragstart = (e) => {
         e.stopPropagation();
         e.dataTransfer!.effectAllowed = "move";
-        e.dataTransfer!.setData("text/plain", String(i));
+        // Encode source: group lineStart + index so any target can identify the source line
+        const payload = `diaa-row:${this.group.lineStart}:${i}`;
+        e.dataTransfer!.setData("text/plain", payload);
+        // Custom MIME type for dragover detection (Chrome blocks getData in dragover)
+        e.dataTransfer!.setData("application/diaa-row", payload);
         item.classList.add(CLASSES.dragging);
+        logger.info("ImageRowWidget dragstart", {
+          index: i,
+          groupLineStart: this.group.lineStart,
+          payload,
+          targetTag: (e.target as HTMLElement).tagName,
+          targetClass: (e.target as HTMLElement).className?.substring?.(0, 40) || "",
+        });
       };
 
       item.ondragend = (e) => {
@@ -636,18 +653,70 @@ export class ImageRowWidget {
         item.style.borderLeft = "";
         item.style.borderRight = "";
 
-        const fromIndex = parseInt(e.dataTransfer!.getData("text/plain"), 10);
-        if (isNaN(fromIndex) || fromIndex === i) return;
+        const data = e.dataTransfer!.getData("text/plain");
+        logger.debug("ImageRowWidget item ondrop", { i, data: data?.substring(0, 60) });
+
+        if (!data) return;
 
         const rect = item.getBoundingClientRect();
         const mid = rect.left + rect.width / 2;
         const insertAt = e.clientX < mid ? i : i + 1;
-        const toIndex = fromIndex < insertAt ? insertAt - 1 : insertAt;
 
-        if (fromIndex !== toIndex && this.reorderCallback) {
-          this.reorderCallback(fromIndex, toIndex);
+        // Flex row source: "diaa-row:<lineStart>:<index>"
+        const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
+        if (rowMatch) {
+          const srcLineStart = parseInt(rowMatch[1], 10);
+          const srcIndex = parseInt(rowMatch[2], 10);
+
+          if (srcLineStart === this.group.lineStart) {
+            // Intra-row reorder (same group)
+            const toIndex = srcIndex < insertAt ? insertAt - 1 : insertAt;
+            if (srcIndex !== toIndex && srcIndex !== i && this.reorderCallback) {
+              this.reorderCallback(srcIndex, toIndex);
+            }
+            return;
+          }
+
+          // Inter-row: move from another flex row into this one
+          if (this.mergeExternalCallback) {
+            logger.info("ImageRowWidget inter-row merge", { i, insertAt, srcLineStart, srcIndex });
+            this.mergeExternalCallback(insertAt, data);
+          }
+          return;
+        }
+
+        // Standalone source: diaa-standalone:<line> (intercepted) or obsidian://open URI
+        if ((data.startsWith("diaa-standalone:") || data.startsWith("obsidian://open")) && this.mergeExternalCallback) {
+          logger.info("ImageRowWidget cross-row merge from standalone", { i, insertAt, data: data.substring(0, 60) });
+          this.mergeExternalCallback(insertAt, data);
         }
       };
+    }
+
+    // Container-level fallback: accept drops that land between items or on the row background
+    if (this.container) {
+      this.container.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer!.dropEffect = "move";
+      });
+
+      this.container.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const data = e.dataTransfer!.getData("text/plain");
+        logger.debug("ImageRowWidget container ondrop", { data: data?.substring(0, 60) });
+        if (!data) return;
+
+        // Only handle non-intra-row drops at container level (intra-row is item-level)
+        const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
+        const isStandalone = data.startsWith("diaa-standalone:") || data.startsWith("obsidian://open");
+        if ((rowMatch || isStandalone) && this.mergeExternalCallback) {
+          const containerRect = this.container!.getBoundingClientRect();
+          const mid = containerRect.left + containerRect.width / 2;
+          const insertAt = e.clientX < mid ? 0 : this.itemEls.length;
+          logger.info("ImageRowWidget cross-row merge (container)", { insertAt });
+          this.mergeExternalCallback(insertAt, data);
+        }
+      });
     }
   }
 

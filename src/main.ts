@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { createLivePreviewPlugin, settingsChanged } from "./livePreview";
+import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged } from "./livePreview";
 import { ImageRowOptions } from "./imageRowWidget";
 import { logger } from "./logger";
 
@@ -69,6 +69,15 @@ export default class DragImageAutoArrangePlugin
       )
     );
     logger.info("Live Preview extension registered");
+
+    // Standalone line drop handler (flex row → standalone)
+    this.registerEditorExtension(
+      createStandaloneDropPlugin(
+        () => this.settings,
+        () => this.settings.enabled
+      )
+    );
+    logger.info("Standalone drop plugin registered");
 
     // Command: rescan image groups
     this.addCommand({

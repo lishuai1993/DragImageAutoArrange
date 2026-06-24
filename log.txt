@@ -1,89 +1,98 @@
-[2026-06-23T09:32:32.604Z] [INFO] Plugin loading {"version":"1.0.0"}
-[2026-06-23T09:32:32.604Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
-[2026-06-23T09:32:32.604Z] [INFO] Reading Mode processor registered
-[2026-06-23T09:32:32.605Z] [INFO] Live Preview extension registered
-[2026-06-23T09:32:32.605Z] [INFO] Plugin loaded successfully
-[2026-06-23T09:32:32.708Z] [DEBUG] LivePreview StateField create
-[2026-06-23T09:32:32.708Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:32:32.708Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:32:32.709Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":170,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|115]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:32:32.709Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":67,"docLength":170,"imageCount":2}
-[2026-06-23T09:32:32.709Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:32:32.709Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":74,"to":167,"docLength":170,"imageCount":3}
-[2026-06-23T09:32:32.709Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:32:32.709Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:32:32.714Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:32:32.714Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:32.715Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-23T09:32:32.715Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:32.774Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":197,"flexGrows":[1,2,2],"imageCount":3}
-[2026-06-23T09:32:40.013Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:32:40.013Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:32:40.013Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":169,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|87]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:32:40.013Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":66,"docLength":169,"imageCount":2}
-[2026-06-23T09:32:40.013Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:32:40.013Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":73,"to":166,"docLength":169,"imageCount":3}
-[2026-06-23T09:32:40.013Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:32:40.013Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:32:40.016Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:32:40.016Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:32:40.016Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:43.332Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:32:43.332Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:32:43.332Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":169,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|84]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:32:43.332Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":66,"docLength":169,"imageCount":2}
-[2026-06-23T09:32:43.332Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:32:43.332Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":73,"to":166,"docLength":169,"imageCount":3}
-[2026-06-23T09:32:43.332Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:32:43.332Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:32:43.334Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:32:43.335Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:32:43.335Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:50.398Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:32:50.398Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:32:50.398Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":169,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|84]]","![[图片并排测试-1782122225593.webp]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:32:50.398Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":66,"docLength":169,"imageCount":2}
-[2026-06-23T09:32:50.398Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:32:50.398Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":73,"to":166,"docLength":169,"imageCount":3}
-[2026-06-23T09:32:50.398Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:32:50.398Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:32:50.399Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:32:50.399Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:32:50.399Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:50.399Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:32:50.399Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-23T09:32:50.399Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:50.403Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":663.9285278320312,"rowHeight":197,"flexGrows":[1,2,2],"imageCount":3}
-[2026-06-23T09:32:56.548Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:32:56.548Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:32:56.548Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":172,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|86]]","![[图片并排测试-1782122225593.webp|98]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:32:56.548Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":69,"docLength":172,"imageCount":2}
-[2026-06-23T09:32:56.548Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:32:56.548Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":76,"to":169,"docLength":172,"imageCount":3}
-[2026-06-23T09:32:56.548Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:32:56.548Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:32:56.549Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:32:56.549Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:32:56.549Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:32:58.283Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:32:58.283Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:32:58.283Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":172,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|66]]","![[图片并排测试-1782122225593.webp|98]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:32:58.283Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":69,"docLength":172,"imageCount":2}
-[2026-06-23T09:32:58.283Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:32:58.283Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":76,"to":169,"docLength":172,"imageCount":3}
-[2026-06-23T09:32:58.283Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:32:58.283Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:32:58.284Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:32:58.285Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:32:58.285Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-23T09:33:07.340Z] [DEBUG] detectImageGroups start {"lineCount":17,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-23T09:33:07.341Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":1,"lineEnd":3,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]},{"lineStart":10,"lineEnd":13,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-23T09:33:07.341Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":172,"docLines":17,"groups":[{"lineStart":1,"lineEnd":3,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"raws":["![[图片并排测试-1782121567403.webp|85]]","![[图片并排测试-1782122225593.webp|98]]"]},{"lineStart":10,"lineEnd":13,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp]]","![[图片并排测试-1782184100492.webp]]","![[图片并排测试-1782184100492.webp]]"]}]}
-[2026-06-23T09:33:07.341Z] [DEBUG] LivePreview decoration range {"groupLineStart":1,"groupLineEnd":3,"lineStart1":2,"lineEnd1":3,"lineCount":17,"from":1,"to":69,"docLength":172,"imageCount":2}
-[2026-06-23T09:33:07.341Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":1,"lineEnd":3}
-[2026-06-23T09:33:07.341Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":13,"lineStart1":11,"lineEnd1":13,"lineCount":17,"from":76,"to":169,"docLength":172,"imageCount":3}
-[2026-06-23T09:33:07.341Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":10,"lineEnd":13}
-[2026-06-23T09:33:07.341Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-23T09:33:07.343Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-23T09:33:07.343Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"]}
-[2026-06-23T09:33:07.343Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T02:30:38.670Z] [INFO] Plugin loading {"version":"1.0.0"}
+[2026-06-24T02:30:38.670Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
+[2026-06-24T02:30:38.671Z] [INFO] Reading Mode processor registered
+[2026-06-24T02:30:38.671Z] [INFO] Live Preview extension registered
+[2026-06-24T02:30:38.671Z] [INFO] Standalone drop plugin registered
+[2026-06-24T02:30:38.671Z] [INFO] Plugin loaded successfully
+[2026-06-24T02:30:38.740Z] [DEBUG] LivePreview StateField create {"wasLivePreview":true}
+[2026-06-24T02:30:38.740Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:30:38.740Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":9,"lineEnd":12,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:30:38.740Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":9,"lineEnd":12,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]","![[图片并排测试-1782184100492.webp|186]]","![[图片并排测试-1782184100492.webp|200]]"]}]}
+[2026-06-24T02:30:38.740Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:38.740Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:30:38.740Z] [DEBUG] LivePreview decoration range {"groupLineStart":9,"groupLineEnd":12,"lineStart1":10,"lineEnd1":12,"lineCount":26,"from":119,"to":224,"docLength":241,"imageCount":3}
+[2026-06-24T02:30:38.740Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":9,"lineEnd":12}
+[2026-06-24T02:30:38.740Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T02:30:38.744Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
+[2026-06-24T02:30:38.747Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-24T02:30:38.747Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T02:30:38.748Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
+[2026-06-24T02:30:38.748Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T02:30:40.234Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T02:30:40.235Z] [INFO] ImageRowWidget dragstart {"index":1,"groupLineStart":9,"payload":"diaa-row:9:1","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
+[2026-06-24T02:30:40.400Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
+[2026-06-24T02:30:40.859Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:9:1"}
+[2026-06-24T02:30:40.860Z] [INFO] SD flex-row → standalone: moveLine {"srcLine":10,"targetLine":17}
+[2026-06-24T02:30:40.860Z] [INFO] LivePreview moveLine {"srcLine":10,"targetLine":17,"minLine":10,"maxLine":17,"fromPos":154,"toPos":230,"lineCount":9}
+[2026-06-24T02:30:40.861Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:30:40.861Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":9,"lineEnd":11,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]},{"lineStart":16,"lineEnd":17,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:30:40.861Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":9,"lineEnd":11,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]","![[图片并排测试-1782184100492.webp|200]]"]},{"lineStart":16,"lineEnd":17,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]}]}
+[2026-06-24T02:30:40.861Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:40.861Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:30:40.861Z] [DEBUG] LivePreview decoration range {"groupLineStart":9,"groupLineEnd":11,"lineStart1":10,"lineEnd1":11,"lineCount":26,"from":119,"to":189,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:40.861Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":9,"lineEnd":11}
+[2026-06-24T02:30:40.861Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T02:30:40.864Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T02:30:40.864Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}
+[2026-06-24T02:30:40.864Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T02:30:46.284Z] [INFO] SD dragstart stored source line {"line":16,"tag":"DIV"}
+[2026-06-24T02:30:47.084Z] [INFO] SD drop enter {"hasDiaaSource":true,"textPlain":"obsidian://open?vault=%E5%B7%A5%E4%BD%9C%E7%AE%A1%E7%90%86&f"}
+[2026-06-24T02:30:47.084Z] [INFO] SD standalone → standalone: moveLine {"srcLine":16,"targetLine":14}
+[2026-06-24T02:30:47.084Z] [INFO] LivePreview moveLine {"srcLine":16,"targetLine":14,"minLine":14,"maxLine":16,"fromPos":192,"toPos":229,"lineCount":4}
+[2026-06-24T02:30:47.084Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:30:47.084Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":9,"lineEnd":11,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]},{"lineStart":14,"lineEnd":15,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:30:47.084Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":9,"lineEnd":11,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]","![[图片并排测试-1782184100492.webp|200]]"]},{"lineStart":14,"lineEnd":15,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]}]}
+[2026-06-24T02:30:47.084Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:47.084Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:30:47.084Z] [DEBUG] LivePreview decoration range {"groupLineStart":9,"groupLineEnd":11,"lineStart1":10,"lineEnd1":11,"lineCount":26,"from":119,"to":189,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:47.084Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":9,"lineEnd":11}
+[2026-06-24T02:30:47.084Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T02:30:47.886Z] [INFO] SD dragstart stored source line {"line":14,"tag":"DIV"}
+[2026-06-24T02:30:48.804Z] [INFO] SD drop enter {"hasDiaaSource":true,"textPlain":"obsidian://open?vault=%E5%B7%A5%E4%BD%9C%E7%AE%A1%E7%90%86&f"}
+[2026-06-24T02:30:48.804Z] [INFO] SD standalone → standalone: moveLine {"srcLine":14,"targetLine":8}
+[2026-06-24T02:30:48.804Z] [INFO] LivePreview moveLine {"srcLine":14,"targetLine":8,"minLine":8,"maxLine":14,"fromPos":118,"toPos":227,"lineCount":8}
+[2026-06-24T02:30:48.805Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:30:48.805Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":8,"lineEnd":9,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]},{"lineStart":10,"lineEnd":12,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:30:48.805Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":8,"lineEnd":9,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":10,"lineEnd":12,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]","![[图片并排测试-1782184100492.webp|200]]"]}]}
+[2026-06-24T02:30:48.805Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:48.805Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:30:48.805Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":12,"lineStart1":11,"lineEnd1":12,"lineCount":26,"from":154,"to":224,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:48.805Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":10,"lineEnd":12}
+[2026-06-24T02:30:48.805Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T02:30:48.807Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T02:30:48.807Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}
+[2026-06-24T02:30:48.807Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T02:30:51.921Z] [INFO] SD dragstart stored source line {"line":8,"tag":"DIV"}
+[2026-06-24T02:30:53.568Z] [INFO] SD drop enter {"hasDiaaSource":true,"textPlain":"app://60fb1bab3957b41c96e3044e03c195d13836/D:/lishuai/%E7%9F"}
+[2026-06-24T02:30:53.568Z] [INFO] SD standalone → standalone: moveLine {"srcLine":8,"targetLine":9}
+[2026-06-24T02:30:53.568Z] [INFO] LivePreview moveLine {"srcLine":8,"targetLine":9,"minLine":8,"maxLine":9,"fromPos":118,"toPos":154,"lineCount":3}
+[2026-06-24T02:30:53.569Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:30:53.569Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":8,"lineEnd":9,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]},{"lineStart":10,"lineEnd":12,"imageCount":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:30:53.569Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":8,"lineEnd":9,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":10,"lineEnd":12,"count":2,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]","![[图片并排测试-1782184100492.webp|200]]"]}]}
+[2026-06-24T02:30:53.569Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:53.569Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:30:53.569Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":12,"lineStart1":11,"lineEnd1":12,"lineCount":26,"from":154,"to":224,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:53.569Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":10,"lineEnd":12}
+[2026-06-24T02:30:53.569Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T02:30:55.967Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T02:30:55.967Z] [INFO] ImageRowWidget dragstart {"index":1,"groupLineStart":10,"payload":"diaa-row:10:1","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
+[2026-06-24T02:30:57.478Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:10:1"}
+[2026-06-24T02:30:57.478Z] [INFO] SD flex-row → standalone: moveLine {"srcLine":11,"targetLine":16}
+[2026-06-24T02:30:57.478Z] [INFO] LivePreview moveLine {"srcLine":11,"targetLine":16,"minLine":11,"maxLine":16,"fromPos":189,"toPos":229,"lineCount":7}
+[2026-06-24T02:30:57.478Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:30:57.479Z] [DEBUG] detectImageGroups result {"groupCount":4,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":8,"lineEnd":9,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]},{"lineStart":10,"lineEnd":11,"imageCount":1,"files":["图片并排测试-1782121567403.webp"]},{"lineStart":15,"lineEnd":16,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:30:57.479Z] [DEBUG] LivePreview buildDecorations {"groupCount":4,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":8,"lineEnd":9,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":10,"lineEnd":11,"count":1,"files":["图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":15,"lineEnd":16,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]"]}]}
+[2026-06-24T02:30:57.479Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:30:57.479Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:30:57.479Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":1}
+[2026-06-24T02:30:57.481Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T02:31:00.328Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T02:31:00.330Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T02:31:04.785Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T02:31:04.785Z] [DEBUG] detectImageGroups result {"groupCount":4,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":8,"lineEnd":9,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]},{"lineStart":10,"lineEnd":11,"imageCount":1,"files":["图片并排测试-1782121567403.webp"]},{"lineStart":15,"lineEnd":16,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T02:31:04.785Z] [DEBUG] LivePreview buildDecorations {"groupCount":4,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|112]]"]},{"lineStart":8,"lineEnd":9,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":10,"lineEnd":11,"count":1,"files":["图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":15,"lineEnd":16,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]"]}]}
+[2026-06-24T02:31:04.785Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":241,"imageCount":2}
+[2026-06-24T02:31:04.785Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T02:31:04.785Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":1}
+[2026-06-24T02:31:04.787Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-24T02:31:04.787Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}

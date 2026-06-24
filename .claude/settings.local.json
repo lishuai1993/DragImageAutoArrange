@@ -9,7 +9,8 @@
       "Bash(powershell *)",
       "Bash(npm run *)",
       "Read(//d/work/custom/.obsidian/plugins/obsidian-DragImageAutoArrange/**)",
-      "Read(//d/work/custom/.obsidian/**)"
+      "Read(//d/work/custom/.obsidian/**)",
+      "Bash(chmod +x node_modules/.bin/tsc node_modules/.bin/esbuild node_modules/.bin/tsserver)"
     ]
   }
 }

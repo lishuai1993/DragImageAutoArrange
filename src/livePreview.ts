@@ -2,6 +2,8 @@ import {
   Decoration,
   DecorationSet,
   EditorView,
+  ViewPlugin,
+  ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
 import {
@@ -16,6 +18,130 @@ import type { ImageGroup } from "./imageDetector";
 import { ImageRowWidget, ImageRowOptions } from "./imageRowWidget";
 import { DragImageSettings } from "./settings";
 import { logger } from "./logger";
+
+/**
+ * Parse the file path from an obsidian://open URI and search ALL document lines
+ * for a matching image embed. Returns the 0-indexed line number, or null.
+ */
+/**
+ * Parse the file path from an obsidian://open URI and search the document
+ * for the corresponding standalone image line (not part of the target group).
+ */
+function findStandaloneImageLine(
+  view: EditorView,
+  obsidianUri: string,
+  targetGroup: ImageGroup
+): number | null {
+  try {
+    // Decode the file parameter from obsidian://open?vault=...&file=<encodedPath>
+    const match = obsidianUri.match(/[?&]file=([^&]+)/);
+    if (!match) return null;
+
+    const encodedPath = match[1];
+    const filePath = decodeURIComponent(encodedPath);
+    // Extract just the filename (last segment after last /)
+    const fileName = filePath.split("/").pop();
+    if (!fileName) return null;
+
+    logger.debug("findStandaloneImageLine parsing URI", {
+      encodedPath,
+      fileName,
+    });
+
+    const doc = view.state.doc;
+    const groupLines = new Set<number>();
+    for (let g = targetGroup.lineStart; g < targetGroup.lineEnd; g++) {
+      groupLines.add(g);
+    }
+
+    // Search for ![[...fileName]] lines that are not in the target group
+    for (let i = 1; i <= doc.lines; i++) {
+      if (groupLines.has(i - 1)) continue; // 0-indexed
+      const lineText = doc.line(i).text;
+      // Check if this line references the same file
+      if (lineText.includes(fileName) && /^[\s]*!\[\[/.test(lineText)) {
+        logger.debug("findStandaloneImageLine found", { line: i - 1, lineText: lineText.substring(0, 60) });
+        return i - 1; // 0-indexed
+      }
+    }
+    return null;
+  } catch (e) {
+    logger.error("findStandaloneImageLine error", { error: String(e) });
+    return null;
+  }
+}
+
+/**
+ * Resolve the source line index from a drag dataTransfer payload.
+ * Supports:
+ *   "diaa-row:<lineStart>:<index>"   — flex row source
+ *   "diaa-standalone:<lineNumber>"   — standalone source (intercepted at dragstart)
+ *   "obsidian://open..."             — fallback standalone source (legacy)
+ */
+function resolveSourceLine(
+  view: EditorView,
+  dataTransfer: string,
+  targetGroup: ImageGroup
+): number | null {
+  const rowMatch = dataTransfer.match(/^diaa-row:(\d+):(\d+)$/);
+  if (rowMatch) {
+    return parseInt(rowMatch[1], 10) + parseInt(rowMatch[2], 10);
+  }
+  const standaloneMatch = dataTransfer.match(/^diaa-standalone:(\d+)$/);
+  if (standaloneMatch) {
+    return parseInt(standaloneMatch[1], 10);
+  }
+  if (dataTransfer.startsWith("obsidian://open")) {
+    return findStandaloneImageLine(view, dataTransfer, targetGroup);
+  }
+  return null;
+}
+
+/**
+ * Move one document line from srcLine to targetLine.
+ * Uses a single range replacement (same pattern as intra-row reorder)
+ * to avoid sequential-adjustment issues with two CodeMirror changes.
+ */
+function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
+  if (srcLine === targetLine) return;
+
+  const doc = view.state.doc;
+
+  const minLine = Math.min(srcLine, targetLine);
+  const maxLine = Math.max(srcLine, targetLine);
+
+  const fromPos = doc.line(minLine + 1).from;
+  const maxLineNum = maxLine + 1; // 1-indexed
+  const toPos = maxLineNum + 1 <= doc.lines
+    ? doc.line(maxLineNum + 1).from
+    : doc.length;
+
+  const originalText = doc.sliceString(fromPos, toPos);
+  const originalLines = originalText.split("\n");
+  const hadTrailingNewline = originalText.endsWith("\n");
+  if (hadTrailingNewline && originalLines.length > 0) {
+    originalLines.pop(); // remove empty last entry from trailing \n
+  }
+
+  const localSrc = srcLine - minLine;
+  const localTarget = targetLine - minLine;
+
+  const [moved] = originalLines.splice(localSrc, 1);
+  const insertAt = srcLine < targetLine ? localTarget - 1 : localTarget;
+  originalLines.splice(insertAt, 0, moved);
+
+  const insert = originalLines.join("\n") + (hadTrailingNewline ? "\n" : "");
+
+  logger.info("LivePreview moveLine", {
+    srcLine, targetLine, minLine, maxLine,
+    fromPos, toPos,
+    lineCount: originalLines.length + 1,
+  });
+
+  view.dispatch({
+    changes: { from: fromPos, to: toPos, insert },
+  });
+}
 
 /**
  * CodeMirror Widget that renders a flex row of images with interactive features.
@@ -74,6 +200,11 @@ class StaticImageRowWidget extends WidgetType {
       // Persist flex-grow changes back to markdown on drag end
       this.innerWidget.onPersist(() => {
         this.persistFlexGrows();
+      });
+
+      // Handle cross-row merge: drag a standalone image into this row
+      this.innerWidget.onMergeExternal((insertAtIndex, dataTransfer) => {
+        this.handleMergeExternal(insertAtIndex, dataTransfer);
       });
 
       return el;
@@ -178,6 +309,32 @@ class StaticImageRowWidget extends WidgetType {
         });
       }
     });
+  }
+
+  /**
+   * Merge an image from another location into this flex row.
+   * Supports both standalone (obsidian://open) and flex-row ("diaa-row:") sources.
+   */
+  private handleMergeExternal(insertAtIndex: number, dataTransfer: string): void {
+    if (!this.editorView) return;
+    const view = this.editorView;
+
+    // Resolve source line from dataTransfer
+    const srcLine = resolveSourceLine(view, dataTransfer, this.group);
+    if (srcLine === null) {
+      logger.debug("LivePreview mergeExternal: could not resolve source");
+      return;
+    }
+
+    const targetLine = this.group.lineStart + insertAtIndex;
+    if (srcLine === targetLine) return;
+
+    logger.info("LivePreview cross-row merge", {
+      srcLine, targetLine, insertAtIndex,
+      dataTransfer: dataTransfer.substring(0, 40),
+    });
+
+    moveLine(view, srcLine, targetLine);
   }
 
   updateDOM(_element: HTMLElement, _view: EditorView): boolean {
@@ -356,13 +513,19 @@ export function createLivePreviewPlugin(
   getSettings: () => DragImageSettings,
   isEnabled: () => boolean
 ) {
+  // Track Live Preview state so we can rebuild decorations on mode switch
+  let wasLivePreview = false;
+
   const field = StateField.define<DecorationSet>({
     create(state) {
-      logger.debug("LivePreview StateField create");
+      wasLivePreview = !!state.field(editorLivePreviewField, false);
+      logger.debug("LivePreview StateField create", { wasLivePreview });
       return buildDecorations(state, getOptions, getSettings, isEnabled);
     },
     update(_oldDecos, tr) {
-      if (tr.docChanged || tr.annotation(settingsChanged)) {
+      const isLivePreview = !!tr.state.field(editorLivePreviewField, false);
+      if (tr.docChanged || tr.annotation(settingsChanged) || wasLivePreview !== isLivePreview) {
+        wasLivePreview = isLivePreview;
         return buildDecorations(tr.state, getOptions, getSettings, isEnabled);
       }
       return _oldDecos;
@@ -371,4 +534,233 @@ export function createLivePreviewPlugin(
   });
 
   return Prec.highest(field);
+}
+
+/**
+ * ViewPlugin that orchestrates cross-row drag operations at the capture phase
+ * on .cm-editor (above .cm-content in the DOM). This ensures our handlers fire
+ * before Obsidian's .cm-content-level handlers, letting us intercept and block
+ * Obsidian from duplicating standalone-image drops.
+ *
+ * Scenarios handled here:
+ *   1. Flex row → standalone line (diaa-row: data on non-flex-row target)
+ *   2. Standalone image → flex row (obsidian://open data intercepted at dragstart
+ *      via custom MIME, handled at drop to prevent Obsidian copy)
+ */
+export function createStandaloneDropPlugin(
+  getSettings: () => DragImageSettings,
+  isEnabled: () => boolean
+) {
+  return ViewPlugin.fromClass(
+    class {
+      private view: EditorView;
+      private editorEl: HTMLElement | null = null;
+      private onDragStart: ((e: DragEvent) => void) | null = null;
+      private onDragOver: ((e: DragEvent) => void) | null = null;
+      private onDragLeave: ((e: DragEvent) => void) | null = null;
+      private onDragEnd: ((e: DragEvent) => void) | null = null;
+      private onDrop: ((e: DragEvent) => void) | null = null;
+      private dragoverLogged = false;
+      private dropIndicatorEl: HTMLElement | null = null;
+
+      constructor(view: EditorView) {
+        this.view = view;
+        this.setup();
+      }
+
+      update(_update: ViewUpdate) {
+        if (!this.editorEl) this.setup();
+      }
+
+      destroy() {
+        this.clearDropIndicator();
+        if (this.onDragStart) window.removeEventListener("dragstart", this.onDragStart, true);
+        if (this.onDragOver) window.removeEventListener("dragover", this.onDragOver, true);
+        if (this.onDragLeave) window.removeEventListener("dragleave", this.onDragLeave, true);
+        if (this.onDragEnd) window.removeEventListener("dragend", this.onDragEnd, true);
+        if (this.onDrop) window.removeEventListener("drop", this.onDrop, true);
+      }
+
+      private clearDropIndicator() {
+        if (this.dropIndicatorEl) {
+          this.dropIndicatorEl.classList.remove("diaa-drop-target-line");
+          this.dropIndicatorEl = null;
+        }
+      }
+
+      private showDropIndicator(pos: number) {
+        this.clearDropIndicator();
+        const lineBlock = this.view.lineBlockAt(pos);
+        if (!lineBlock) return;
+        // Use domAtPos to find the DOM node, then walk up to .cm-line
+        const domPos = this.view.domAtPos(lineBlock.from);
+        if (domPos) {
+          const el = domPos.node.nodeType === 3
+            ? (domPos.node as Text).parentElement
+            : (domPos.node as HTMLElement);
+          const cmLine = el?.closest?.(".cm-line") as HTMLElement | null;
+          if (cmLine) {
+            cmLine.classList.add("diaa-drop-target-line");
+            this.dropIndicatorEl = cmLine;
+          }
+        }
+      }
+
+      private setup() {
+        this.editorEl = this.view.dom;
+
+        // ── dragstart: capture on WINDOW. Store exact source line via posAtDOM.
+        this.onDragStart = (e: DragEvent) => {
+          const target = e.target as HTMLElement;
+          const embed = target?.closest?.(".internal-embed.image-embed") as HTMLElement | null;
+          if (!embed) {
+            // Check if this is a flex row item drag (should not be intercepted here)
+            const flexItem = target?.closest?.(".drag-img-item") as HTMLElement | null;
+            logger.info("SD dragstart: not an obsidian embed", {
+              targetTag: target?.tagName,
+              targetClass: target?.className?.substring?.(0, 60) || "",
+              isFlexItem: !!flexItem,
+            });
+            return;
+          }
+
+          const root = embed.getRootNode();
+          const domNode: Element = root instanceof ShadowRoot ? root.host : embed;
+
+          const pos = this.view.posAtDOM(domNode as Node);
+          if (pos < 0) {
+            logger.info("SD dragstart: posAtDOM failed", {
+              tag: domNode.tagName,
+              shadowRoot: root instanceof ShadowRoot,
+            });
+            return;
+          }
+
+          const line = this.view.state.doc.lineAt(pos).number - 1;
+          e.dataTransfer!.setData("application/diaa-source", String(line));
+          logger.info("SD dragstart stored source line", { line, tag: domNode.tagName });
+        };
+
+        // ── dragover: capture on WINDOW, show drop target indicator ──
+        this.onDragOver = (e: DragEvent) => {
+          const hasDiaaSource = e.dataTransfer?.types.includes("application/diaa-source");
+          const hasDiaaRow = e.dataTransfer?.types.includes("application/diaa-row");
+
+          if (!hasDiaaSource && !hasDiaaRow) return;
+
+          // For diaa-row: skip if target is inside a flex row (widget handles it)
+          if (hasDiaaRow) {
+            const targetEl = e.target as HTMLElement;
+            if (targetEl?.closest?.(".drag-img-row")) {
+              this.clearDropIndicator();
+              return;
+            }
+          }
+
+          if (!this.dragoverLogged) {
+            this.dragoverLogged = true;
+            logger.info("SD dragover first", { hasDiaaSource, hasDiaaRow });
+          }
+
+          const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
+          if (pos === null) {
+            this.clearDropIndicator();
+            return;
+          }
+
+          const targetLine = this.view.state.doc.lineAt(pos).number - 1;
+
+          e.preventDefault();
+          e.dataTransfer!.dropEffect = "move";
+          this.showDropIndicator(pos);
+        };
+
+        // ── drop: capture on WINDOW, handle standalone → standalone and flex-row → standalone ──
+        this.onDrop = (e: DragEvent) => {
+          this.clearDropIndicator();
+
+          const textPlain = e.dataTransfer?.getData("text/plain") || "";
+
+          logger.info("SD drop enter", {
+            hasDiaaSource: e.dataTransfer?.types.includes("application/diaa-source"),
+            textPlain: textPlain.substring(0, 60),
+          });
+
+          if (!isEnabled()) return;
+
+          // ── Flex row → standalone / blank line ──
+          if (textPlain.startsWith("diaa-row:")) {
+            const rowMatch = textPlain.match(/^diaa-row:(\d+):(\d+)$/);
+            if (!rowMatch) return;
+
+            // Skip if target is inside a flex row (widget handles inter-row merge)
+            const targetEl = e.target as HTMLElement;
+            if (targetEl?.closest?.(".drag-img-row")) return;
+
+            const srcLineStart = parseInt(rowMatch[1], 10);
+            const srcIndex = parseInt(rowMatch[2], 10);
+            const srcLine = srcLineStart + srcIndex;
+
+            const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
+            if (pos === null) return;
+
+            const targetLine = this.view.state.doc.lineAt(pos).number - 1;
+            if (srcLine === targetLine) return;
+
+            logger.info("SD flex-row → standalone: moveLine", { srcLine, targetLine });
+
+            e.preventDefault();
+            e.stopPropagation();
+            moveLine(this.view, srcLine, targetLine);
+            return;
+          }
+
+          // ── Standalone → standalone ──
+          if (!e.dataTransfer?.types.includes("application/diaa-source")) return;
+
+          const srcLine = parseInt(e.dataTransfer!.getData("application/diaa-source"), 10);
+          if (isNaN(srcLine)) {
+            logger.info("SD drop: could not parse source line from diaa-source");
+            return;
+          }
+
+          const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
+          if (pos === null) return;
+
+          const targetLine = this.view.state.doc.lineAt(pos).number - 1;
+          if (srcLine === targetLine) return;
+
+          logger.info("SD standalone → standalone: moveLine", { srcLine, targetLine });
+
+          e.preventDefault();
+          e.stopPropagation();
+          moveLine(this.view, srcLine, targetLine);
+        };
+
+        // ── dragleave: clear indicator when leaving the editor ──
+        this.onDragLeave = (e: DragEvent) => {
+          if (!e.dataTransfer?.types.includes("application/diaa-source") &&
+              !e.dataTransfer?.types.includes("application/diaa-row")) return;
+          const relatedTarget = e.relatedTarget as Node | null;
+          if (!relatedTarget || !this.view.dom.contains(relatedTarget)) {
+            this.clearDropIndicator();
+          }
+        };
+
+        // ── dragend: cleanup in case of cancel (Escape) ──
+        this.onDragEnd = (_e: DragEvent) => {
+          this.clearDropIndicator();
+        };
+
+        window.addEventListener("dragstart", this.onDragStart, true);
+        window.addEventListener("dragover", this.onDragOver, true);
+        window.addEventListener("dragleave", this.onDragLeave, true);
+        window.addEventListener("dragend", this.onDragEnd, true);
+        window.addEventListener("drop", this.onDrop, true);
+        logger.info("SD setup complete: handlers on window capture", {
+          domTag: this.view.dom?.tagName,
+        });
+      }
+    }
+  );
 }
