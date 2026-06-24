@@ -13,6 +13,7 @@ export const CLASSES = {
   dividerSnap: `${CSS_PREFIX}-divider-snap`,
   itemSnap: `${CSS_PREFIX}-snap`,
   topBar: `${CSS_PREFIX}-top-bar`,
+  resizing: `${CSS_PREFIX}-resizing`,
 } as const;
 
 export const DEFAULT_SETTINGS = {
@@ -32,7 +33,7 @@ export const DEFAULT_SETTINGS = {
 
 export const MIN_IMAGE_WIDTH = 50;
 export const DIVIDER_WIDTH = 4;
-export const RESIZE_HANDLE_SIZE = 8;
+export const RESIZE_HANDLE_SIZE = 10;
 export const RESIZE_DEBOUNCE_MS = 100;
 
 export function buildImageLineRe(extensions: string): RegExp {

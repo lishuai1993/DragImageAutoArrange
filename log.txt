@@ -1,29 +1,471 @@
-[2026-06-24T06:24:30.254Z] [INFO] Plugin loading {"version":"1.0.0"}
-[2026-06-24T06:24:30.255Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
-[2026-06-24T06:24:30.255Z] [INFO] Reading Mode processor registered
-[2026-06-24T06:24:30.255Z] [INFO] Live Preview extension registered
-[2026-06-24T06:24:30.255Z] [INFO] Standalone drop plugin registered
-[2026-06-24T06:24:30.255Z] [INFO] Plugin loaded successfully
-[2026-06-24T06:24:30.325Z] [DEBUG] LivePreview StateField create {"wasLivePreview":true}
-[2026-06-24T06:24:30.326Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T06:24:30.326Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":6,"lineEnd":9,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]},{"lineStart":11,"lineEnd":12,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":233,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|120]]","![[图片并排测试-1782121567403.webp|105]]"]},{"lineStart":6,"lineEnd":9,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782184100492.webp|334]]","![[图片并排测试-1782184100492.webp|334]]","![[图片并排测试-1782121567403.webp|167]]"]},{"lineStart":11,"lineEnd":12,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|367]]"]}]}
-[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":233,"imageCount":2}
-[2026-06-24T06:24:30.326Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
-[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decoration range {"groupLineStart":6,"groupLineEnd":9,"lineStart1":7,"lineEnd1":9,"lineCount":26,"from":74,"to":179,"docLength":233,"imageCount":3}
-[2026-06-24T06:24:30.326Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":6,"lineEnd":9}
-[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decoration range {"groupLineStart":11,"groupLineEnd":12,"lineStart1":12,"lineEnd1":12,"lineCount":26,"from":181,"to":216,"docLength":233,"imageCount":1}
-[2026-06-24T06:24:30.326Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":11,"lineEnd":12}
-[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":3}
-[2026-06-24T06:24:30.330Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
-[2026-06-24T06:24:30.333Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
-[2026-06-24T06:24:30.333Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T06:24:30.333Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}
-[2026-06-24T06:24:30.333Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T06:24:30.334Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}
-[2026-06-24T06:24:30.334Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T06:25:07.046Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T06:25:07.046Z] [INFO] ImageRowWidget dragstart {"index":0,"groupLineStart":6,"payload":"diaa-row:6:0","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T06:25:07.356Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
-[2026-06-24T06:25:08.285Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:6:0"}
-[2026-06-24T06:25:08.285Z] [DEBUG] ImageRowWidget item ondrop {"i":0,"data":"diaa-row:6:0"}
+[2026-06-24T10:26:33.004Z] [INFO] Plugin loading {"version":"1.0.0"}
+[2026-06-24T10:26:33.005Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
+[2026-06-24T10:26:33.005Z] [INFO] Reading Mode processor registered
+[2026-06-24T10:26:33.005Z] [INFO] Live Preview extension registered
+[2026-06-24T10:26:33.005Z] [INFO] Standalone drop plugin registered
+[2026-06-24T10:26:33.005Z] [INFO] Plugin loaded successfully
+[2026-06-24T10:26:33.074Z] [DEBUG] LivePreview StateField create {"wasLivePreview":true}
+[2026-06-24T10:26:33.074Z] [DEBUG] buildDecorations invoked {"timestamp":1782296793074,"stack":"    at create (plugin:drag-image-auto-arrange:1803:14)\n    at e.create (app://obsidian.md/app.js:1:287997)\n    at Object.create (app://obsidian.md/app.js:1:288105)\n    at e.computeSlot (app://obsidian.md/app.js:1:301218)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)"}
+[2026-06-24T10:26:33.075Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
+[2026-06-24T10:26:35.413Z] [DEBUG] LivePreview StateField create {"wasLivePreview":true}
+[2026-06-24T10:26:35.413Z] [DEBUG] buildDecorations invoked {"timestamp":1782296795413,"stack":"    at create (plugin:drag-image-auto-arrange:1803:14)\n    at e.create (app://obsidian.md/app.js:1:287997)\n    at Object.create (app://obsidian.md/app.js:1:288105)\n    at e.computeSlot (app://obsidian.md/app.js:1:301218)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)"}
+[2026-06-24T10:26:35.413Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:26:35.413Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:26:35.413Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:26:35.413Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:26:35.426Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.427Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
+[2026-06-24T10:26:35.456Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.457Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.458Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.458Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.458Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.459Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.459Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.459Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.460Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.460Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.460Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.526Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.526Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.526Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.527Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.527Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.527Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.527Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.528Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.528Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.528Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.528Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.529Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.529Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.530Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.530Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.530Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.530Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.531Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.531Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.531Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.567Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296795567}
+[2026-06-24T10:26:35.567Z] [DEBUG] buildDecorations invoked {"timestamp":1782296795567,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:26:35.567Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:26:35.567Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:26:35.567Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:26:35.567Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:26:35.704Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.704Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.704Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.704Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.705Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.705Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.705Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.706Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.706Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.706Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.706Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.707Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.708Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.708Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.709Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.709Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.709Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.710Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.710Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.710Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.728Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.729Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.729Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.729Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.735Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.735Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.736Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.736Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.736Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.737Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.775Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.776Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.776Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.777Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.777Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.777Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.778Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.778Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.778Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.778Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.779Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.779Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.779Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.779Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.780Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.780Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.780Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.780Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.781Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.781Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.806Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.807Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.807Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.807Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.807Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.808Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.808Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.808Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.808Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.809Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.809Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.809Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.810Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.810Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.810Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.810Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:26:35.811Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"知识库/工具资源/办公工具/obsidian 常见问题及解决方案.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.573Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"workspace-tab-header tappable","isFlexItem":false}
+[2026-06-24T10:27:28.573Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"workspace-tab-header tappable","isFlexItem":false}
+[2026-06-24T10:27:28.589Z] [DEBUG] LivePreview StateField create {"wasLivePreview":true}
+[2026-06-24T10:27:28.589Z] [DEBUG] buildDecorations invoked {"timestamp":1782296848589,"stack":"    at create (plugin:drag-image-auto-arrange:1803:14)\n    at e.create (app://obsidian.md/app.js:1:287997)\n    at Object.create (app://obsidian.md/app.js:1:288105)\n    at e.computeSlot (app://obsidian.md/app.js:1:301218)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)"}
+[2026-06-24T10:27:28.589Z] [DEBUG] detectImageGroups start {"lineCount":1099,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:27:28.589Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:27:28.589Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":41275,"docLines":1099,"groups":[]}
+[2026-06-24T10:27:28.589Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:27:28.597Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.597Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.605Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.606Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:28.607Z] [DEBUG] ReadingMode processor invoked {"sourcePath":"工作管理/北京美踏/项目实战/2026年/文生音漫_2026-05-14/UI交互模式演示.md","embedCount":0,"enabled":true}
+[2026-06-24T10:27:32.103Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296852103}
+[2026-06-24T10:27:32.103Z] [DEBUG] buildDecorations invoked {"timestamp":1782296852103,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:32.103Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:27:32.130Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296852130}
+[2026-06-24T10:27:32.130Z] [DEBUG] buildDecorations invoked {"timestamp":1782296852130,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:32.130Z] [DEBUG] detectImageGroups start {"lineCount":1099,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:27:32.130Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:27:32.130Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":41275,"docLines":1099,"groups":[]}
+[2026-06-24T10:27:32.130Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:27:32.132Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296852132}
+[2026-06-24T10:27:32.132Z] [DEBUG] buildDecorations invoked {"timestamp":1782296852132,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:32.132Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:27:32.132Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296852132}
+[2026-06-24T10:27:32.132Z] [DEBUG] buildDecorations invoked {"timestamp":1782296852132,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:32.132Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:27:32.132Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:27:32.132Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:27:32.132Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:27:32.133Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296852133}
+[2026-06-24T10:27:32.133Z] [DEBUG] buildDecorations invoked {"timestamp":1782296852133,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:32.133Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:27:34.057Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296854057}
+[2026-06-24T10:27:34.057Z] [DEBUG] buildDecorations invoked {"timestamp":1782296854057,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:34.057Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:27:34.057Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:27:34.057Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:27:34.057Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:27:34.736Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296854736}
+[2026-06-24T10:27:34.736Z] [DEBUG] buildDecorations invoked {"timestamp":1782296854736,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:27:34.736Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:11.208Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296951208}
+[2026-06-24T10:29:11.208Z] [DEBUG] buildDecorations invoked {"timestamp":1782296951208,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:11.209Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:11.395Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296951395}
+[2026-06-24T10:29:11.395Z] [DEBUG] buildDecorations invoked {"timestamp":1782296951395,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:11.395Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:11.540Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296951539}
+[2026-06-24T10:29:11.540Z] [DEBUG] buildDecorations invoked {"timestamp":1782296951540,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:11.540Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:12.285Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296952285}
+[2026-06-24T10:29:12.285Z] [DEBUG] buildDecorations invoked {"timestamp":1782296952285,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:12.285Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:12.292Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296952292}
+[2026-06-24T10:29:12.292Z] [DEBUG] buildDecorations invoked {"timestamp":1782296952292,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:12.292Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:12.300Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296952300}
+[2026-06-24T10:29:12.300Z] [DEBUG] buildDecorations invoked {"timestamp":1782296952300,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:12.300Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:14.980Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296954980}
+[2026-06-24T10:29:14.980Z] [DEBUG] buildDecorations invoked {"timestamp":1782296954980,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:14.980Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:18.089Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296958089}
+[2026-06-24T10:29:18.089Z] [DEBUG] buildDecorations invoked {"timestamp":1782296958089,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:18.089Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:18.311Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296958311}
+[2026-06-24T10:29:18.311Z] [DEBUG] buildDecorations invoked {"timestamp":1782296958311,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:18.311Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:22.057Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296962057}
+[2026-06-24T10:29:22.057Z] [DEBUG] buildDecorations invoked {"timestamp":1782296962057,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:22.057Z] [DEBUG] detectImageGroups start {"lineCount":7,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:29:22.057Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":3,"lineEnd":5,"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]},{"lineStart":6,"lineEnd":7,"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}]}
+[2026-06-24T10:29:22.057Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":96,"docLines":7,"groups":[{"lineStart":3,"lineEnd":5,"count":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp]]","![[图片并排测试-1782296951859.webp]]"]},{"lineStart":6,"lineEnd":7,"count":1,"files":["图片并排测试-1782296951858.webp"],"raws":["![[图片并排测试-1782296951858.webp]]"]}]}
+[2026-06-24T10:29:22.057Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":5,"lineStart1":4,"lineEnd1":5,"lineCount":7,"from":3,"to":65,"docLength":96,"imageCount":2}
+[2026-06-24T10:29:22.058Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":3,"lineEnd":5}
+[2026-06-24T10:29:22.058Z] [DEBUG] LivePreview decoration range {"groupLineStart":6,"groupLineEnd":7,"lineStart1":7,"lineEnd1":7,"lineCount":7,"from":66,"to":96,"docLength":96,"imageCount":1}
+[2026-06-24T10:29:22.058Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":6,"lineEnd":7}
+[2026-06-24T10:29:22.058Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T10:29:22.059Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]}
+[2026-06-24T10:29:22.059Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:29:22.060Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}
+[2026-06-24T10:29:22.060Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782296951858.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:29:22.075Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":976.00439453125,"rowHeight":486,"flexGrows":[1,2],"imageCount":2}
+[2026-06-24T10:29:22.076Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":976.00439453125,"rowHeight":600,"flexGrows":[1],"imageCount":1}
+[2026-06-24T10:29:28.547Z] [DEBUG] resize-mousedown {"index":1,"timestamp":1782296968547,"relX":1,"relY":1}
+[2026-06-24T10:29:30.060Z] [DEBUG] resize-mouseup {"index":1,"finalFlex":0.933125,"timestamp":1782296970060}
+[2026-06-24T10:29:31.065Z] [DEBUG] resize-mousedown {"index":1,"timestamp":1782296971065,"relX":0,"relY":1}
+[2026-06-24T10:29:32.340Z] [DEBUG] resize-mouseup {"index":1,"finalFlex":0.567981,"timestamp":1782296972340}
+[2026-06-24T10:29:33.463Z] [DEBUG] resize-mousedown {"index":1,"timestamp":1782296973463,"relX":0,"relY":1}
+[2026-06-24T10:29:33.755Z] [DEBUG] resize-mouseup {"index":1,"finalFlex":0.53003,"timestamp":1782296973755}
+[2026-06-24T10:29:35.820Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296975820}
+[2026-06-24T10:29:35.820Z] [DEBUG] buildDecorations invoked {"timestamp":1782296975820,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:35.820Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:35.821Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:29:35.821Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:29:35.834Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296975834}
+[2026-06-24T10:29:35.834Z] [DEBUG] buildDecorations invoked {"timestamp":1782296975834,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:35.834Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:35.844Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296975844}
+[2026-06-24T10:29:35.844Z] [DEBUG] buildDecorations invoked {"timestamp":1782296975844,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:35.845Z] [DEBUG] detectImageGroups start {"lineCount":1099,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:29:35.845Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:29:35.845Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":41275,"docLines":1099,"groups":[]}
+[2026-06-24T10:29:35.845Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:29:35.846Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296975846}
+[2026-06-24T10:29:35.846Z] [DEBUG] buildDecorations invoked {"timestamp":1782296975846,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:35.846Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:35.846Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296975846}
+[2026-06-24T10:29:35.846Z] [DEBUG] buildDecorations invoked {"timestamp":1782296975846,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:35.846Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:29:35.846Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:29:35.846Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:29:35.846Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:29:35.847Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296975847}
+[2026-06-24T10:29:35.847Z] [DEBUG] buildDecorations invoked {"timestamp":1782296975847,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:35.847Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:38.470Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296978470}
+[2026-06-24T10:29:38.471Z] [DEBUG] buildDecorations invoked {"timestamp":1782296978471,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:38.471Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:38.986Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296978986}
+[2026-06-24T10:29:38.986Z] [DEBUG] buildDecorations invoked {"timestamp":1782296978986,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:38.986Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.012Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979012}
+[2026-06-24T10:29:39.013Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979013,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.013Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.045Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979045}
+[2026-06-24T10:29:39.045Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979045,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.045Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.077Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979077}
+[2026-06-24T10:29:39.077Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979077,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.077Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.108Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979108}
+[2026-06-24T10:29:39.108Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979108,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.108Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.140Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979140}
+[2026-06-24T10:29:39.140Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979140,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.140Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.171Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979171}
+[2026-06-24T10:29:39.171Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979171,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.171Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.202Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979202}
+[2026-06-24T10:29:39.202Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979202,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.202Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.235Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979235}
+[2026-06-24T10:29:39.235Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979235,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.235Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.281Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979281}
+[2026-06-24T10:29:39.282Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979282,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.282Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:39.312Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296979312}
+[2026-06-24T10:29:39.312Z] [DEBUG] buildDecorations invoked {"timestamp":1782296979312,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:39.312Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:29:42.460Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782296982460}
+[2026-06-24T10:29:42.460Z] [DEBUG] buildDecorations invoked {"timestamp":1782296982460,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:42.460Z] [DEBUG] detectImageGroups start {"lineCount":19,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:29:42.460Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":3,"lineEnd":5,"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]},{"lineStart":6,"lineEnd":7,"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}]}
+[2026-06-24T10:29:42.460Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":115,"docLines":19,"groups":[{"lineStart":3,"lineEnd":5,"count":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp|138]]","![[图片并排测试-1782296951859.webp|53]]"]},{"lineStart":6,"lineEnd":7,"count":1,"files":["图片并排测试-1782296951858.webp"],"raws":["![[图片并排测试-1782296951858.webp]]"]}]}
+[2026-06-24T10:29:42.460Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":5,"lineStart1":4,"lineEnd1":5,"lineCount":19,"from":3,"to":72,"docLength":115,"imageCount":2}
+[2026-06-24T10:29:42.460Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":3,"lineEnd":5}
+[2026-06-24T10:29:42.460Z] [DEBUG] LivePreview decoration range {"groupLineStart":6,"groupLineEnd":7,"lineStart1":7,"lineEnd1":7,"lineCount":19,"from":73,"to":104,"docLength":115,"imageCount":1}
+[2026-06-24T10:29:42.460Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":6,"lineEnd":7}
+[2026-06-24T10:29:42.461Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T10:29:42.462Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]}
+[2026-06-24T10:29:42.462Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:29:42.463Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}
+[2026-06-24T10:29:42.463Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782296951858.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:29:42.479Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":973.9285278320312,"rowHeight":600,"flexGrows":[1],"imageCount":1}
+[2026-06-24T10:29:45.798Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:29:45.798Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:29:45.798Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:29:45.798Z] [INFO] ImageRowWidget dragstart {"index":0,"groupLineStart":6,"payload":"diaa-row:6:0","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
+[2026-06-24T10:29:46.010Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
+[2026-06-24T10:29:46.011Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
+[2026-06-24T10:29:46.011Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
+[2026-06-24T10:29:48.174Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:6:0"}
+[2026-06-24T10:29:48.174Z] [INFO] SD flex-row → standalone: moveLine {"srcLine":6,"targetLine":10,"dropLine":10,"isImageLine":false}
+[2026-06-24T10:29:48.174Z] [INFO] LivePreview moveLine {"srcLine":6,"targetLine":10,"minLine":6,"maxLine":10,"fromPos":73,"toPos":108,"lineCount":6}
+[2026-06-24T10:29:48.174Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296988174}
+[2026-06-24T10:29:48.175Z] [DEBUG] buildDecorations invoked {"timestamp":1782296988175,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:48.175Z] [DEBUG] detectImageGroups start {"lineCount":19,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:29:48.175Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":3,"lineEnd":5,"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]},{"lineStart":10,"lineEnd":11,"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}]}
+[2026-06-24T10:29:48.175Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":115,"docLines":19,"groups":[{"lineStart":3,"lineEnd":5,"count":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp|138]]","![[图片并排测试-1782296951859.webp|53]]"]},{"lineStart":10,"lineEnd":11,"count":1,"files":["图片并排测试-1782296951858.webp"],"raws":["![[图片并排测试-1782296951858.webp]]"]}]}
+[2026-06-24T10:29:48.175Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":5,"lineStart1":4,"lineEnd1":5,"lineCount":19,"from":3,"to":72,"docLength":115,"imageCount":2}
+[2026-06-24T10:29:48.175Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":3,"lineEnd":5}
+[2026-06-24T10:29:48.175Z] [DEBUG] LivePreview decoration range {"groupLineStart":10,"groupLineEnd":11,"lineStart1":11,"lineEnd1":11,"lineCount":19,"from":77,"to":108,"docLength":115,"imageCount":1}
+[2026-06-24T10:29:48.175Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":10,"lineEnd":11}
+[2026-06-24T10:29:48.175Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T10:29:48.176Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:29:48.177Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}
+[2026-06-24T10:29:48.177Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782296951858.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:29:48.180Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:6:0"}
+[2026-06-24T10:29:48.181Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:6:0"}
+[2026-06-24T10:29:48.182Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":973.9285278320312,"rowHeight":600,"flexGrows":[1],"imageCount":1}
+[2026-06-24T10:29:52.032Z] [INFO] Top bar dblclick global snap {"totalGrow":1.91,"aspectSum":2,"grows":[0.6366666666666666,1.2733333333333332]}
+[2026-06-24T10:29:58.248Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:29:58.248Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:29:58.248Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:29:58.248Z] [INFO] ImageRowWidget dragstart {"index":0,"groupLineStart":10,"payload":"diaa-row:10:0","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
+[2026-06-24T10:29:58.863Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:10:0"}
+[2026-06-24T10:29:58.864Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:10:0"}
+[2026-06-24T10:29:58.864Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:10:0"}
+[2026-06-24T10:29:58.864Z] [DEBUG] ImageRowWidget item ondrop {"i":0,"data":"diaa-row:10:0"}
+[2026-06-24T10:29:58.864Z] [INFO] ImageRowWidget inter-row merge {"i":0,"insertAt":1,"srcLineStart":10,"srcIndex":0}
+[2026-06-24T10:29:58.864Z] [INFO] LivePreview cross-row merge {"srcLine":10,"targetLine":4,"insertAtIndex":1,"dataTransfer":"diaa-row:10:0"}
+[2026-06-24T10:29:58.864Z] [INFO] LivePreview moveLine {"srcLine":10,"targetLine":4,"minLine":4,"maxLine":10,"fromPos":38,"toPos":108,"lineCount":8}
+[2026-06-24T10:29:58.864Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782296998864}
+[2026-06-24T10:29:58.864Z] [DEBUG] buildDecorations invoked {"timestamp":1782296998864,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:29:58.865Z] [DEBUG] detectImageGroups start {"lineCount":19,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:29:58.865Z] [DEBUG] detectImageGroups result {"groupCount":1,"groups":[{"lineStart":3,"lineEnd":6,"imageCount":3,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951858.webp","图片并排测试-1782296951859.webp"]}]}
+[2026-06-24T10:29:58.865Z] [DEBUG] LivePreview buildDecorations {"groupCount":1,"enabled":true,"docLength":115,"docLines":19,"groups":[{"lineStart":3,"lineEnd":6,"count":3,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951858.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp|138]]","![[图片并排测试-1782296951858.webp]]","![[图片并排测试-1782296951859.webp|53]]"]}]}
+[2026-06-24T10:29:58.865Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":6,"lineStart1":4,"lineEnd1":6,"lineCount":19,"from":3,"to":103,"docLength":115,"imageCount":3}
+[2026-06-24T10:29:58.865Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":3,"lineEnd":6}
+[2026-06-24T10:29:58.865Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":1}
+[2026-06-24T10:29:58.866Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:30:04.340Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297004340}
+[2026-06-24T10:30:04.340Z] [DEBUG] buildDecorations invoked {"timestamp":1782297004340,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:04.340Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:30:04.341Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:30:04.367Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297004367}
+[2026-06-24T10:30:04.367Z] [DEBUG] buildDecorations invoked {"timestamp":1782297004367,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:04.367Z] [DEBUG] detectImageGroups start {"lineCount":1099,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:04.367Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:30:04.367Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":41275,"docLines":1099,"groups":[]}
+[2026-06-24T10:30:04.367Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:30:04.369Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297004369}
+[2026-06-24T10:30:04.369Z] [DEBUG] buildDecorations invoked {"timestamp":1782297004369,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:04.369Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:30:04.369Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297004369}
+[2026-06-24T10:30:04.369Z] [DEBUG] buildDecorations invoked {"timestamp":1782297004369,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:04.369Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:04.369Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:30:04.369Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:30:04.369Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:30:04.370Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297004370}
+[2026-06-24T10:30:04.370Z] [DEBUG] buildDecorations invoked {"timestamp":1782297004370,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:04.370Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:30:15.803Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297015803}
+[2026-06-24T10:30:15.803Z] [DEBUG] buildDecorations invoked {"timestamp":1782297015803,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:15.803Z] [DEBUG] detectImageGroups start {"lineCount":19,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:15.803Z] [DEBUG] detectImageGroups result {"groupCount":1,"groups":[{"lineStart":3,"lineEnd":6,"imageCount":3,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951858.webp","图片并排测试-1782296951859.webp"]}]}
+[2026-06-24T10:30:15.803Z] [DEBUG] LivePreview buildDecorations {"groupCount":1,"enabled":true,"docLength":115,"docLines":19,"groups":[{"lineStart":3,"lineEnd":6,"count":3,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951858.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp|138]]","![[图片并排测试-1782296951858.webp]]","![[图片并排测试-1782296951859.webp|53]]"]}]}
+[2026-06-24T10:30:15.803Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":6,"lineStart1":4,"lineEnd1":6,"lineCount":19,"from":3,"to":103,"docLength":115,"imageCount":3}
+[2026-06-24T10:30:15.803Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":3,"lineEnd":6}
+[2026-06-24T10:30:15.803Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":1}
+[2026-06-24T10:30:15.804Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951858.webp","图片并排测试-1782296951859.webp"]}
+[2026-06-24T10:30:15.804Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951858.webp","图片并排测试-1782296951859.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:30:20.158Z] [INFO] Top bar dblclick global snap {"totalGrow":2.91,"aspectSum":2.764525993883792,"grows":[0.7017477876106194,0.8047566371681417,1.4034955752212388]}
+[2026-06-24T10:30:22.747Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:30:22.748Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:30:22.748Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T10:30:22.748Z] [INFO] ImageRowWidget dragstart {"index":1,"groupLineStart":3,"payload":"diaa-row:3:1","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
+[2026-06-24T10:30:23.123Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:3:1"}
+[2026-06-24T10:30:23.123Z] [INFO] SD flex-row → standalone: moveLine {"srcLine":4,"targetLine":12,"dropLine":12,"isImageLine":false}
+[2026-06-24T10:30:23.124Z] [INFO] LivePreview moveLine {"srcLine":4,"targetLine":12,"minLine":4,"maxLine":12,"fromPos":38,"toPos":110,"lineCount":10}
+[2026-06-24T10:30:23.124Z] [DEBUG] StateField.update → buildDecorations {"docChanged":true,"settingsAnnotation":false,"livePreviewChanged":false,"timestamp":1782297023124}
+[2026-06-24T10:30:23.124Z] [DEBUG] buildDecorations invoked {"timestamp":1782297023124,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:23.124Z] [DEBUG] detectImageGroups start {"lineCount":19,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:23.124Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":3,"lineEnd":5,"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]},{"lineStart":12,"lineEnd":13,"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}]}
+[2026-06-24T10:30:23.124Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":115,"docLines":19,"groups":[{"lineStart":3,"lineEnd":5,"count":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp|138]]","![[图片并排测试-1782296951859.webp|53]]"]},{"lineStart":12,"lineEnd":13,"count":1,"files":["图片并排测试-1782296951858.webp"],"raws":["![[图片并排测试-1782296951858.webp]]"]}]}
+[2026-06-24T10:30:23.124Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":5,"lineStart1":4,"lineEnd1":5,"lineCount":19,"from":3,"to":72,"docLength":115,"imageCount":2}
+[2026-06-24T10:30:23.124Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":3,"lineEnd":5}
+[2026-06-24T10:30:23.124Z] [DEBUG] LivePreview decoration range {"groupLineStart":12,"groupLineEnd":13,"lineStart1":13,"lineEnd1":13,"lineCount":19,"from":79,"to":110,"docLength":115,"imageCount":1}
+[2026-06-24T10:30:23.124Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":12,"lineEnd":13}
+[2026-06-24T10:30:23.124Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T10:30:23.125Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}
+[2026-06-24T10:30:23.125Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782296951858.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:30:23.129Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:3:1"}
+[2026-06-24T10:30:23.129Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:3:1"}
+[2026-06-24T10:30:23.129Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":973.9285278320312,"rowHeight":600,"flexGrows":[1],"imageCount":1}
+[2026-06-24T10:30:26.099Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297026099}
+[2026-06-24T10:30:26.099Z] [DEBUG] buildDecorations invoked {"timestamp":1782297026099,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:26.099Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:30:26.100Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:30:26.100Z] [DEBUG] StaticImageRowWidget destroyed
+[2026-06-24T10:30:26.123Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297026123}
+[2026-06-24T10:30:26.123Z] [DEBUG] buildDecorations invoked {"timestamp":1782297026123,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:26.123Z] [DEBUG] detectImageGroups start {"lineCount":1099,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:26.123Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:30:26.123Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":41275,"docLines":1099,"groups":[]}
+[2026-06-24T10:30:26.123Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:30:26.124Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297026124}
+[2026-06-24T10:30:26.124Z] [DEBUG] buildDecorations invoked {"timestamp":1782297026124,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:26.124Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:30:26.124Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297026124}
+[2026-06-24T10:30:26.124Z] [DEBUG] buildDecorations invoked {"timestamp":1782297026124,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:26.124Z] [DEBUG] detectImageGroups start {"lineCount":357,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:26.124Z] [DEBUG] detectImageGroups result {"groupCount":0,"groups":[]}
+[2026-06-24T10:30:26.124Z] [DEBUG] LivePreview buildDecorations {"groupCount":0,"enabled":true,"docLength":6105,"docLines":357,"groups":[]}
+[2026-06-24T10:30:26.124Z] [DEBUG] LivePreview decorations built {"decorationAdded":false,"setSize":0}
+[2026-06-24T10:30:26.125Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297026125}
+[2026-06-24T10:30:26.125Z] [DEBUG] buildDecorations invoked {"timestamp":1782297026125,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:26.125Z] [DEBUG] LivePreview decorations skipped (source mode)
+[2026-06-24T10:30:28.811Z] [DEBUG] StateField.update → buildDecorations {"docChanged":false,"settingsAnnotation":false,"livePreviewChanged":true,"timestamp":1782297028811}
+[2026-06-24T10:30:28.811Z] [DEBUG] buildDecorations invoked {"timestamp":1782297028811,"stack":"    at e.update [as updateF] (plugin:drag-image-auto-arrange:1818:16)\n    at Object.update (app://obsidian.md/app.js:1:288161)\n    at e.computeSlot (app://obsidian.md/app.js:1:299011)\n    at Ie (app://obsidian.md/app.js:1:292105)\n    at new e (app://obsidian.md/app.js:1:297980)\n    at e.applyTransaction (app://obsidian.md/app.js:1:298966)"}
+[2026-06-24T10:30:28.811Z] [DEBUG] detectImageGroups start {"lineCount":19,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T10:30:28.811Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":3,"lineEnd":5,"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]},{"lineStart":12,"lineEnd":13,"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}]}
+[2026-06-24T10:30:28.811Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":115,"docLines":19,"groups":[{"lineStart":3,"lineEnd":5,"count":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"raws":["![[图片并排测试-1782296951856.webp|138]]","![[图片并排测试-1782296951859.webp|53]]"]},{"lineStart":12,"lineEnd":13,"count":1,"files":["图片并排测试-1782296951858.webp"],"raws":["![[图片并排测试-1782296951858.webp]]"]}]}
+[2026-06-24T10:30:28.811Z] [DEBUG] LivePreview decoration range {"groupLineStart":3,"groupLineEnd":5,"lineStart1":4,"lineEnd1":5,"lineCount":19,"from":3,"to":72,"docLength":115,"imageCount":2}
+[2026-06-24T10:30:28.811Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":3,"lineEnd":5}
+[2026-06-24T10:30:28.811Z] [DEBUG] LivePreview decoration range {"groupLineStart":12,"groupLineEnd":13,"lineStart1":13,"lineEnd1":13,"lineCount":19,"from":79,"to":110,"docLength":115,"imageCount":1}
+[2026-06-24T10:30:28.811Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":12,"lineEnd":13}
+[2026-06-24T10:30:28.811Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
+[2026-06-24T10:30:28.812Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"]}
+[2026-06-24T10:30:28.812Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782296951856.webp","图片并排测试-1782296951859.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:30:28.812Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782296951858.webp"]}
+[2026-06-24T10:30:28.812Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782296951858.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T10:30:28.826Z] [DEBUG] ImageRowWidget layout applied {"containerWidth":973.9285278320312,"rowHeight":600,"flexGrows":[1],"imageCount":1}

@@ -23,6 +23,12 @@ export type DividerDragCallback = (leftIndex: number, ratio: number) => void;
 export type PersistCallback = () => void;
 export type MergeExternalCallback = (insertAtIndex: number, dataTransfer: string) => void;
 
+interface HandleDef {
+  el: HTMLElement;
+  relX: number; // 0=left, 0.5=center, 1=right (relative to image content rect)
+  relY: number; // 0=top, 0.5=center, 1=bottom (relative to image content rect)
+}
+
 /**
  * Builds and manages the DOM for a flex row of images.
  */
@@ -32,6 +38,8 @@ export class ImageRowWidget {
   private itemEls: HTMLElement[] = [];
   private dividerEls: HTMLElement[] = [];
   private resizeHandles: HTMLElement[][] = [];
+  private handleDefs: HandleDef[][] = [];
+  private resizeObserver: ResizeObserver | null = null;
 
   private group: ImageGroup;
   private options: ImageRowOptions;
@@ -98,17 +106,21 @@ export class ImageRowWidget {
     this.container.style.alignItems = "flex-start";
     this.container.style.gap = `${this.options.gap}px`;
     this.container.style.width = "100%";
-    this.container.style.overflow = "hidden";
 
-    // Top hover bar for global balance (double-click to equalize all image heights)
+    // Top hover bar (visual indicator only — pointer-events: none so it
+    // never blocks resize handles at the top edge of images).
     const topBar = document.createElement("div");
     topBar.className = CLASSES.topBar;
-    topBar.ondblclick = (e) => {
+    this.container.appendChild(topBar);
+
+    // Double-click on container top edge → equalize all image heights
+    let topBarDblClickArmed = false;
+    this.container.addEventListener("dblclick", (e) => {
+      if (!topBarDblClickArmed) return;
       e.preventDefault();
       e.stopPropagation();
       this.snapAllToEquilibrium();
-    };
-    this.container.appendChild(topBar);
+    });
 
     // Show/hide top bar based on mouse proximity to container top
     const sensitivity = this.options.topBarSensitivity;
@@ -117,12 +129,15 @@ export class ImageRowWidget {
       const offsetY = e.clientY - rect.top;
       if (offsetY <= sensitivity) {
         topBar.style.backgroundColor = "#4a9eff";
+        topBarDblClickArmed = true;
       } else {
         topBar.style.backgroundColor = "";
+        topBarDblClickArmed = false;
       }
     });
     this.container.addEventListener("mouseleave", () => {
       topBar.style.backgroundColor = "";
+      topBarDblClickArmed = false;
     });
 
     const images = this.group.images;
@@ -143,6 +158,16 @@ export class ImageRowWidget {
       this.container.appendChild(item);
     }
 
+    // ResizeObserver: auto-update handle positions when ANY layout change
+    // occurs (our resize, Obsidian native resize, window resize, etc.)
+    this.resizeObserver = new ResizeObserver(() => {
+      this.updateAllHandlePositions();
+    });
+    this.resizeObserver.observe(this.container);
+    for (const item of this.itemEls) {
+      this.resizeObserver.observe(item);
+    }
+
     // Initial layout pass — will be refined as images load
     this.applyLayout();
 
@@ -152,13 +177,12 @@ export class ImageRowWidget {
   private buildImageItem(image: ImageEmbed, index: number): HTMLElement {
     const item = document.createElement("div");
     item.className = CLASSES.imageItem;
-    item.style.flex = `${image.flexGrow} 1 0%`;
+    item.style.flex = `${image.flexGrow} 0 0%`;
     item.style.position = "relative";
-    item.style.overflow = "hidden";
     item.style.minWidth = "50px";
     item.style.minHeight = "0";
-    item.style.flexShrink = "0";
     item.style.height = "100%";
+    item.style.transform = "translateZ(0)";
     item.dataset.index = String(index);
 
     const img = document.createElement("img");
@@ -169,7 +193,7 @@ export class ImageRowWidget {
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.objectFit = "contain";
-    img.style.objectPosition = "top";
+    img.style.objectPosition = "left top";
     img.dataset.index = String(index);
 
     img.onload = () => {
@@ -178,6 +202,8 @@ export class ImageRowWidget {
         naturalHeight: img.naturalHeight,
       });
       this.applyLayout();
+      // Defer handle position update until after browser reflow
+      requestAnimationFrame(() => this.updateHandlePositions(index));
     };
 
     img.onerror = () => {
@@ -202,6 +228,7 @@ export class ImageRowWidget {
     if (this.options.enableResize) {
       const handles = this.buildResizeHandles(item, index);
       this.resizeHandles.push(handles);
+      item.onmouseenter = () => { this.updateHandlePositions(index); };
     }
 
     return item;
@@ -318,7 +345,6 @@ export class ImageRowWidget {
         document.removeEventListener("mouseup", currentOnUp!);
         currentOnMove = null;
         currentOnUp = null;
-        this.persistCallback?.();
       };
 
       document.addEventListener("mousemove", currentOnMove);
@@ -333,73 +359,169 @@ export class ImageRowWidget {
     return divider;
   }
 
+  /**
+   * Compute the actual rendered image rect within a flex item,
+   * accounting for object-fit: contain + object-position: left top.
+   */
+  private getImageContentRect(index: number): { left: number; top: number; width: number; height: number } | null {
+    const item = this.itemEls[index];
+    const img = this.imageEls[index];
+    if (!item || !img) return null;
+
+    // Force synchronous reflow so clientWidth/clientHeight reflect the
+    // most recent style changes (height updates, flex-grow changes, etc.).
+    void item.offsetHeight;
+
+    const cw = item.clientWidth;
+    const ch = item.clientHeight;
+    if (cw === 0 || ch === 0) return null;
+
+    const meta = this.loadedMetas.get(index);
+    if (!meta || meta.naturalWidth === 0) return null;
+
+    const imageAspect = meta.naturalWidth / meta.naturalHeight;
+    const containerAspect = cw / ch;
+
+    let displayW: number;
+    let displayH: number;
+
+    if (imageAspect > containerAspect) {
+      // Image is wider — fills full width, height constrained by aspect
+      displayW = cw;
+      displayH = cw / imageAspect;
+    } else {
+      // Image is taller — fills full height, width constrained by aspect
+      displayH = ch;
+      displayW = ch * imageAspect;
+    }
+
+    return { left: 0, top: 0, width: displayW, height: displayH };
+  }
+
+  /** Reposition resize handles to match the actual image content rect. */
+  private updateHandlePositions(index: number): void {
+    const rect = this.getImageContentRect(index);
+    const defs = this.handleDefs[index];
+    if (!rect || !defs) return;
+
+    const SZ = RESIZE_HANDLE_SIZE;
+    for (const hd of defs) {
+      // Position handles snug INSIDE the image content edges.
+      // relX=0 → left edge, relX=1 → right edge, relX=0.5 → horizontal center.
+      hd.el.style.left = (hd.relX * (rect.width - SZ)) + "px";
+      hd.el.style.top = (hd.relY * (rect.height - SZ)) + "px";
+    }
+  }
+
+  /** Reposition all resize handles after a layout change. */
+  private updateAllHandlePositions(): void {
+    for (let i = 0; i < this.itemEls.length; i++) {
+      this.updateHandlePositions(i);
+    }
+  }
+
   private buildResizeHandles(
     item: HTMLElement,
     index: number
   ): HTMLElement[] {
     const handles: HTMLElement[] = [];
-    const positions: Array<{
-      top?: string; bottom?: string; left?: string; right?: string;
-      cursor: string;
-    }> = [
-      { top: "0", left: "0", cursor: "nw-resize" },
-      { top: "0", right: "0", cursor: "ne-resize" },
-      { bottom: "0", left: "0", cursor: "sw-resize" },
-      { bottom: "0", right: "0", cursor: "se-resize" },
+
+    const defs: HandleDef[] = [
+      { el: null!, relX: 0, relY: 0 },     // nw corner
+      { el: null!, relX: 1, relY: 0 },     // ne corner
+      { el: null!, relX: 0, relY: 1 },     // sw corner
+      { el: null!, relX: 1, relY: 1 },     // se corner
+      { el: null!, relX: 0.5, relY: 0 },   // n edge midpoint
+      { el: null!, relX: 0.5, relY: 1 },   // s edge midpoint
+      { el: null!, relX: 0, relY: 0.5 },   // w edge midpoint
+      { el: null!, relX: 1, relY: 0.5 },   // e edge midpoint
     ];
 
-    for (const pos of positions) {
+    const cursors = ["nw-resize", "ne-resize", "sw-resize", "se-resize",
+      "n-resize", "s-resize", "w-resize", "e-resize"];
+
+    for (let i = 0; i < defs.length; i++) {
+      const hd = defs[i];
       const handle = document.createElement("div");
       handle.className = CLASSES.resizeHandle;
-      handle.style.position = "absolute";
-      handle.style.width = `${RESIZE_HANDLE_SIZE}px`;
-      handle.style.height = `${RESIZE_HANDLE_SIZE}px`;
-      handle.style.borderRadius = "50%";
-      handle.style.backgroundColor = "#4a9eff";
-      handle.style.visibility = "hidden";
-      handle.style.zIndex = "2";
-      handle.style.cursor = pos.cursor;
-      if (pos.top !== undefined) handle.style.top = pos.top;
-      if (pos.bottom !== undefined) handle.style.bottom = pos.bottom;
-      if (pos.left !== undefined) handle.style.left = pos.left;
-      if (pos.right !== undefined) handle.style.right = pos.right;
+      // Use setProperty with "important" to defend against Obsidian CSS
+      // that may apply !important overrides inside .cm-embed-block elements.
+      const important = (k: string, v: string) => handle.style.setProperty(k, v, "important");
+      important("position", "absolute");
+      important("width", `${RESIZE_HANDLE_SIZE}px`);
+      important("height", `${RESIZE_HANDLE_SIZE}px`);
+      important("border-radius", "2px");
+      important("background-color", "#4a9eff");
+      important("border", "1px solid white");
+      important("z-index", "2");
+      handle.style.cursor = cursors[i];
 
-      // Show handles on hover — use visibility instead of opacity to avoid
-      // creating a new stacking context, which can shift flex+object-fit images.
-      item.onmouseenter = () => {
-        for (const h of handles) h.style.visibility = "visible";
-      };
-      item.onmouseleave = () => {
-        for (const h of handles) h.style.visibility = "hidden";
-      };
-
-      // Resize drag
+      // Resize drag — feedforward: compute target flex-grow directly
+      // from cursor position so the handle follows the cursor 1:1 without
+      // overshoot/oscillation.
       let dragging = false;
-      let startX = 0;
-      let startFlex = 0;
       let currentOnMove: ((e: MouseEvent) => void) | null = null;
       let currentOnUp: (() => void) | null = null;
 
+      // Capture layout state at mousedown for width-based feedforward.
+      // Converts cursor dx → item width change → flex-grow, so left/right
+      // handles scale symmetrically despite the nonlinear flex→width mapping.
+      let AW = 0;
+      let totalG = 0;
+      let startFlex = 0;
+      let startWidth = 0;
+      let scale = 1;
+      let nItems = 0;
+
       handle.onmousedown = (e) => {
         dragging = true;
-        startX = e.clientX;
-        startFlex = parseFloat(item.style.flexGrow || "1");
+        item.classList.add(CLASSES.resizing);
+        logger.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
         e.preventDefault();
         e.stopPropagation();
 
-        // Register fresh listeners for each drag session
+        // Snapshot layout state
+        const containerRect = this.container!.getBoundingClientRect();
+        nItems = this.itemEls.length;
+        AW = containerRect.width - (nItems - 1) * this.options.gap;
+
+        totalG = 0;
+        const grows: number[] = [];
+        for (let j = 0; j < nItems; j++) {
+          const g = parseFloat(this.itemEls[j].style.flexGrow || "1");
+          grows.push(g);
+          totalG += g;
+        }
+        startFlex = grows[index];
+        startWidth = (startFlex / totalG) * AW;
+
+        // Scale: image-content width to item-width ratio.
+        // When object-fit:contain makes the image narrower than the item,
+        // a cursor dx maps to a larger item-width change so the handle
+        // visually tracks the cursor 1:1.
+        const displayRect = this.getImageContentRect(index);
+        const displayW = displayRect ? displayRect.width : startWidth;
+        scale = displayW > 0 ? startWidth / displayW : 1;
+
         if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
         if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
 
         currentOnMove = (ev: MouseEvent) => {
           if (!dragging) return;
-          const dx = ev.clientX - startX;
-          if (Math.abs(dx) < 3) return;
-          let newFlex = Math.max(0.1, startFlex + dx * 0.01);
 
-          // Snap to neighbor when heights become equal.
-          // Snap zone = equilibriumHeight × snapSensitivity%.
-          // Simplifies to height-based comparison: |curH - neighborH| < eqH × snapFactor
+          // Width-based feedforward: dx → target width → flex-grow.
+          // Dampened by SENS to avoid hypersensitive scaling on tall images.
+          const SENS = 0.4;
+          const sign = hd.relX < 0.5 ? -1 : 1;
+          const effectiveDx = (ev.clientX - e.clientX) * scale * SENS;
+          const otherG = totalG - startFlex;
+          const minW = 50;
+          const maxW = AW - minW * (nItems - 1);
+          const targetWidth = Math.max(minW, Math.min(maxW, startWidth + sign * effectiveDx));
+          let newFlex = targetWidth * otherG / (AW - targetWidth);
+          newFlex = Math.max(0.1, newFlex);
+
+          // Snap to neighbor when heights become equal
           const snapFactor = this.options.snapSensitivity / 100;
           if (snapFactor > 0) {
             const cm = this.loadedMetas.get(index);
@@ -408,14 +530,12 @@ export class ImageRowWidget {
               let bestTarget: number | null = null;
               let bestScore = Infinity;
 
-              // Check left neighbor
               if (index > 0) {
                 const lm = this.loadedMetas.get(index - 1);
                 if (lm && lm.naturalWidth > 0) {
                   const la = lm.naturalWidth / lm.naturalHeight;
                   const lf = parseFloat(this.itemEls[index - 1].style.flexGrow || "1");
                   const target = lf * ca / la;
-                  // Height diff scaled: |newFlex/ca - lf/la| vs (lf/la) × snapFactor
                   const heightDiff = Math.abs(newFlex / ca - lf / la);
                   const snapThreshold = (lf / la) * snapFactor;
                   const score = snapThreshold > 0 ? heightDiff / snapThreshold : Infinity;
@@ -423,7 +543,6 @@ export class ImageRowWidget {
                 }
               }
 
-              // Check right neighbor
               if (index < this.itemEls.length - 1) {
                 const rm = this.loadedMetas.get(index + 1);
                 if (rm && rm.naturalWidth > 0) {
@@ -448,12 +567,15 @@ export class ImageRowWidget {
 
           item.style.flexGrow = String(newFlex);
           this.recalculateRowHeight();
+          this.updateHandlePositions(index);
         };
 
         currentOnUp = () => {
           dragging = false;
+          item.classList.remove(CLASSES.resizing);
           item.classList.remove(CLASSES.itemSnap);
           const finalFlex = parseFloat(item.style.flexGrow || "1");
+          logger.debug("resize-mouseup", { index, finalFlex, timestamp: Date.now() });
           if (this.resizeEndCallback) {
             this.resizeEndCallback(index, finalFlex);
           }
@@ -461,7 +583,6 @@ export class ImageRowWidget {
           document.removeEventListener("mouseup", currentOnUp!);
           currentOnMove = null;
           currentOnUp = null;
-          this.persistCallback?.();
         };
 
         document.addEventListener("mousemove", currentOnMove);
@@ -474,8 +595,11 @@ export class ImageRowWidget {
       };
 
       item.appendChild(handle);
+      hd.el = handle;
       handles.push(handle);
     }
+
+    this.handleDefs.push(defs);
 
     return handles;
   }
@@ -542,6 +666,9 @@ export class ImageRowWidget {
         imageCount: metas.length,
       });
       this.onLayoutChange?.();
+      // Force reflow so handle positions use the new dimensions
+      void this.container.offsetHeight;
+      this.updateAllHandlePositions();
     } else {
       // Use a sensible default until images load
       this.container.style.height = `${this.options.defaultRowHeight}px`;
@@ -600,6 +727,9 @@ export class ImageRowWidget {
     }
 
     this.onLayoutChange?.();
+    // Force reflow so handle positions use the new dimensions
+    void this.container.offsetHeight;
+    this.updateAllHandlePositions();
   }
 
   /**
@@ -625,7 +755,6 @@ export class ImageRowWidget {
     rightItem.style.flexGrow = String(snapRight);
 
     this.recalculateRowHeight();
-    this.persistCallback?.();
 
     logger.info("Divider dblclick snap to equilibrium", {
       leftIndex,
@@ -664,7 +793,6 @@ export class ImageRowWidget {
     }
 
     this.recalculateRowHeight();
-    this.persistCallback?.();
 
     logger.info("Top bar dblclick global snap", { totalGrow, aspectSum, grows });
   }
@@ -877,10 +1005,13 @@ export class ImageRowWidget {
         if (h._destroy) h._destroy();
       }
     }
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.imageEls = [];
     this.itemEls = [];
     this.dividerEls = [];
     this.resizeHandles = [];
+    this.handleDefs = [];
     if (this.container) {
       this.container.remove();
       this.container = null;

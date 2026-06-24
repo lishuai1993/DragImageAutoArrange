@@ -14,9 +14,10 @@ import {
 } from "@codemirror/state";
 import { editorLivePreviewField } from "obsidian";
 import { detectImageGroups } from "./imageDetector";
-import type { ImageGroup } from "./imageDetector";
+import type { ImageGroup, ImageEmbed } from "./imageDetector";
 import { ImageRowWidget, ImageRowOptions } from "./imageRowWidget";
 import { DragImageSettings } from "./settings";
+import { CLASSES } from "./constants";
 import { logger } from "./logger";
 
 /**
@@ -146,11 +147,43 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
 /**
  * CodeMirror Widget that renders a flex row of images with interactive features.
  */
+/** Strip everything between the first | and ]] so widget equality ignores
+ * width/dimension metadata — only the image file name matters for identity. */
+function normalizeRaw(raw: string): string {
+  return raw.replace(/\|[^\]]*(?=\]\])/, "");
+}
+
+/** Write flex-grow values back to markdown as ![[file|width]].
+ *  Extracted so it can be called both synchronously (legacy) and deferred
+ *  via setTimeout (from destroy, where view.dispatch is illegal). */
+function applyFlexGrowChanges(
+  view: EditorView,
+  images: ImageEmbed[],
+  grows: number[]
+): void {
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  for (let i = 0; i < grows.length && i < images.length; i++) {
+    const newLine = updateImageLineWidth(images[i].raw, grows[i]);
+    if (newLine === images[i].raw) continue;
+
+    const line = images[i].line + 1; // 1-indexed
+    const lineObj = view.state.doc.line(line);
+    changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
+  }
+
+  if (changes.length === 0) return;
+
+  // Apply from bottom to top so earlier positions stay valid
+  changes.sort((a, b) => b.from - a.from);
+  view.dispatch({ changes });
+}
+
 class StaticImageRowWidget extends WidgetType {
   private group: ImageGroup;
   private options: ImageRowOptions;
   private innerWidget: ImageRowWidget | null = null;
   private editorView: EditorView | null = null;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(group: ImageGroup, options: ImageRowOptions) {
     super();
@@ -174,7 +207,7 @@ class StaticImageRowWidget extends WidgetType {
     if (this.options.topBarSensitivity !== other.options.topBarSensitivity) return false;
     if (this.options.dragOpacity !== other.options.dragOpacity) return false;
     for (let i = 0; i < a.images.length; i++) {
-      if (a.images[i].raw !== b.images[i].raw) return false;
+      if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
     }
     return true;
   }
@@ -200,10 +233,8 @@ class StaticImageRowWidget extends WidgetType {
       });
       this.innerWidget.enableDragReorder();
 
-      // Persist flex-grow changes back to markdown on drag end
-      this.innerWidget.onPersist(() => {
-        this.persistFlexGrows();
-      });
+      // Flex-grow values are persisted in destroy(), not during interactive
+      // resize, to avoid triggering a CodeMirror decoration rebuild and flash.
 
       // Handle cross-row merge: drag a standalone image into this row
       this.innerWidget.onMergeExternal((insertAtIndex, dataTransfer) => {
@@ -340,16 +371,48 @@ class StaticImageRowWidget extends WidgetType {
     moveLine(view, srcLine, targetLine);
   }
 
-  updateDOM(_element: HTMLElement, _view: EditorView): boolean {
-    return false;
+  updateDOM(_element: HTMLElement, view: EditorView): boolean {
+    // Re-read flex-grows from editor text (persistFlexGrows may have
+    // updated them).  Returning true tells CodeMirror the existing DOM
+    // is still good — no rebuild, no flash.
+    if (this.innerWidget && this.group) {
+      const doc = view.state.doc;
+      const grows: number[] = [];
+      for (let line = this.group.lineStart; line < this.group.lineEnd; line++) {
+        const text = doc.line(line + 1).text;
+        const match = text.match(/\|(\d+)(?:\]\]|\|)/);
+        const flex = match ? parseInt(match[1], 10) / 100 : 1;
+        grows.push(flex);
+      }
+      if (grows.length === this.group.images.length) {
+        this.innerWidget.updateFlexGrows(grows);
+      }
+    }
+    return true;
   }
 
   ignoreEvent(event: Event): boolean {
-    return event.type.startsWith("drag");
+    if (event.type.startsWith("drag")) return true;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.("." + CLASSES.resizeHandle) || target?.closest?.("." + CLASSES.divider)) {
+      return true;
+    }
+    return false;
   }
 
   destroy(): void {
     logger.debug("StaticImageRowWidget destroyed");
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    // Defer: view.dispatch() inside a CodeMirror update cycle (e.g. mode
+    // switch, decoration removal) throws and corrupts decorations.
+    // Capture state before teardown; dispatch in next event-loop tick.
+    if (this.editorView && this.innerWidget) {
+      const view = this.editorView;
+      const images = [...this.group.images];
+      const grows = this.innerWidget.getCurrentFlexGrows();
+      setTimeout(() => applyFlexGrowChanges(view, images, grows), 0);
+    }
     this.innerWidget?.destroy();
     this.innerWidget = null;
   }
@@ -357,27 +420,11 @@ class StaticImageRowWidget extends WidgetType {
   /** Write current flex-grow values back to markdown as ![[file|width]]. */
   private persistFlexGrows(): void {
     if (!this.editorView || !this.innerWidget) return;
-
-    const view = this.editorView;
-    const images = this.group.images;
-    const grows = this.innerWidget.getCurrentFlexGrows();
-
-    // Collect line-level changes (descending order so positions stay valid)
-    const changes: Array<{ from: number; to: number; insert: string }> = [];
-    for (let i = 0; i < grows.length && i < images.length; i++) {
-      const newLine = updateImageLineWidth(images[i].raw, grows[i]);
-      if (newLine === images[i].raw) continue;
-
-      const line = images[i].line + 1; // 1-indexed
-      const pos = view.state.doc.line(line).from;
-      changes.push({ from: pos, to: pos + images[i].raw.length, insert: newLine });
-    }
-
-    if (changes.length === 0) return;
-
-    // Apply from bottom to top so earlier positions stay valid
-    changes.sort((a, b) => b.from - a.from);
-    view.dispatch({ changes });
+    applyFlexGrowChanges(
+      this.editorView,
+      this.group.images,
+      this.innerWidget.getCurrentFlexGrows()
+    );
   }
 }
 
@@ -399,6 +446,11 @@ function buildDecorations(
   isEnabled: () => boolean
 ): DecorationSet {
   try {
+    // Capture stack to identify the call chain triggering a rebuild.
+    // Filter to the first few frames after buildDecorations itself.
+    const stack = new Error().stack?.split("\n").slice(2, 8).join("\n") || "";
+    logger.debug("buildDecorations invoked", { timestamp: Date.now(), stack });
+
     if (!isEnabled()) {
       logger.debug("LivePreview decorations skipped (disabled)");
       return Decoration.none;
@@ -527,7 +579,16 @@ export function createLivePreviewPlugin(
     },
     update(_oldDecos, tr) {
       const isLivePreview = !!tr.state.field(editorLivePreviewField, false);
-      if (tr.docChanged || tr.annotation(settingsChanged) || wasLivePreview !== isLivePreview) {
+      const docChanged = tr.docChanged;
+      const settingsAnnot = tr.annotation(settingsChanged);
+      const lpChanged = wasLivePreview !== isLivePreview;
+      if (docChanged || settingsAnnot || lpChanged) {
+        logger.debug("StateField.update → buildDecorations", {
+          docChanged,
+          settingsAnnotation: !!settingsAnnot,
+          livePreviewChanged: lpChanged,
+          timestamp: Date.now(),
+        });
         wasLivePreview = isLivePreview;
         return buildDecorations(tr.state, getOptions, getSettings, isEnabled);
       }

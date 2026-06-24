@@ -4,7 +4,6 @@
   display: flex;
   align-items: flex-start;
   width: 100%;
-  overflow: hidden;
   box-sizing: border-box;
   margin: 4px 0;
   border-radius: 4px;
@@ -15,7 +14,6 @@
 .drag-img-item {
   flex: 1 1 0;
   position: relative;
-  overflow: hidden;
   min-width: 50px;
   min-height: 0;
   flex-shrink: 0;
@@ -23,7 +21,8 @@
 }
 
 .drag-img-item:hover {
-  background-color: rgba(74, 158, 255, 0.06);
+  outline: 2px solid rgba(74, 158, 255, 0.15);
+  outline-offset: -2px;
 }
 
 .drag-img-item:active {
@@ -41,7 +40,7 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  object-position: top;
+  object-position: left top;
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -85,14 +84,14 @@
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
 }
 
-/* Top hover bar for global height balance (double-click to equalize all images) */
+/* Top hover bar — visual indicator only, never blocks pointer events */
 .drag-img-top-bar {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   height: 4px;
-  cursor: pointer;
+  pointer-events: none;
   background-color: transparent;
   transition: background-color 0.15s;
   z-index: 4;
@@ -104,21 +103,26 @@
   box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.7);
 }
 
-/* Resize handles on image corners */
+/* Resize handles on image content — square, more prominent */
 .drag-img-resize-handle {
   position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
   background-color: #4a9eff;
-  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
   z-index: 2;
   border: 1px solid white;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.1s;
 }
 
-.drag-img-item:hover .drag-img-resize-handle {
-  visibility: visible;
+/* Show handles on item hover and keep them visible during resize drag */
+.drag-img-item:hover .drag-img-resize-handle,
+.drag-img-item.drag-img-resizing .drag-img-resize-handle {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* Drop indicator during drag reorder */
@@ -208,6 +212,21 @@
 /* Ensure the CodeMirror embed block styles don't interfere */
 .cm-embed-block .drag-img-row {
   pointer-events: auto;
+}
+
+/* Hide Obsidian's native image resize handles inside our widget.
+   Obsidian auto-wraps <img> elements in .image-resize-container
+   and adds .image-resize-handle children. Neutralize the container
+   so it doesn't interfere with our flex layout, and hide the handles
+   since our plugin provides its own. */
+.drag-img-row .image-resize-container {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.drag-img-row .image-resize-handle {
+  display: none !important;
 }
 
 /* === Mobile responsiveness === */
