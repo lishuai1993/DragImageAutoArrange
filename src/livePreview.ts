@@ -127,7 +127,7 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
   const localTarget = targetLine - minLine;
 
   const [moved] = originalLines.splice(localSrc, 1);
-  const insertAt = srcLine < targetLine ? localTarget - 1 : localTarget;
+  const insertAt = localTarget;
   originalLines.splice(insertAt, 0, moved);
 
   const insert = originalLines.join("\n") + (hadTrailingNewline ? "\n" : "");
@@ -170,6 +170,9 @@ class StaticImageRowWidget extends WidgetType {
     if (a.lineStart !== b.lineStart) return false;
     if (a.lineEnd !== b.lineEnd) return false;
     if (this.options.snapSensitivity !== other.options.snapSensitivity) return false;
+    if (this.options.ghostImageWidth !== other.options.ghostImageWidth) return false;
+    if (this.options.topBarSensitivity !== other.options.topBarSensitivity) return false;
+    if (this.options.dragOpacity !== other.options.dragOpacity) return false;
     for (let i = 0; i < a.images.length; i++) {
       if (a.images[i].raw !== b.images[i].raw) return false;
     }
@@ -711,6 +714,50 @@ export function createStandaloneDropPlugin(
 
           const line = this.view.state.doc.lineAt(pos).number - 1;
           e.dataTransfer!.setData("application/diaa-source", String(line));
+
+          // Configurable opacity on the original image during drag
+          embed.style.opacity = String(1 - getSettings().dragOpacity / 100);
+          const restoreOpacity = () => { embed.style.opacity = ""; };
+          embed.addEventListener("dragend", restoreOpacity, { once: true });
+
+          // Custom fully-opaque ghost that follows cursor via dragover
+          const img = embed.querySelector("img") as HTMLImageElement | null;
+          if (img && img.naturalWidth > 0) {
+            // Hide browser's default semi-transparent ghost with a transparent 1x1 pixel
+            const pixel = document.createElement("canvas");
+            pixel.width = 1;
+            pixel.height = 1;
+            pixel.style.cssText = "position:fixed;left:0;top:0;pointer-events:none";
+            document.body.appendChild(pixel);
+            e.dataTransfer!.setDragImage(pixel, 0, 0);
+            setTimeout(() => pixel.remove(), 0);
+
+            // Custom fully-opaque ghost, initially at cursor (with DPR for sharpness)
+            const w = getSettings().ghostImageWidth;
+            const h = (img.naturalHeight / img.naturalWidth) * w;
+            const dpr = window.devicePixelRatio || 1;
+            const ghost = document.createElement("canvas");
+            ghost.width = w * dpr;
+            ghost.height = h * dpr;
+            ghost.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;width:${w}px;height:${h}px;pointer-events:none;z-index:2147483647`;
+            const ctx = ghost.getContext("2d")!;
+            ctx.scale(dpr, dpr);
+            ctx.drawImage(img, 0, 0, w, h);
+            document.body.appendChild(ghost);
+
+            const onDragOver = (ev: DragEvent) => {
+              ghost.style.left = ev.clientX + "px";
+              ghost.style.top = ev.clientY + "px";
+            };
+            const onDragEnd = () => {
+              document.removeEventListener("dragover", onDragOver, true);
+              ghost.remove();
+              embed.style.opacity = "";
+            };
+            document.addEventListener("dragover", onDragOver, true);
+            embed.addEventListener("dragend", onDragEnd, { once: true });
+          }
+
           logger.info("SD dragstart stored source line", { line, tag: domNode.tagName });
         };
 

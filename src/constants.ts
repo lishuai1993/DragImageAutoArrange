@@ -12,6 +12,7 @@ export const CLASSES = {
   dividerActive: `${CSS_PREFIX}-divider-active`,
   dividerSnap: `${CSS_PREFIX}-divider-snap`,
   itemSnap: `${CSS_PREFIX}-snap`,
+  topBar: `${CSS_PREFIX}-top-bar`,
 } as const;
 
 export const DEFAULT_SETTINGS = {
@@ -24,6 +25,9 @@ export const DEFAULT_SETTINGS = {
   enableResize: true,
   enableDividers: true,
   imageExtensions: "png,jpg,jpeg,gif,webp,svg,bmp,avif",
+  topBarSensitivity: 12,
+  ghostImageWidth: 120,
+  dragOpacity: 60,
 } as const;
 
 export const MIN_IMAGE_WIDTH = 50;

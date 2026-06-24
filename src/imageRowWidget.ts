@@ -10,6 +10,9 @@ export interface ImageRowOptions {
   enableDividers: boolean;
   enableResize: boolean;
   snapSensitivity: number;
+  topBarSensitivity: number;
+  ghostImageWidth: number;
+  dragOpacity: number;
   getResourcePath: (fileName: string) => string;
 }
 
@@ -96,6 +99,31 @@ export class ImageRowWidget {
     this.container.style.gap = `${this.options.gap}px`;
     this.container.style.width = "100%";
     this.container.style.overflow = "hidden";
+
+    // Top hover bar for global balance (double-click to equalize all image heights)
+    const topBar = document.createElement("div");
+    topBar.className = CLASSES.topBar;
+    topBar.ondblclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.snapAllToEquilibrium();
+    };
+    this.container.appendChild(topBar);
+
+    // Show/hide top bar based on mouse proximity to container top
+    const sensitivity = this.options.topBarSensitivity;
+    this.container.addEventListener("mousemove", (e) => {
+      const rect = this.container!.getBoundingClientRect();
+      const offsetY = e.clientY - rect.top;
+      if (offsetY <= sensitivity) {
+        topBar.style.backgroundColor = "#4a9eff";
+      } else {
+        topBar.style.backgroundColor = "";
+      }
+    });
+    this.container.addEventListener("mouseleave", () => {
+      topBar.style.backgroundColor = "";
+    });
 
     const images = this.group.images;
     this.imageEls = [];
@@ -195,6 +223,13 @@ export class ImageRowWidget {
     };
     divider.onmouseleave = () => {
       divider.style.backgroundColor = "transparent";
+    };
+
+    // Double-click divider → snap to equal heights
+    divider.ondblclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.snapDividerToEquilibrium(leftIndex);
     };
 
     // Divider drag
@@ -568,6 +603,73 @@ export class ImageRowWidget {
   }
 
   /**
+   * Double-click on divider: snap the two adjacent images to equal heights.
+   */
+  private snapDividerToEquilibrium(leftIndex: number): void {
+    const lm = this.loadedMetas.get(leftIndex);
+    const rm = this.loadedMetas.get(leftIndex + 1);
+    if (!lm || !rm || lm.naturalWidth === 0 || rm.naturalWidth === 0) return;
+
+    const la = lm.naturalWidth / lm.naturalHeight;
+    const ra = rm.naturalWidth / rm.naturalHeight;
+
+    const leftItem = this.itemEls[leftIndex];
+    const rightItem = this.itemEls[leftIndex + 1];
+    if (!leftItem || !rightItem) return;
+
+    const total = parseFloat(leftItem.style.flexGrow || "1") + parseFloat(rightItem.style.flexGrow || "1");
+    const snapLeft = total * la / (la + ra);
+    const snapRight = total - snapLeft;
+
+    leftItem.style.flexGrow = String(snapLeft);
+    rightItem.style.flexGrow = String(snapRight);
+
+    this.recalculateRowHeight();
+    this.persistCallback?.();
+
+    logger.info("Divider dblclick snap to equilibrium", {
+      leftIndex,
+      total,
+      snapLeft,
+      snapRight,
+      la,
+      ra,
+    });
+  }
+
+  /**
+   * Double-click top bar: snap ALL images in the row to equal heights.
+   * Distributes flex-grow proportionally to aspect ratios so every image
+   * has the same rendered height.
+   */
+  private snapAllToEquilibrium(): void {
+    const n = this.itemEls.length;
+    if (n < 2) return;
+
+    // Gather aspect ratios; all images must be loaded
+    const aspects: number[] = [];
+    let totalGrow = 0;
+    for (let i = 0; i < n; i++) {
+      const meta = this.loadedMetas.get(i);
+      if (!meta || meta.naturalWidth === 0) return;
+      aspects.push(meta.naturalWidth / meta.naturalHeight);
+      totalGrow += parseFloat(this.itemEls[i].style.flexGrow || "1");
+    }
+
+    const aspectSum = aspects.reduce((s, a) => s + a, 0);
+    const grows: number[] = aspects.map((a) => (totalGrow * a) / aspectSum);
+
+    for (let i = 0; i < n; i++) {
+      this.itemEls[i].style.flexGrow = String(grows[i]);
+    }
+
+    this.recalculateRowHeight();
+    this.persistCallback?.();
+
+    logger.info("Top bar dblclick global snap", { totalGrow, aspectSum, grows });
+  }
+
+  /**
    * Update the flex-grow values from an external source (e.g., after reorder).
    */
   updateFlexGrows(grows: number[]): void {
@@ -605,6 +707,48 @@ export class ImageRowWidget {
         // Custom MIME type for dragover detection (Chrome blocks getData in dragover)
         e.dataTransfer!.setData("application/diaa-row", payload);
         item.classList.add(CLASSES.dragging);
+        // Configurable opacity: higher dragOpacity = more transparent
+        item.style.opacity = String(1 - this.options.dragOpacity / 100);
+
+        // Custom fully-opaque ghost that follows cursor via dragover
+        const imgEl = this.imageEls[i];
+        if (imgEl && imgEl.naturalWidth > 0) {
+          // Hide browser's default semi-transparent ghost with a transparent 1x1 pixel
+          const pixel = document.createElement("canvas");
+          pixel.width = 1;
+          pixel.height = 1;
+          pixel.style.cssText = "position:fixed;left:0;top:0;pointer-events:none";
+          document.body.appendChild(pixel);
+          e.dataTransfer!.setDragImage(pixel, 0, 0);
+          setTimeout(() => pixel.remove(), 0);
+
+          // Custom fully-opaque ghost, initially at cursor (with DPR for sharpness)
+          const w = this.options.ghostImageWidth;
+          const h = (imgEl.naturalHeight / imgEl.naturalWidth) * w;
+          const dpr = window.devicePixelRatio || 1;
+          const ghost = document.createElement("canvas");
+          ghost.width = w * dpr;
+          ghost.height = h * dpr;
+          ghost.style.width = w + "px";
+          ghost.style.height = h + "px";
+          ghost.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;width:${w}px;height:${h}px;pointer-events:none;z-index:2147483647`;
+          const ctx = ghost.getContext("2d")!;
+          ctx.scale(dpr, dpr);
+          ctx.drawImage(imgEl, 0, 0, w, h);
+          document.body.appendChild(ghost);
+
+          const onDragOver = (ev: DragEvent) => {
+            ghost.style.left = ev.clientX + "px";
+            ghost.style.top = ev.clientY + "px";
+          };
+          const onDragEnd = () => {
+            document.removeEventListener("dragover", onDragOver, true);
+            ghost.remove();
+          };
+          document.addEventListener("dragover", onDragOver, true);
+          item.addEventListener("dragend", onDragEnd, { once: true });
+        }
+
         logger.info("ImageRowWidget dragstart", {
           index: i,
           groupLineStart: this.group.lineStart,
@@ -617,6 +761,7 @@ export class ImageRowWidget {
       item.ondragend = (e) => {
         e.stopPropagation();
         item.classList.remove(CLASSES.dragging);
+        item.style.opacity = "";
         for (const el of this.itemEls) {
           el.style.borderLeft = "";
           el.style.borderRight = "";

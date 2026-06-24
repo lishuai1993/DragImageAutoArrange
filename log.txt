@@ -1,140 +1,29 @@
-[2026-06-24T03:23:15.476Z] [INFO] Plugin loading {"version":"1.0.0"}
-[2026-06-24T03:23:15.476Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
-[2026-06-24T03:23:15.477Z] [INFO] Reading Mode processor registered
-[2026-06-24T03:23:15.477Z] [INFO] Live Preview extension registered
-[2026-06-24T03:23:15.477Z] [INFO] Standalone drop plugin registered
-[2026-06-24T03:23:15.477Z] [INFO] Plugin loaded successfully
-[2026-06-24T03:23:15.680Z] [DEBUG] LivePreview StateField create {"wasLivePreview":false}
-[2026-06-24T03:23:15.680Z] [DEBUG] LivePreview decorations skipped (source mode)
-[2026-06-24T03:23:15.689Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
-[2026-06-24T03:23:53.606Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:23:53.606Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":10,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:23:53.606Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":10,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|705|614x460]]","![[图片并排测试-1782184100492.webp|186]]"]}]}
-[2026-06-24T03:23:53.606Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:53.606Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:23:53.606Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":10,"lineStart1":8,"lineEnd1":10,"lineCount":26,"from":109,"to":222,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:53.606Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":7,"lineEnd":10}
-[2026-06-24T03:23:53.606Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-24T03:23:53.610Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
-[2026-06-24T03:23:53.610Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:23:53.611Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:23:53.611Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:23:55.349Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T03:23:55.350Z] [INFO] ImageRowWidget dragstart {"index":2,"groupLineStart":7,"payload":"diaa-row:7:2","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T03:23:55.957Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:7:2"}
-[2026-06-24T03:23:55.957Z] [DEBUG] ImageRowWidget item ondrop {"i":1,"data":"diaa-row:7:2"}
-[2026-06-24T03:23:55.958Z] [INFO] LivePreview drag reorder {"fromIndex":2,"toIndex":1,"fromLine":9,"toLine":8,"minLine":7,"maxLine":9,"fromPos":109,"toPos":222,"docLength":241,"docLines":26,"before":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|705|614x460]]","![[图片并排测试-1782184100492.webp|186]]"],"after":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|186]]","![[图片并排测试-1782184100492.webp|705|614x460]]",""],"originalLength":113,"insertLength":113}
-[2026-06-24T03:23:55.959Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:23:55.959Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":10,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:23:55.959Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":10,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|186]]","![[图片并排测试-1782184100492.webp|705|614x460]]"]}]}
-[2026-06-24T03:23:55.959Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:55.959Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:23:55.959Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":10,"lineStart1":8,"lineEnd1":10,"lineCount":26,"from":109,"to":222,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:55.959Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":7,"lineEnd":10}
-[2026-06-24T03:23:55.959Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-24T03:23:55.962Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:23:55.962Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:23:55.962Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:23:55.963Z] [DEBUG] LivePreview post-reorder doc {"docLines":26,"docLength":241,"docPreview":"![[图片并排测试-1782121567403.webp|112]]\n![[图片并排测试-1782122225593.webp|103]]\n![[图片并排测试-1782121567403.webp|114]]\n\n\n\n\n![[图片并排测试-1782184100492.webp|200]]\n![[图片并排测试-1782184100492.webp|186]]\n![[图片并排测试-1782184100492.webp|705|614x460]]\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n那iOS"}
-[2026-06-24T03:23:55.967Z] [DEBUG] LivePreview post-reorder DOM check {"embedCount":0,"cmLineCount":18,"embeds":[]}
-[2026-06-24T03:23:56.631Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T03:23:56.631Z] [INFO] ImageRowWidget dragstart {"index":2,"groupLineStart":7,"payload":"diaa-row:7:2","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T03:23:57.141Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:7:2"}
-[2026-06-24T03:23:57.141Z] [DEBUG] ImageRowWidget item ondrop {"i":1,"data":"diaa-row:7:2"}
-[2026-06-24T03:23:57.142Z] [INFO] LivePreview drag reorder {"fromIndex":2,"toIndex":1,"fromLine":9,"toLine":8,"minLine":7,"maxLine":9,"fromPos":109,"toPos":222,"docLength":241,"docLines":26,"before":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|186]]","![[图片并排测试-1782184100492.webp|705|614x460]]"],"after":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|705|614x460]]","![[图片并排测试-1782184100492.webp|186]]",""],"originalLength":113,"insertLength":113}
-[2026-06-24T03:23:57.142Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:23:57.142Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":10,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:23:57.142Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":10,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|705|614x460]]","![[图片并排测试-1782184100492.webp|186]]"]}]}
-[2026-06-24T03:23:57.142Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:57.142Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:23:57.142Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":10,"lineStart1":8,"lineEnd1":10,"lineCount":26,"from":109,"to":222,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:57.142Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":7,"lineEnd":10}
-[2026-06-24T03:23:57.142Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-24T03:23:57.145Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:23:57.145Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:23:57.145Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:23:57.146Z] [DEBUG] LivePreview post-reorder doc {"docLines":26,"docLength":241,"docPreview":"![[图片并排测试-1782121567403.webp|112]]\n![[图片并排测试-1782122225593.webp|103]]\n![[图片并排测试-1782121567403.webp|114]]\n\n\n\n\n![[图片并排测试-1782184100492.webp|200]]\n![[图片并排测试-1782184100492.webp|705|614x460]]\n![[图片并排测试-1782184100492.webp|186]]\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n那iOS"}
-[2026-06-24T03:23:57.150Z] [DEBUG] LivePreview post-reorder DOM check {"embedCount":0,"cmLineCount":18,"embeds":[]}
-[2026-06-24T03:23:58.165Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T03:23:58.165Z] [INFO] ImageRowWidget dragstart {"index":1,"groupLineStart":7,"payload":"diaa-row:7:1","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T03:23:58.332Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
-[2026-06-24T03:23:58.926Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:7:1"}
-[2026-06-24T03:23:58.927Z] [INFO] SD flex-row → standalone: moveLine {"srcLine":8,"targetLine":16,"dropLine":16,"isImageLine":false}
-[2026-06-24T03:23:58.927Z] [INFO] LivePreview moveLine {"srcLine":8,"targetLine":16,"minLine":8,"maxLine":16,"fromPos":144,"toPos":229,"lineCount":10}
-[2026-06-24T03:23:58.927Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:23:58.927Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":9,"imageCount":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]},{"lineStart":15,"lineEnd":16,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:23:58.927Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":9,"count":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":15,"lineEnd":16,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|705|614x460]]"]}]}
-[2026-06-24T03:23:58.927Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:23:58.927Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:23:58.927Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":9,"lineStart1":8,"lineEnd1":9,"lineCount":26,"from":109,"to":179,"docLength":241,"imageCount":2}
-[2026-06-24T03:23:58.927Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":7,"lineEnd":9}
-[2026-06-24T03:23:58.927Z] [DEBUG] LivePreview decoration range {"groupLineStart":15,"groupLineEnd":16,"lineStart1":16,"lineEnd1":16,"lineCount":26,"from":185,"to":228,"docLength":241,"imageCount":1}
-[2026-06-24T03:23:58.927Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":15,"lineEnd":16}
-[2026-06-24T03:23:58.927Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":3}
-[2026-06-24T03:23:58.930Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:23:58.930Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:23:58.930Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:23:58.930Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:23:58.930Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:24:00.148Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T03:24:00.148Z] [INFO] ImageRowWidget dragstart {"index":1,"groupLineStart":7,"payload":"diaa-row:7:1","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T03:24:00.964Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:7:1"}
-[2026-06-24T03:24:00.964Z] [INFO] SD flex-row → standalone: moveLine {"srcLine":8,"targetLine":12,"dropLine":12,"isImageLine":false}
-[2026-06-24T03:24:00.964Z] [INFO] LivePreview moveLine {"srcLine":8,"targetLine":12,"minLine":8,"maxLine":12,"fromPos":144,"toPos":183,"lineCount":6}
-[2026-06-24T03:24:00.964Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:24:00.964Z] [DEBUG] detectImageGroups result {"groupCount":4,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":8,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]},{"lineStart":11,"lineEnd":12,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]},{"lineStart":15,"lineEnd":16,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:24:00.964Z] [DEBUG] LivePreview buildDecorations {"groupCount":4,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":8,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]"]},{"lineStart":11,"lineEnd":12,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":15,"lineEnd":16,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|705|614x460]]"]}]}
-[2026-06-24T03:24:00.964Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:24:00.964Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:24:00.964Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":8,"lineStart1":8,"lineEnd1":8,"lineCount":26,"from":109,"to":144,"docLength":241,"imageCount":1}
-[2026-06-24T03:24:00.964Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":7,"lineEnd":8}
-[2026-06-24T03:24:00.964Z] [DEBUG] LivePreview decoration range {"groupLineStart":11,"groupLineEnd":12,"lineStart1":12,"lineEnd1":12,"lineCount":26,"from":147,"to":182,"docLength":241,"imageCount":1}
-[2026-06-24T03:24:00.964Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":11,"lineEnd":12}
-[2026-06-24T03:24:00.964Z] [DEBUG] LivePreview decoration range {"groupLineStart":15,"groupLineEnd":16,"lineStart1":16,"lineEnd1":16,"lineCount":26,"from":185,"to":228,"docLength":241,"imageCount":1}
-[2026-06-24T03:24:00.964Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":15,"lineEnd":16}
-[2026-06-24T03:24:00.964Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":4}
-[2026-06-24T03:24:00.965Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:24:00.965Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:24:00.966Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:24:00.966Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:24:00.966Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:24:05.598Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T03:24:05.598Z] [INFO] ImageRowWidget dragstart {"index":0,"groupLineStart":11,"payload":"diaa-row:11:0","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T03:24:06.310Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:11:0"}
-[2026-06-24T03:24:06.310Z] [DEBUG] ImageRowWidget item ondrop {"i":0,"data":"diaa-row:11:0"}
-[2026-06-24T03:24:06.310Z] [INFO] ImageRowWidget inter-row merge {"i":0,"insertAt":1,"srcLineStart":11,"srcIndex":0}
-[2026-06-24T03:24:06.311Z] [INFO] LivePreview cross-row merge {"srcLine":11,"targetLine":8,"insertAtIndex":1,"dataTransfer":"diaa-row:11:0"}
-[2026-06-24T03:24:06.311Z] [INFO] LivePreview moveLine {"srcLine":11,"targetLine":8,"minLine":8,"maxLine":11,"fromPos":144,"toPos":182,"lineCount":5}
-[2026-06-24T03:24:06.311Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:24:06.311Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":9,"imageCount":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]},{"lineStart":15,"lineEnd":16,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:24:06.311Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":9,"count":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|186]]"]},{"lineStart":15,"lineEnd":16,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|705|614x460]]"]}]}
-[2026-06-24T03:24:06.311Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:24:06.311Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:24:06.311Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":9,"lineStart1":8,"lineEnd1":9,"lineCount":26,"from":109,"to":179,"docLength":241,"imageCount":2}
-[2026-06-24T03:24:06.311Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":7,"lineEnd":9}
-[2026-06-24T03:24:06.311Z] [DEBUG] LivePreview decoration range {"groupLineStart":15,"groupLineEnd":16,"lineStart1":16,"lineEnd1":16,"lineCount":26,"from":185,"to":228,"docLength":241,"imageCount":1}
-[2026-06-24T03:24:06.311Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":15,"lineEnd":16}
-[2026-06-24T03:24:06.311Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":3}
-[2026-06-24T03:24:06.313Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:24:06.313Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:24:06.313Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:24:06.313Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
-[2026-06-24T03:24:07.464Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
-[2026-06-24T03:24:07.464Z] [INFO] ImageRowWidget dragstart {"index":0,"groupLineStart":15,"payload":"diaa-row:15:0","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
-[2026-06-24T03:24:08.143Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:15:0"}
-[2026-06-24T03:24:08.143Z] [DEBUG] ImageRowWidget item ondrop {"i":1,"data":"diaa-row:15:0"}
-[2026-06-24T03:24:08.144Z] [INFO] ImageRowWidget inter-row merge {"i":1,"insertAt":1,"srcLineStart":15,"srcIndex":0}
-[2026-06-24T03:24:08.144Z] [INFO] LivePreview cross-row merge {"srcLine":15,"targetLine":8,"insertAtIndex":1,"dataTransfer":"diaa-row:15:0"}
-[2026-06-24T03:24:08.144Z] [INFO] LivePreview moveLine {"srcLine":15,"targetLine":8,"minLine":8,"maxLine":15,"fromPos":144,"toPos":228,"lineCount":9}
-[2026-06-24T03:24:08.144Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
-[2026-06-24T03:24:08.144Z] [DEBUG] detectImageGroups result {"groupCount":2,"groups":[{"lineStart":0,"lineEnd":3,"imageCount":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":7,"lineEnd":10,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}]}
-[2026-06-24T03:24:08.144Z] [DEBUG] LivePreview buildDecorations {"groupCount":2,"enabled":true,"docLength":241,"docLines":26,"groups":[{"lineStart":0,"lineEnd":3,"count":3,"files":["图片并排测试-1782121567403.webp","图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782121567403.webp|112]]","![[图片并排测试-1782122225593.webp|103]]","![[图片并排测试-1782121567403.webp|114]]"]},{"lineStart":7,"lineEnd":10,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|200]]","![[图片并排测试-1782184100492.webp|705|614x460]]","![[图片并排测试-1782184100492.webp|186]]"]}]}
-[2026-06-24T03:24:08.144Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":3,"lineStart1":1,"lineEnd1":3,"lineCount":26,"from":0,"to":105,"docLength":241,"imageCount":3}
-[2026-06-24T03:24:08.144Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":0,"lineEnd":3}
-[2026-06-24T03:24:08.144Z] [DEBUG] LivePreview decoration range {"groupLineStart":7,"groupLineEnd":10,"lineStart1":8,"lineEnd1":10,"lineCount":26,"from":109,"to":222,"docLength":241,"imageCount":3}
-[2026-06-24T03:24:08.144Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":7,"lineEnd":10}
-[2026-06-24T03:24:08.144Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":2}
-[2026-06-24T03:24:08.146Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:24:08.146Z] [DEBUG] StaticImageRowWidget destroyed
-[2026-06-24T03:24:08.146Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"]}
-[2026-06-24T03:24:08.146Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T06:24:30.254Z] [INFO] Plugin loading {"version":"1.0.0"}
+[2026-06-24T06:24:30.255Z] [INFO] Settings loaded {"enabled":true,"maxImagesPerRow":10,"defaultRowHeight":200,"gapSize":4,"imageExtensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif","enableDragReorder":true,"enableResize":true,"enableDividers":true}
+[2026-06-24T06:24:30.255Z] [INFO] Reading Mode processor registered
+[2026-06-24T06:24:30.255Z] [INFO] Live Preview extension registered
+[2026-06-24T06:24:30.255Z] [INFO] Standalone drop plugin registered
+[2026-06-24T06:24:30.255Z] [INFO] Plugin loaded successfully
+[2026-06-24T06:24:30.325Z] [DEBUG] LivePreview StateField create {"wasLivePreview":true}
+[2026-06-24T06:24:30.326Z] [DEBUG] detectImageGroups start {"lineCount":26,"maxImagesPerRow":10,"extensions":"png,jpg,jpeg,gif,webp,svg,bmp,avif"}
+[2026-06-24T06:24:30.326Z] [DEBUG] detectImageGroups result {"groupCount":3,"groups":[{"lineStart":0,"lineEnd":2,"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]},{"lineStart":6,"lineEnd":9,"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]},{"lineStart":11,"lineEnd":12,"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}]}
+[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview buildDecorations {"groupCount":3,"enabled":true,"docLength":233,"docLines":26,"groups":[{"lineStart":0,"lineEnd":2,"count":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782122225593.webp|120]]","![[图片并排测试-1782121567403.webp|105]]"]},{"lineStart":6,"lineEnd":9,"count":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"raws":["![[图片并排测试-1782184100492.webp|334]]","![[图片并排测试-1782184100492.webp|334]]","![[图片并排测试-1782121567403.webp|167]]"]},{"lineStart":11,"lineEnd":12,"count":1,"files":["图片并排测试-1782184100492.webp"],"raws":["![[图片并排测试-1782184100492.webp|367]]"]}]}
+[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decoration range {"groupLineStart":0,"groupLineEnd":2,"lineStart1":1,"lineEnd1":2,"lineCount":26,"from":0,"to":70,"docLength":233,"imageCount":2}
+[2026-06-24T06:24:30.326Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":2,"lineStart":0,"lineEnd":2}
+[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decoration range {"groupLineStart":6,"groupLineEnd":9,"lineStart1":7,"lineEnd1":9,"lineCount":26,"from":74,"to":179,"docLength":233,"imageCount":3}
+[2026-06-24T06:24:30.326Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":3,"lineStart":6,"lineEnd":9}
+[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decoration range {"groupLineStart":11,"groupLineEnd":12,"lineStart1":12,"lineEnd1":12,"lineCount":26,"from":181,"to":216,"docLength":233,"imageCount":1}
+[2026-06-24T06:24:30.326Z] [DEBUG] StaticImageRowWidget constructed {"imageCount":1,"lineStart":11,"lineEnd":12}
+[2026-06-24T06:24:30.326Z] [DEBUG] LivePreview decorations built {"decorationAdded":true,"setSize":3}
+[2026-06-24T06:24:30.330Z] [INFO] SD setup complete: handlers on window capture {"domTag":"DIV"}
+[2026-06-24T06:24:30.333Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-24T06:24:30.333Z] [DEBUG] ImageRowWidget build {"imageCount":2,"files":["图片并排测试-1782122225593.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T06:24:30.333Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"]}
+[2026-06-24T06:24:30.333Z] [DEBUG] ImageRowWidget build {"imageCount":3,"files":["图片并排测试-1782184100492.webp","图片并排测试-1782184100492.webp","图片并排测试-1782121567403.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T06:24:30.334Z] [DEBUG] StaticImageRowWidget toDOM {"imageCount":1,"files":["图片并排测试-1782184100492.webp"]}
+[2026-06-24T06:24:30.334Z] [DEBUG] ImageRowWidget build {"imageCount":1,"files":["图片并排测试-1782184100492.webp"],"options":{"defaultRowHeight":200,"gap":4,"enableDividers":true,"enableResize":true}}
+[2026-06-24T06:25:07.046Z] [INFO] SD dragstart: not an obsidian embed {"targetTag":"DIV","targetClass":"drag-img-item","isFlexItem":true}
+[2026-06-24T06:25:07.046Z] [INFO] ImageRowWidget dragstart {"index":0,"groupLineStart":6,"payload":"diaa-row:6:0","targetTag":"DIV","targetClass":"drag-img-item drag-img-dragging"}
+[2026-06-24T06:25:07.356Z] [INFO] SD dragover first {"hasDiaaSource":false,"hasDiaaRow":true}
+[2026-06-24T06:25:08.285Z] [INFO] SD drop enter {"hasDiaaSource":false,"textPlain":"diaa-row:6:0"}
+[2026-06-24T06:25:08.285Z] [DEBUG] ImageRowWidget item ondrop {"i":0,"data":"diaa-row:6:0"}

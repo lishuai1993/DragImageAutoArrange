@@ -1,11 +1,14 @@
 {
-  "enabled": false,
+  "enabled": true,
   "defaultRowHeight": 200,
   "maxImagesPerRow": 10,
   "gapSize": 4,
-  "snapSensitivity": 3,
+  "snapSensitivity": 7,
   "enableDragReorder": true,
   "enableResize": true,
   "enableDividers": true,
-  "imageExtensions": "png,jpg,jpeg,gif,webp,svg,bmp,avif"
+  "imageExtensions": "png,jpg,jpeg,gif,webp,svg,bmp,avif",
+  "topBarSensitivity": 12,
+  "ghostImageWidth": 400,
+  "dragOpacity": 30
 }

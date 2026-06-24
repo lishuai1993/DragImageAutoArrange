@@ -24,6 +24,9 @@ export default class DragImageAutoArrangePlugin
     enableResize: true,
     enableDividers: true,
     imageExtensions: "png,jpg,jpeg,gif,webp,svg,bmp,avif",
+    topBarSensitivity: 12,
+    ghostImageWidth: 120,
+    dragOpacity: 60,
   };
 
   async onload(): Promise<void> {
@@ -34,7 +37,7 @@ export default class DragImageAutoArrangePlugin
     );
     logger.info("Plugin loading", { version: this.manifest.version });
 
-    this.settings = loadSettings(this);
+    this.settings = await loadSettings(this);
     logger.info("Settings loaded", {
       enabled: this.settings.enabled,
       maxImagesPerRow: this.settings.maxImagesPerRow,
@@ -139,6 +142,9 @@ export default class DragImageAutoArrangePlugin
       enableDividers: this.settings.enableDividers,
       enableResize: this.settings.enableResize,
       snapSensitivity: this.settings.snapSensitivity,
+      topBarSensitivity: this.settings.topBarSensitivity,
+      ghostImageWidth: this.settings.ghostImageWidth,
+      dragOpacity: this.settings.dragOpacity,
       getResourcePath: (fileName: string) => {
         const url = this.resolveImagePath(fileName, sourcePath);
         if (!url) {

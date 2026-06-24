@@ -11,6 +11,9 @@ export interface DragImageSettings {
   enableResize: boolean;
   enableDividers: boolean;
   imageExtensions: string;
+  topBarSensitivity: number;
+  ghostImageWidth: number;
+  dragOpacity: number;
 }
 
 export interface IDragImagePlugin {
@@ -18,8 +21,8 @@ export interface IDragImagePlugin {
   saveSettings(): Promise<void>;
 }
 
-export function loadSettings(plugin: { loadData(): unknown }): DragImageSettings {
-  const data = plugin.loadData();
+export async function loadSettings(plugin: { loadData(): Promise<any> }): Promise<DragImageSettings> {
+  const data = await plugin.loadData();
   return Object.assign({}, DEFAULT_SETTINGS, data ?? {});
 }
 
@@ -101,6 +104,48 @@ export class DragImageSettingTab extends PluginSettingTab {
           .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.snapSensitivity = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Top bar activation zone")
+      .setDesc("Pixel distance from the top of a flex row within which the global-balance top bar appears (4-40 px).")
+      .addSlider((slider) =>
+        slider
+          .setLimits(4, 40, 2)
+          .setValue(this.plugin.settings.topBarSensitivity)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.topBarSensitivity = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Ghost image width")
+      .setDesc("Width (px) of the drag ghost image that follows the cursor (100-500 px).")
+      .addSlider((slider) =>
+        slider
+          .setLimits(100, 500, 10)
+          .setValue(this.plugin.settings.ghostImageWidth)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.ghostImageWidth = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Drag ghost opacity")
+      .setDesc("Transparency of the original image during drag (10% = nearly opaque, 90% = very transparent).")
+      .addSlider((slider) =>
+        slider
+          .setLimits(10, 90, 5)
+          .setValue(this.plugin.settings.dragOpacity)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.dragOpacity = value;
             await this.plugin.saveSettings();
           })
       );
