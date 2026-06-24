@@ -172,6 +172,17 @@
   border-radius: 3px;
 }
 
+/* Left/right drop indicators on standalone image lines */
+.cm-line.diaa-drop-left {
+  border-left: 3px solid #4a9eff !important;
+  border-radius: 3px 0 0 3px;
+}
+
+.cm-line.diaa-drop-right {
+  border-right: 3px solid #4a9eff !important;
+  border-radius: 0 3px 3px 0;
+}
+
 /* === Live Preview specific === */
 
 /* Make our custom widgets sit well within CodeMirror lines */

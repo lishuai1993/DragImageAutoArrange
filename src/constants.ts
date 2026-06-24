@@ -33,9 +33,10 @@ export const RESIZE_DEBOUNCE_MS = 100;
 
 export function buildImageLineRe(extensions: string): RegExp {
   const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");
-  // Format: ![[filename|width]] — width is INSIDE [[...]], before ]]
+  // Format: ![[filename|width]] or ![[filename|WxH]] or ![[filename|width|WxH]]
+  // Match anything between | and ]] (Obsidian dimensions, plugin width, or both)
   return new RegExp(
-    `^\\s*!\\[\\[([^\\]]+\\.(?:${extList}))(?:\\|(\\d+))?\\]\\]\\s*$`,
+    `^\\s*!\\[\\[([^\\]]+\\.(?:${extList}))(?:\\|([^\\]]*))?\\]\\]\\s*$`,
     "i"
   );
 }

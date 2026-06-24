@@ -35,8 +35,10 @@ export function parseImageLine(
   if (!match) return null;
 
   const fileName = match[1];
-  const widthStr = match[2];
-  const explicitWidth = widthStr ? parseInt(widthStr, 10) : null;
+  const rawParam = match[2];
+  // Extract first number from param (handles |width, |WxH, |width|WxH)
+  const firstNum = rawParam ? rawParam.match(/^\d+/) : null;
+  const explicitWidth = firstNum ? parseInt(firstNum[0], 10) : null;
 
   return {
     line: lineIndex,

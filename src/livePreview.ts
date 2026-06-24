@@ -381,8 +381,8 @@ class StaticImageRowWidget extends WidgetType {
 /** Replace or remove the |width parameter in an image embed line. */
 function updateImageLineWidth(raw: string, flexGrow: number): string {
   const widthValue = Math.round(flexGrow * 100);
-  // Strip existing |width parameter
-  let out = raw.replace(/\|(\d+)(\]\])/, "$2");
+  // Strip everything between file extension and ]] (handles |width, |WxH, |width|WxH)
+  let out = raw.replace(/\|[^\]]*(?=\]\])/, "");
   if (widthValue === 100) return out; // default → omit
   return out.replace(/\]\]/, `|${widthValue}]]`);
 }
@@ -440,7 +440,7 @@ function buildDecorations(
 
     for (const group of groups) {
       try {
-        if (group.images.length < 2) continue;
+        if (group.images.length < 1) continue;
 
         const lineCount = state.doc.lines;
         const lineStart1 = group.lineStart + 1;
@@ -562,6 +562,7 @@ export function createStandaloneDropPlugin(
       private onDrop: ((e: DragEvent) => void) | null = null;
       private dragoverLogged = false;
       private dropIndicatorEl: HTMLElement | null = null;
+      private dropSide: "left" | "right" | null = null;
 
       constructor(view: EditorView) {
         this.view = view;
@@ -583,27 +584,99 @@ export function createStandaloneDropPlugin(
 
       private clearDropIndicator() {
         if (this.dropIndicatorEl) {
-          this.dropIndicatorEl.classList.remove("diaa-drop-target-line");
+          this.dropIndicatorEl.classList.remove("diaa-drop-target-line", "diaa-drop-left", "diaa-drop-right");
+          this.dropIndicatorEl.style.boxShadow = "";
           this.dropIndicatorEl = null;
         }
+        this.dropSide = null;
       }
 
-      private showDropIndicator(pos: number) {
-        this.clearDropIndicator();
-        const lineBlock = this.view.lineBlockAt(pos);
-        if (!lineBlock) return;
-        // Use domAtPos to find the DOM node, then walk up to .cm-line
-        const domPos = this.view.domAtPos(lineBlock.from);
-        if (domPos) {
-          const el = domPos.node.nodeType === 3
-            ? (domPos.node as Text).parentElement
-            : (domPos.node as HTMLElement);
-          const cmLine = el?.closest?.(".cm-line") as HTMLElement | null;
-          if (cmLine) {
-            cmLine.classList.add("diaa-drop-target-line");
-            this.dropIndicatorEl = cmLine;
+      private findDropTarget(clientX: number, clientY: number) {
+        const targetEl = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+        if (!targetEl || !this.view.dom.contains(targetEl)) return null;
+
+        // Detect flex row widgets (our custom DOM, spans multiple lines)
+        const flexRow = targetEl.closest(".drag-img-row") as HTMLElement | null;
+        if (flexRow) {
+          const ls = parseInt(flexRow.dataset.lineStart || "", 10);
+          const le = parseInt(flexRow.dataset.lineEnd || "", 10);
+          if (!isNaN(ls) && !isNaN(le)) {
+            const pos = this.view.posAtDOM(flexRow);
+            if (pos >= 0) {
+              return {
+                pos,
+                line: ls,
+                isImageLine: false,
+                isFlexRow: true as const,
+                rowLineStart: ls,
+                rowLineEnd: le,
+                element: flexRow,
+                cmLine: null as HTMLElement | null,
+              };
+            }
           }
         }
+
+        const embed = targetEl.closest(".internal-embed.image-embed") as HTMLElement | null;
+        const cmLine = targetEl.closest(".cm-line") as HTMLElement | null;
+        const domEl = cmLine || embed;
+        if (!domEl) return null;
+
+        const pos = this.view.posAtDOM(domEl);
+        if (pos < 0) return null;
+
+        const line = this.view.state.doc.lineAt(pos).number - 1;
+
+        return {
+          pos,
+          line,
+          isImageLine: !!embed,
+          isFlexRow: false as const,
+          rowLineStart: null as number | null,
+          rowLineEnd: null as number | null,
+          element: domEl,
+          cmLine: cmLine || null,
+        };
+      }
+
+      private showDropIndicator(targetInfo: any, clientX?: number) {
+        this.clearDropIndicator();
+        if (!targetInfo) return;
+
+        // Flex row target: highlight the entire row
+        if (targetInfo.isFlexRow) {
+          const rowEl = targetInfo.element as HTMLElement;
+          const rect = rowEl.getBoundingClientRect();
+          const mid = rect.left + rect.width / 2;
+          if (clientX !== undefined && clientX < mid) {
+            rowEl.style.boxShadow = "inset 3px 0 0 #4a9eff";
+            this.dropSide = "left";
+          } else {
+            rowEl.style.boxShadow = "inset -3px 0 0 #4a9eff";
+            this.dropSide = "right";
+          }
+          this.dropIndicatorEl = rowEl;
+          return;
+        }
+
+        // Prefer .cm-line for indicator styling
+        const indicatorEl = targetInfo.cmLine || targetInfo.element;
+        if (!indicatorEl) return;
+
+        if (clientX !== undefined && targetInfo.isImageLine) {
+          const rect = indicatorEl.getBoundingClientRect();
+          const mid = rect.left + rect.width / 2;
+          if (clientX < mid) {
+            indicatorEl.classList.add("diaa-drop-left");
+            this.dropSide = "left";
+          } else {
+            indicatorEl.classList.add("diaa-drop-right");
+            this.dropSide = "right";
+          }
+        } else {
+          indicatorEl.classList.add("diaa-drop-target-line");
+        }
+        this.dropIndicatorEl = indicatorEl;
       }
 
       private setup() {
@@ -662,17 +735,16 @@ export function createStandaloneDropPlugin(
             logger.info("SD dragover first", { hasDiaaSource, hasDiaaRow });
           }
 
-          const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
-          if (pos === null) {
+          // Use elementFromPoint for reliable detection of image embeds and flex rows
+          const targetInfo = this.findDropTarget(e.clientX, e.clientY);
+          if (!targetInfo) {
             this.clearDropIndicator();
             return;
           }
 
-          const targetLine = this.view.state.doc.lineAt(pos).number - 1;
-
           e.preventDefault();
           e.dataTransfer!.dropEffect = "move";
-          this.showDropIndicator(pos);
+          this.showDropIndicator(targetInfo, e.clientX);
         };
 
         // ── drop: capture on WINDOW, handle standalone → standalone and flex-row → standalone ──
@@ -701,13 +773,24 @@ export function createStandaloneDropPlugin(
             const srcIndex = parseInt(rowMatch[2], 10);
             const srcLine = srcLineStart + srcIndex;
 
-            const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
-            if (pos === null) return;
+            // Use elementFromPoint for reliable target detection
+            const dropTarget = this.findDropTarget(e.clientX, e.clientY);
+            if (!dropTarget || dropTarget.isFlexRow) return;
 
-            const targetLine = this.view.state.doc.lineAt(pos).number - 1;
+            let targetLine = dropTarget.line;
+
+            // When dropping on an image line, compute left/right placement
+            if (dropTarget.isImageLine) {
+              const rect = dropTarget.element.getBoundingClientRect();
+              const mid = rect.left + rect.width / 2;
+              if (e.clientX >= mid) targetLine = dropTarget.line + 1;
+            }
+
             if (srcLine === targetLine) return;
 
-            logger.info("SD flex-row → standalone: moveLine", { srcLine, targetLine });
+            logger.info("SD flex-row → standalone: moveLine", {
+              srcLine, targetLine, dropLine: dropTarget.line, isImageLine: dropTarget.isImageLine,
+            });
 
             e.preventDefault();
             e.stopPropagation();
@@ -715,8 +798,11 @@ export function createStandaloneDropPlugin(
             return;
           }
 
-          // ── Standalone → standalone ──
+          // ── Standalone → standalone (with left/right placement on image lines) ──
           if (!e.dataTransfer?.types.includes("application/diaa-source")) return;
+
+          // Skip if target is inside a flex row (widget handles merge)
+          if ((e.target as HTMLElement)?.closest?.(".drag-img-row")) return;
 
           const srcLine = parseInt(e.dataTransfer!.getData("application/diaa-source"), 10);
           if (isNaN(srcLine)) {
@@ -724,13 +810,38 @@ export function createStandaloneDropPlugin(
             return;
           }
 
-          const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
-          if (pos === null) return;
+          // Use elementFromPoint for reliable image embed detection
+          const dropTarget = this.findDropTarget(e.clientX, e.clientY);
+          let baseTargetLine: number;
+          let targetLine: number;
+          let side = "left";
 
-          const targetLine = this.view.state.doc.lineAt(pos).number - 1;
+          if (dropTarget) {
+            baseTargetLine = dropTarget.line;
+            if (dropTarget.isImageLine) {
+              const rect = dropTarget.element.getBoundingClientRect();
+              const mid = rect.left + rect.width / 2;
+              if (e.clientX >= mid) {
+                targetLine = baseTargetLine + 1;
+                side = "right";
+              } else {
+                targetLine = baseTargetLine;
+              }
+            } else {
+              targetLine = baseTargetLine;
+            }
+          } else {
+            const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
+            if (pos === null) return;
+            baseTargetLine = this.view.state.doc.lineAt(pos).number - 1;
+            targetLine = baseTargetLine;
+          }
+
           if (srcLine === targetLine) return;
 
-          logger.info("SD standalone → standalone: moveLine", { srcLine, targetLine });
+          logger.info("SD standalone → standalone: moveLine", {
+            srcLine, targetLine, baseTargetLine, side,
+          });
 
           e.preventDefault();
           e.stopPropagation();
