@@ -1,6 +1,6 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE } from "./constants";
 import { ImageGroup, ImageEmbed, ImageMeta } from "./imageDetector";
-import { computeFlexGrows, computeUniformHeight } from "./layoutEngine";
+import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeDividerXPositions, findClosestDividerIndex } from "./layoutEngine";
 import { resolveImageSrc } from "./utils";
 import { logger } from "./logger";
 
@@ -381,28 +381,11 @@ export class ImageRowWidget {
 
     const cw = item.clientWidth;
     const ch = item.clientHeight;
-    if (cw === 0 || ch === 0) return null;
 
     const meta = this.loadedMetas.get(index);
     if (!meta || meta.naturalWidth === 0) return null;
 
-    const imageAspect = meta.naturalWidth / meta.naturalHeight;
-    const containerAspect = cw / ch;
-
-    let displayW: number;
-    let displayH: number;
-
-    if (imageAspect > containerAspect) {
-      // Image is wider — fills full width, height constrained by aspect
-      displayW = cw;
-      displayH = cw / imageAspect;
-    } else {
-      // Image is taller — fills full height, width constrained by aspect
-      displayH = ch;
-      displayW = ch * imageAspect;
-    }
-
-    return { left: 0, top: 0, width: displayW, height: displayH };
+    return computeImageContentRect(cw, ch, meta);
   }
 
   /** Reposition resize handles to match the actual image content rect. */
@@ -478,10 +461,11 @@ export class ImageRowWidget {
       let startFlex = 0;
       let startWidth = 0;
       let startHeight = 0;
+      let startDisplayH = 0;
+      let startItemHeights: number[] = [];
       let maxHeight = 2000;
       let scale = 1;
       let nItems = 0;
-
       handle.onmousedown = (e) => {
         dragging = true;
         item.classList.add(CLASSES.resizing);
@@ -505,6 +489,14 @@ export class ImageRowWidget {
         startWidth = (startFlex / totalG) * AW;
         startHeight = parseFloat(this.container!.style.height || "0");
 
+        // Snapshot each image's current item height so resizing one
+        // image doesn't overwrite manual height adjustments on others.
+        startItemHeights = [];
+        for (let j = 0; j < nItems; j++) {
+          const h = parseFloat(this.itemEls[j].style.height || "0");
+          startItemHeights[j] = h > 0 ? h : startHeight;
+        }
+
         // For single-image rows, cap height at the point where the image
         // fills the full container width — beyond that the image won't grow.
         if (nItems === 1) {
@@ -521,8 +513,8 @@ export class ImageRowWidget {
         // visually tracks the cursor 1:1.
         const displayRect = this.getImageContentRect(index);
         const displayW = displayRect ? displayRect.width : startWidth;
+        startDisplayH = displayRect ? displayRect.height : startHeight;
         scale = displayW > 0 ? startWidth / displayW : 1;
-
         if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
         if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
 
@@ -557,64 +549,34 @@ export class ImageRowWidget {
             return;
           }
 
-          // ── Multi-image row: width-based feedforward ──
-          // Dampened by SENS to avoid hypersensitive scaling on tall images.
-          const SENS = 0.4;
-          const sign = hd.relX < 0.5 ? -1 : 1;
-          const effectiveDx = (ev.clientX - e.clientX) * scale * SENS;
-          const otherG = totalG - startFlex;
-          const minW = 50;
-          const maxW = AW - minW * (nItems - 1);
-          const targetWidth = Math.max(minW, Math.min(maxW, startWidth + sign * effectiveDx));
-          let newFlex = targetWidth * otherG / (AW - targetWidth);
-          newFlex = Math.max(0.1, newFlex);
-
-          // Snap to neighbor when heights become equal
-          const snapFactor = this.options.snapSensitivity / 100;
-          if (snapFactor > 0) {
-            const cm = this.loadedMetas.get(index);
-            if (cm && cm.naturalWidth > 0) {
-              const ca = cm.naturalWidth / cm.naturalHeight;
-              let bestTarget: number | null = null;
-              let bestScore = Infinity;
-
-              if (index > 0) {
-                const lm = this.loadedMetas.get(index - 1);
-                if (lm && lm.naturalWidth > 0) {
-                  const la = lm.naturalWidth / lm.naturalHeight;
-                  const lf = parseFloat(this.itemEls[index - 1].style.flexGrow || "1");
-                  const target = lf * ca / la;
-                  const heightDiff = Math.abs(newFlex / ca - lf / la);
-                  const snapThreshold = (lf / la) * snapFactor;
-                  const score = snapThreshold > 0 ? heightDiff / snapThreshold : Infinity;
-                  if (score < bestScore) { bestScore = score; bestTarget = target; }
-                }
-              }
-
-              if (index < this.itemEls.length - 1) {
-                const rm = this.loadedMetas.get(index + 1);
-                if (rm && rm.naturalWidth > 0) {
-                  const ra = rm.naturalWidth / rm.naturalHeight;
-                  const rf = parseFloat(this.itemEls[index + 1].style.flexGrow || "1");
-                  const target = rf * ca / ra;
-                  const heightDiff = Math.abs(newFlex / ca - rf / ra);
-                  const snapThreshold = (rf / ra) * snapFactor;
-                  const score = snapThreshold > 0 ? heightDiff / snapThreshold : Infinity;
-                  if (score < bestScore) { bestScore = score; bestTarget = target; }
-                }
-              }
-
-              if (bestTarget !== null && bestScore < 1) {
-                newFlex = bestTarget;
-                item.classList.add(CLASSES.itemSnap);
-              } else {
-                item.classList.remove(CLASSES.itemSnap);
-              }
-            }
+          // ── Multi-image row: direct image-height scaling (dividers stay fixed) ──
+          const dy = ev.clientY - e.clientY;
+          const ySign = hd.relY < 0.5 ? -1 : 1;
+          const wy = 2 * Math.abs(hd.relY - 0.5);
+          const wx = 2 * Math.abs(hd.relX - 0.5);
+          const sY = 1;
+          const yDelta = wx + wy > 0
+            ? (dy * ySign * wy) / (wx + wy) * sY
+            : 0;
+          // Use image content height as delta baseline — not container height.
+          // This eliminates the dead zone that occurs when container is taller
+          // than the image (e.g. from a prior resize).
+          const targetImageH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
+          const imageH = `${targetImageH}px`;
+          this.imageEls[index].style.height = imageH;
+          this.itemEls[index].style.height = imageH;
+          // Preserve each non-dragged image's original height (may differ
+          // from container height due to prior manual resizes).
+          let otherMax = 0;
+          for (let j = 0; j < this.itemEls.length; j++) {
+            if (j === index) continue;
+            const h = `${startItemHeights[j]}px`;
+            this.itemEls[j].style.height = h;
+            this.imageEls[j].style.height = h;
+            otherMax = Math.max(otherMax, startItemHeights[j]);
           }
-
-          item.style.flexGrow = String(newFlex);
-          this.recalculateRowHeight();
+          const containerH = Math.max(targetImageH, otherMax);
+          this.container!.style.height = `${containerH}px`;
           this.updateHandlePositions(index);
         };
 
@@ -746,32 +708,23 @@ export class ImageRowWidget {
     }
 
     const n = this.itemEls.length;
-    const availableWidth = containerWidth - (n - 1) * this.options.gap;
-
-    let totalGrow = 0;
     const grows: number[] = [];
+    const metas: ImageMeta[] = [];
     for (let i = 0; i < n; i++) {
-      const g = parseFloat(this.itemEls[i].style.flexGrow || "1");
-      grows.push(g);
-      totalGrow += g;
+      grows[i] = parseFloat(this.itemEls[i].style.flexGrow || "1");
+      metas[i] = this.loadedMetas.get(i)!;
     }
 
-    let maxHeight = 0;
-    for (let i = 0; i < n; i++) {
-      const meta = this.loadedMetas.get(i)!;
-      const w = (grows[i] / totalGrow) * availableWidth;
-      const h = w / (meta.naturalWidth / meta.naturalHeight);
-      maxHeight = Math.max(maxHeight, h);
-    }
-
-    const upperClamp = n === 1 ? 2000 : this.options.defaultRowHeight * 3;
-    const clamped = Math.max(
-      50,
-      Math.min(upperClamp, Math.round(maxHeight))
+    const clamped = computeRowHeight(
+      grows,
+      metas,
+      containerWidth,
+      this.options.gap,
+      this.options.defaultRowHeight
     );
     this.rowHeight = clamped;
 
-    logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, availableWidth, grows, totalGrow, maxHeight, clampedRowHeight: clamped, imageCount: n });
+    logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, grows, imageCount: n, clampedRowHeight: clamped });
 
     const h = `${clamped}px`;
     this.container.style.height = h;
@@ -796,29 +749,23 @@ export class ImageRowWidget {
     const rm = this.loadedMetas.get(leftIndex + 1);
     if (!lm || !rm || lm.naturalWidth === 0 || rm.naturalWidth === 0) return;
 
-    const la = lm.naturalWidth / lm.naturalHeight;
-    const ra = rm.naturalWidth / rm.naturalHeight;
-
     const leftItem = this.itemEls[leftIndex];
     const rightItem = this.itemEls[leftIndex + 1];
     if (!leftItem || !rightItem) return;
 
     const total = parseFloat(leftItem.style.flexGrow || "1") + parseFloat(rightItem.style.flexGrow || "1");
-    const snapLeft = total * la / (la + ra);
-    const snapRight = total - snapLeft;
+    const { left, right } = computeDividerEquilibrium(lm, rm, total);
 
-    leftItem.style.flexGrow = String(snapLeft);
-    rightItem.style.flexGrow = String(snapRight);
+    leftItem.style.flexGrow = String(left);
+    rightItem.style.flexGrow = String(right);
 
     this.recalculateRowHeight();
 
     logger.info("Divider dblclick snap to equilibrium", {
       leftIndex,
       total,
-      snapLeft,
-      snapRight,
-      la,
-      ra,
+      snapLeft: left,
+      snapRight: right,
     });
   }
 
@@ -831,18 +778,16 @@ export class ImageRowWidget {
     const n = this.itemEls.length;
     if (n < 2) return;
 
-    // Gather aspect ratios; all images must be loaded
-    const aspects: number[] = [];
+    const metas: ImageMeta[] = [];
     let totalGrow = 0;
     for (let i = 0; i < n; i++) {
       const meta = this.loadedMetas.get(i);
       if (!meta || meta.naturalWidth === 0) return;
-      aspects.push(meta.naturalWidth / meta.naturalHeight);
+      metas.push(meta);
       totalGrow += parseFloat(this.itemEls[i].style.flexGrow || "1");
     }
 
-    const aspectSum = aspects.reduce((s, a) => s + a, 0);
-    const grows: number[] = aspects.map((a) => (totalGrow * a) / aspectSum);
+    const grows = computeGlobalEquilibrium(metas, totalGrow);
 
     for (let i = 0; i < n; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
@@ -850,7 +795,7 @@ export class ImageRowWidget {
 
     this.recalculateRowHeight();
 
-    logger.info("Top bar dblclick global snap", { totalGrow, aspectSum, grows });
+    logger.info("Top bar dblclick global snap", { totalGrow, grows });
   }
 
   /**
@@ -946,50 +891,31 @@ export class ImageRowWidget {
         e.stopPropagation();
         item.classList.remove(CLASSES.dragging);
         item.style.opacity = "";
-        for (const el of this.itemEls) {
-          el.style.borderLeft = "";
-          el.style.borderRight = "";
-        }
+        this.hideDividerHint();
       };
 
       item.ondragover = (e) => {
         e.stopPropagation();
         e.preventDefault();
         e.dataTransfer!.dropEffect = "move";
-        const rect = item.getBoundingClientRect();
-        const mid = rect.left + rect.width / 2;
-
-        for (const el of this.itemEls) {
-          el.style.borderLeft = "";
-          el.style.borderRight = "";
-        }
-        if (e.clientX < mid) {
-          item.style.borderLeft = "3px solid #4a9eff";
-        } else {
-          item.style.borderRight = "3px solid #4a9eff";
-        }
+        this.showDividerHint(e.clientX);
       };
 
       item.ondragleave = (e) => {
         e.stopPropagation();
-        item.style.borderLeft = "";
-        item.style.borderRight = "";
       };
 
       item.ondrop = (e) => {
         e.stopPropagation();
         e.preventDefault();
-        item.style.borderLeft = "";
-        item.style.borderRight = "";
+        this.hideDividerHint();
 
         const data = e.dataTransfer!.getData("text/plain");
         logger.debug("ImageRowWidget item ondrop", { i, data: data?.substring(0, 60) });
 
         if (!data) return;
 
-        const rect = item.getBoundingClientRect();
-        const mid = rect.left + rect.width / 2;
-        const insertAt = e.clientX < mid ? i : i + 1;
+        const insertAt = this.getInsertAt(e.clientX);
 
         // Flex row source: "diaa-row:<lineStart>:<index>"
         const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
@@ -1022,30 +948,112 @@ export class ImageRowWidget {
       };
     }
 
-    // Container-level fallback: accept drops that land between items or on the row background
+    // Container-level dragover/drop: catches drops in gaps between items,
+    // and provides a unified insert-position hint line.
     if (this.container) {
       this.container.addEventListener("dragover", (e) => {
+        e.stopPropagation();
         e.preventDefault();
         e.dataTransfer!.dropEffect = "move";
+        this.showDividerHint(e.clientX);
+      });
+
+      this.container.addEventListener("dragleave", (e) => {
+        // Only hide when truly leaving the container (not moving into a child)
+        const target = e.relatedTarget as Node | null;
+        if (!target || !this.container!.contains(target)) {
+          this.hideDividerHint();
+        }
       });
 
       this.container.addEventListener("drop", (e) => {
+        e.stopPropagation();
         e.preventDefault();
+        this.hideDividerHint();
         const data = e.dataTransfer!.getData("text/plain");
         logger.debug("ImageRowWidget container ondrop", { data: data?.substring(0, 60) });
         if (!data) return;
 
-        // Only handle non-intra-row drops at container level (intra-row is item-level)
         const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
         const isStandalone = data.startsWith("diaa-standalone:") || data.startsWith("obsidian://open");
         if ((rowMatch || isStandalone) && this.mergeExternalCallback) {
-          const containerRect = this.container!.getBoundingClientRect();
-          const mid = containerRect.left + containerRect.width / 2;
-          const insertAt = e.clientX < mid ? 0 : this.itemEls.length;
+          const insertAt = this.getInsertAt(e.clientX);
           logger.info("ImageRowWidget cross-row merge (container)", { insertAt });
           this.mergeExternalCallback(insertAt, data);
         }
       });
+    }
+  }
+
+  /**
+   * Highlight the divider closest to cursorX during drag-over.
+   * Uses existing divider elements for internal positions and
+   * inset box-shadow on the container for edge positions.
+   */
+  private showDividerHint(cursorX: number): void {
+    if (!this.container || this.itemEls.length === 0) return;
+
+    const containerRect = this.container.getBoundingClientRect();
+    const widths = this.itemEls.map(el => el.getBoundingClientRect().width);
+
+    const positions = computeDividerXPositions(
+      containerRect.left,
+      widths,
+      this.options.gap
+    );
+
+    const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
+    const threshold = Math.min(avgWidth * 0.4, 80);
+
+    const closestIdx = findClosestDividerIndex(cursorX, positions, threshold);
+
+    // Clear previous highlight
+    this.hideDividerHint();
+
+    if (closestIdx === null) return;
+
+    const n = positions.length; // n images → n+1 positions
+    const hasDividers = this.dividerEls.length > 0;
+
+    if (closestIdx > 0 && closestIdx < n - 1 && hasDividers) {
+      // Internal position → highlight the corresponding physical divider
+      const divIndex = closestIdx - 1; // positions[1] maps to dividerEls[0]
+      if (divIndex < this.dividerEls.length) {
+        this.dividerEls[divIndex].style.backgroundColor = "#4a9eff";
+        this.dividerEls[divIndex].classList.add(CLASSES.dividerActive);
+      }
+    } else if (closestIdx === 0) {
+      // Left edge → inset shadow on the container
+      this.container.style.boxShadow = "inset 3px 0 0 0 #4a9eff";
+    } else {
+      // Right edge
+      this.container.style.boxShadow = "inset -3px 0 0 0 #4a9eff";
+    }
+  }
+
+  /**
+   * Compute the insert-at index from cursorX using divider positions.
+   * This is the single source of truth for both item-level and container-level
+   * drop handlers, ensuring the drop position matches the hint line.
+   */
+  private getInsertAt(cursorX: number): number {
+    const containerRect = this.container!.getBoundingClientRect();
+    const widths = this.itemEls.map(el => el.getBoundingClientRect().width);
+    const positions = computeDividerXPositions(containerRect.left, widths, this.options.gap);
+    const closestIdx = findClosestDividerIndex(cursorX, positions, 60);
+    if (closestIdx !== null) return closestIdx;
+    // Fallback: binary choice based on container center
+    return cursorX < containerRect.left + containerRect.width / 2 ? 0 : this.itemEls.length;
+  }
+
+  /** Clear all drag-over highlight states. */
+  private hideDividerHint(): void {
+    for (const div of this.dividerEls) {
+      div.style.backgroundColor = "";
+      div.classList.remove(CLASSES.dividerActive);
+    }
+    if (this.container) {
+      this.container.style.boxShadow = "";
     }
   }
 

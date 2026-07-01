@@ -31,7 +31,7 @@ export default class DragImageAutoArrangePlugin
 
   async onload(): Promise<void> {
     // Init file logger (hardcoded path for debugging)
-    logger.init(
+    await logger.init(
       this.app.vault.adapter,
       ".obsidian/plugins/obsidian-DragImageAutoArrange/log.txt"
     );

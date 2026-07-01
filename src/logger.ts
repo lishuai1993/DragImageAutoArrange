@@ -16,12 +16,13 @@ class Logger {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private flushing = false;
 
-  /** Call once during plugin load to enable file logging. Clears previous log. */
-  init(adapter: DataAdapter, logPath: string): void {
+  /** Call once during plugin load to enable file logging. */
+  async init(adapter: DataAdapter, logPath: string): Promise<void> {
     this.adapter = adapter;
     this.logPath = logPath;
-    // Clear previous session's log
-    adapter.write(logPath, "").catch(() => {});
+    // Clear stale log from previous session, then start fresh.
+    // Await ensures the clear completes before the first flush (5 s later).
+    try { await this.adapter.write(logPath, ""); } catch { /* ignore */ }
     console.log(`[DragImg] Logger initialized, logPath=${logPath}`);
     this.flushTimer = setInterval(() => this.flush(), 5000);
   }

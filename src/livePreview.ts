@@ -128,7 +128,9 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
   const localTarget = targetLine - minLine;
 
   const [moved] = originalLines.splice(localSrc, 1);
-  const insertAt = localTarget;
+  // When source is before target, the target index shifts left by one
+  // after the source line is removed.
+  const insertAt = localSrc < localTarget ? localTarget - 1 : localTarget;
   originalLines.splice(insertAt, 0, moved);
 
   const insert = originalLines.join("\n") + (hadTrailingNewline ? "\n" : "");
@@ -149,7 +151,7 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
  */
 /** Strip everything between the first | and ]] so widget equality ignores
  * width/dimension metadata — only the image file name matters for identity. */
-function normalizeRaw(raw: string): string {
+export function normalizeRaw(raw: string): string {
   return raw.replace(/\|[^\]]*(?=\]\])/, "");
 }
 
@@ -436,7 +438,7 @@ class StaticImageRowWidget extends WidgetType {
 }
 
 /** Replace or remove the |width parameter in an image embed line. */
-function updateImageLineWidth(raw: string, flexGrow: number): string {
+export function updateImageLineWidth(raw: string, flexGrow: number): string {
   const widthValue = Math.round(flexGrow * 100);
   // Strip everything between file extension and ]] (handles |width, |WxH, |width|WxH)
   let out = raw.replace(/\|[^\]]*(?=\]\])/, "");

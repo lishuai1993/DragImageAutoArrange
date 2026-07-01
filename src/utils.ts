@@ -46,3 +46,26 @@ export function throttle<T extends (...args: any[]) => void>(
     }, delay);
   }) as T;
 }
+
+/**
+ * Move a line within a range of lines from `fromIndex` to `toIndex`.
+ *
+ * Extracted from `moveLine` in livePreview.ts — the splice adjustment
+ * logic when fromIndex < toIndex is the source-of-truth for this operation.
+ *
+ * Returns a new array (does not mutate the input).
+ */
+export function moveLineInRange(
+  lines: string[],
+  fromIndex: number,
+  toIndex: number
+): string[] {
+  if (lines.length === 0) return [];
+  const result = [...lines];
+  const [moved] = result.splice(fromIndex, 1);
+  // When source is before target, the target index shifts left by one
+  // after the source line is removed.
+  const insertAt = fromIndex < toIndex ? toIndex - 1 : toIndex;
+  result.splice(insertAt, 0, moved);
+  return result;
+}

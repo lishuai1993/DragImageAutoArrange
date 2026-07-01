@@ -6,9 +6,19 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "lint": "tsc -noEmit -skipLibCheck"
+    "lint": "tsc -noEmit -skipLibCheck",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
-  "keywords": ["obsidian", "plugin", "image", "gallery", "grid", "drag", "arrange"],
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "image",
+    "gallery",
+    "grid",
+    "drag",
+    "arrange"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -19,6 +29,7 @@
     "esbuild": "^0.21.0",
     "obsidian": "latest",
     "tslib": "^2.6.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.9"
   }
 }
