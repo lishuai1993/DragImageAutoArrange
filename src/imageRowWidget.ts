@@ -549,12 +549,31 @@ export class ImageRowWidget {
     // When item is a flex container (e.g. for alignment), the img element
     // may be offset from the item's top-left.  Add that offset so resize
     // handles track the actual visual position of the image.
-    return {
-      left: contentRect.left + img.offsetLeft,
-      top: contentRect.top + img.offsetTop,
+    const offsetLeft = img.offsetLeft;
+    const offsetTop = img.offsetTop;
+
+    const result = {
+      left: contentRect.left + offsetLeft,
+      top: contentRect.top + offsetTop,
       width: contentRect.width,
       height: contentRect.height,
     };
+    logger.debug("getImageContentRect", {
+      index,
+      itemW: item.clientWidth,
+      itemH: item.clientHeight,
+      imgW: img.clientWidth,
+      imgH: img.clientHeight,
+      imgOffsetLeft: offsetLeft,
+      imgOffsetTop: offsetTop,
+      contentLeft: contentRect.left,
+      contentTop: contentRect.top,
+      contentW: contentRect.width,
+      contentH: contentRect.height,
+      resultLeft: result.left,
+      resultTop: result.top,
+    });
+    return result;
   }
 
   /** Reposition resize handles to match the actual image content rect. */
@@ -567,9 +586,21 @@ export class ImageRowWidget {
     for (const hd of defs) {
       // Position handles snug INSIDE the image content edges.
       // relX=0 → left edge, relX=1 → right edge, relX=0.5 → horizontal center.
-      hd.el.style.left = (hd.relX * (rect.width - SZ)) + "px";
-      hd.el.style.top = (hd.relY * (rect.height - SZ)) + "px";
+      // Add rect.left / rect.top to account for the img element's offset
+      // within the item (e.g. when flex justify-content pushes it right).
+      hd.el.style.left = (rect.left + hd.relX * (rect.width - SZ)) + "px";
+      hd.el.style.top = (rect.top + hd.relY * (rect.height - SZ)) + "px";
     }
+    logger.debug("updateHandlePositions", {
+      index,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      rectW: rect.width,
+      rectH: rect.height,
+      handleCount: defs.length,
+      firstHandleLeft: defs[0]?.el.style.left,
+      firstHandleTop: defs[0]?.el.style.top,
+    });
   }
 
   /** Reposition all resize handles after a layout change. */
