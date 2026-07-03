@@ -11,7 +11,26 @@
       "Read(//d/work/custom/.obsidian/plugins/obsidian-DragImageAutoArrange/**)",
       "Read(//d/work/custom/.obsidian/**)",
       "Bash(chmod +x node_modules/.bin/tsc node_modules/.bin/esbuild node_modules/.bin/tsserver)",
-      "Bash(npx esbuild *)"
+      "Bash(npx esbuild *)",
+      "Bash(npx --yes esbuild --version)",
+      "Bash(chmod +x node_modules/.bin/esbuild)",
+      "Bash(chmod +x node_modules/@esbuild/darwin-arm64/bin/esbuild)",
+      "Bash(node *)",
+      "Bash(xxd)",
+      "Bash(python3 *)",
+      "Bash(npx vitest *)",
+      "Bash(python normalize_headings.py test_headings.md)",
+      "Bash(python normalize_headings.py test_already_numbered.md)",
+      "Bash(python normalize_headings.py --stdin)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import sys; print\\(sys.path[:3]\\)\")",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(rm -rf __pycache__)",
+      "Bash(python normalize_headings.py --help)",
+      "Bash(python)",
+      "Bash(npm test *)",
+      "Bash(chmod +x node_modules/.bin/vitest node_modules/.bin/vite)",
+      "Bash(grep *)"
     ]
   }
 }

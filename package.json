@@ -24,9 +24,11 @@
   "devDependencies": {
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.26.0",
+    "@types/jsdom": "^28.0.3",
     "@types/node": "^20.0.0",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.0",
+    "jsdom": "^29.1.1",
     "obsidian": "latest",
     "tslib": "^2.6.0",
     "typescript": "^5.4.0",

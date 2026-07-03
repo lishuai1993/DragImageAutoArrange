@@ -9,6 +9,7 @@ import {
 import {
   RangeSetBuilder,
   StateField,
+  StateEffect,
   Prec,
   Annotation,
 } from "@codemirror/state";
@@ -208,6 +209,11 @@ class StaticImageRowWidget extends WidgetType {
     if (this.options.ghostImageWidth !== other.options.ghostImageWidth) return false;
     if (this.options.topBarSensitivity !== other.options.topBarSensitivity) return false;
     if (this.options.dragOpacity !== other.options.dragOpacity) return false;
+    if (this.options.alignment !== other.options.alignment) return false;
+    if (this.options.defaultRowHeight !== other.options.defaultRowHeight) return false;
+    if (this.options.gap !== other.options.gap) return false;
+    if (this.options.enableResize !== other.options.enableResize) return false;
+    if (this.options.enableDividers !== other.options.enableDividers) return false;
     for (let i = 0; i < a.images.length; i++) {
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
     }
@@ -224,9 +230,20 @@ class StaticImageRowWidget extends WidgetType {
       this.innerWidget = new ImageRowWidget(this.group, this.options);
       const el = this.innerWidget.build();
 
-      // Notify CodeMirror when the widget height changes after images load
+      // Notify CodeMirror when the widget height changes.
+      // Use StateEffect to force an actual state change so CM6 runs
+      // the full update cycle (measure → viewport → gutter sync).
+      let version = 0;
       this.innerWidget.onLayoutChange = () => {
-        this.editorView?.requestMeasure();
+        const view = this.editorView;
+        if (!view) return;
+        logger.debug("StaticImageRowWidget onLayoutChange → forceLayoutRefresh", {
+          hasView: !!view,
+          version: version + 1,
+        });
+        view.dispatch({
+          effects: forceLayoutRefresh.of(++version),
+        });
       };
 
       // Set up drag reorder within this row
@@ -245,7 +262,20 @@ class StaticImageRowWidget extends WidgetType {
 
       return el;
     } catch (e) {
-      logger.error("StaticImageRowWidget toDOM error", { error: String(e) });
+      logger.error("StaticImageRowWidget toDOM error", {
+        error: String(e),
+        stack: (e as Error)?.stack ?? "no stack",
+        options: {
+          alignment: this.options.alignment,
+          defaultRowHeight: this.options.defaultRowHeight,
+          gap: this.options.gap,
+        },
+        group: {
+          imageCount: this.group.images.length,
+          lineStart: this.group.lineStart,
+          lineEnd: this.group.lineEnd,
+        },
+      });
       const fallback = document.createElement("span");
       fallback.textContent = "(image row render error)";
       return fallback;
@@ -421,7 +451,23 @@ class StaticImageRowWidget extends WidgetType {
   destroy(): void {
     logger.debug("StaticImageRowWidget destroyed");
     if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = null;
+    // Persist flex-grows only for multi-image rows, and only when the values
+    // differ from the originals (avoids unnecessary doc changes for single-image
+    // rows where flex is always "0 0 auto", and for unchanged multi-image rows).
+    if (this.editorView && this.innerWidget && this.group.images.length > 1) {
+      const view = this.editorView;
+      const images = this.group.images;
+      const grows = this.innerWidget.getCurrentFlexGrows();
+      // Only persist if any flex-grow differs from the persisted markdown value
+      const hasChanges = grows.some((g, i) => {
+        return Math.abs(g - images[i].flexGrow) > 0.005;
+      });
+      if (hasChanges) {
+        this.persistTimer = setTimeout(() => {
+          applyFlexGrowChanges(view, images, grows);
+        }, 0);
+      }
+    }
     this.innerWidget?.destroy();
     this.innerWidget = null;
   }
@@ -572,6 +618,25 @@ function buildDecorations(
 /** Dispatch this annotation to force a decoration rebuild (e.g. after settings change). */
 export const settingsChanged = Annotation.define<boolean>();
 
+/**
+ * StateEffect and StateField to force CM6 to run a full update cycle
+ * (viewport re-measurement + gutter sync) during interactive resize drag.
+ *
+ * Without this, dispatch({}) is a no-op because startState === state,
+ * so CM6 skips the entire update cycle and line numbers never reflow.
+ * Each dispatch increments a counter, guaranteeing state actually changes.
+ */
+export const forceLayoutRefresh = StateEffect.define<number>();
+export const layoutVersionField = StateField.define<number>({
+  create() { return 0; },
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(forceLayoutRefresh)) return e.value;
+    }
+    return value;
+  }
+});
+
 export function createLivePreviewPlugin(
   getOptions: () => ImageRowOptions,
   getSettings: () => DragImageSettings,
@@ -606,7 +671,7 @@ export function createLivePreviewPlugin(
     provide: (f) => EditorView.decorations.from(f),
   });
 
-  return Prec.highest(field);
+  return [layoutVersionField, Prec.highest(field)];
 }
 
 /**

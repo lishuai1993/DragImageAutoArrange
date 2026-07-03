@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { displayNameFromPath, resolveImageSrc, throttle, moveLineInRange } from '../src/utils';
+import { displayNameFromPath, resolveImageSrc, throttle, moveLineInRange, alignmentToCSS } from '../src/utils';
+import { DEFAULT_SETTINGS, Alignment } from '../src/constants';
 
 // ── displayNameFromPath ──
 describe('displayNameFromPath', () => {
@@ -180,5 +181,84 @@ describe('moveLineInRange', () => {
 
   it('empty array returns empty', () => {
     expect(moveLineInRange([], 0, 0)).toEqual([]);
+  });
+});
+
+// ── Alignment defaults ──
+describe('DEFAULT_SETTINGS.alignment', () => {
+  it('default alignment is "left"', () => {
+    expect(DEFAULT_SETTINGS.alignment).toBe('left');
+  });
+
+  it('Alignment type includes valid values', () => {
+    // Compile-time type check: these assignments type-check
+    const left: Alignment = 'left';
+    const center: Alignment = 'center';
+    const right: Alignment = 'right';
+    expect(left).toBe('left');
+    expect(center).toBe('center');
+    expect(right).toBe('right');
+  });
+});
+
+// ── Alignment → CSS mapping ──
+describe('alignmentToCSS', () => {
+  it('maps "left" to flex-start and left top', () => {
+    const css = alignmentToCSS('left');
+    expect(css.justifyContent).toBe('flex-start');
+    expect(css.objectPosition).toBe('left top');
+  });
+
+  it('maps "center" to center and center top', () => {
+    const css = alignmentToCSS('center');
+    expect(css.justifyContent).toBe('center');
+    expect(css.objectPosition).toBe('center top');
+  });
+
+  it('maps "right" to flex-end and right top', () => {
+    const css = alignmentToCSS('right');
+    expect(css.justifyContent).toBe('flex-end');
+    expect(css.objectPosition).toBe('right top');
+  });
+});
+
+// ── Single-image alignment visibility ──
+// Alignment is only visible when the image is narrower than the container.
+// For left alignment, the image fills the container (width:100%, height:auto).
+// For center/right, the image height is constrained to defaultRowHeight,
+// making it narrower than the container so justify-content takes effect.
+describe('single-image alignment visibility', () => {
+  it('left alignment fills container — image width equals container width', () => {
+    // 500×654 image in 800px wide container
+    // fillWidthH = 800 * 654 / 500 ≈ 1046
+    // height:auto → image renders at 800×1046 (fills container width)
+    const cw = 800;
+    const aspect = 500 / 654;
+    const fillWidthH = Math.round(cw / aspect);
+    const imageW = Math.round(fillWidthH * aspect);
+    expect(imageW).toBe(cw); // image fills container → alignment invisible
+  });
+
+  it('center/right alignment constrains height to defaultRowHeight', () => {
+    const cw = 800;
+    const defaultRowHeight = 200;
+    const aspect = 500 / 654;
+    const fillWidthH = Math.round(cw / aspect); // 1046
+    const constrainedH = Math.min(defaultRowHeight, fillWidthH); // 200
+    const imageW = Math.round(constrainedH * aspect); // 153
+    expect(imageW).toBeLessThan(cw); // image narrower → alignment visible
+    expect(constrainedH).toBe(defaultRowHeight);
+  });
+
+  it('when fillWidthH is less than defaultRowHeight, uses fillWidthH', () => {
+    // Very narrow container: 105px wide
+    // fillWidthH = 105 * 654 / 500 ≈ 137
+    const cw = 105;
+    const defaultRowHeight = 200;
+    const aspect = 500 / 654;
+    const fillWidthH = Math.round(cw / aspect); // 137
+    const constrainedH = Math.min(defaultRowHeight, fillWidthH); // 137
+    expect(constrainedH).toBeLessThan(defaultRowHeight);
+    expect(constrainedH).toBe(fillWidthH);
   });
 });

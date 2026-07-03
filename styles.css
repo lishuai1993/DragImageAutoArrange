@@ -222,9 +222,7 @@
    so it doesn't interfere with our flex layout, and hide the handles
    since our plugin provides its own. */
 .drag-img-row .image-resize-container {
-  display: block !important;
-  width: 100% !important;
-  height: 100% !important;
+  display: contents !important;
 }
 
 .drag-img-row .image-resize-handle {

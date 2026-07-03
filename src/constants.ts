@@ -16,6 +16,8 @@ export const CLASSES = {
   resizing: `${CSS_PREFIX}-resizing`,
 } as const;
 
+export type Alignment = "left" | "center" | "right";
+
 export const DEFAULT_SETTINGS = {
   enabled: true,
   defaultRowHeight: 200,
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   topBarSensitivity: 12,
   ghostImageWidth: 120,
   dragOpacity: 60,
+  alignment: "left" as Alignment,
 } as const;
 
 export const MIN_IMAGE_WIDTH = 50;

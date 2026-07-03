@@ -27,6 +27,7 @@ export default class DragImageAutoArrangePlugin
     topBarSensitivity: 12,
     ghostImageWidth: 120,
     dragOpacity: 60,
+    alignment: "left",
   };
 
   async onload(): Promise<void> {
@@ -124,11 +125,16 @@ export default class DragImageAutoArrangePlugin
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    // Notify Live Preview editors so they rebuild decorations with fresh options
+    // Notify both Live Preview and Reading Mode views so they rebuild with fresh options
     this.app.workspace.iterateAllLeaves((leaf) => {
+      // Live Preview / Source mode: dispatch settingsChanged annotation to rebuild decorations
       const cm = (leaf.view as any)?.editor?.cm;
       if (cm?.dispatch) {
         cm.dispatch({ annotations: [settingsChanged.of(true)] });
+      }
+      // Reading Mode: force re-render so post-processor picks up new alignment
+      if (leaf.view instanceof MarkdownView && leaf.view.previewMode) {
+        leaf.view.previewMode.rerender(true);
       }
     });
   }
@@ -145,6 +151,7 @@ export default class DragImageAutoArrangePlugin
       topBarSensitivity: this.settings.topBarSensitivity,
       ghostImageWidth: this.settings.ghostImageWidth,
       dragOpacity: this.settings.dragOpacity,
+      alignment: this.settings.alignment,
       getResourcePath: (fileName: string) => {
         const url = this.resolveImagePath(fileName, sourcePath);
         if (!url) {

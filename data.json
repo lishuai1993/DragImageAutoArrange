@@ -10,5 +10,6 @@
   "imageExtensions": "png,jpg,jpeg,gif,webp,svg,bmp,avif",
   "topBarSensitivity": 12,
   "ghostImageWidth": 400,
-  "dragOpacity": 30
+  "dragOpacity": 30,
+  "alignment": "right"
 }

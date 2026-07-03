@@ -69,3 +69,13 @@ export function moveLineInRange(
   result.splice(insertAt, 0, moved);
   return result;
 }
+
+/** Map the global alignment setting to CSS flexbox and object-position values. */
+export function alignmentToCSS(alignment: "left" | "center" | "right"): {
+  justifyContent: string;
+  objectPosition: string;
+} {
+  if (alignment === "center") return { justifyContent: "center", objectPosition: "center top" };
+  if (alignment === "right") return { justifyContent: "flex-end", objectPosition: "right top" };
+  return { justifyContent: "flex-start", objectPosition: "left top" };
+}

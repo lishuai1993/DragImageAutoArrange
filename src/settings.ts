@@ -1,6 +1,8 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 
+import { Alignment } from "./constants";
+
 export interface DragImageSettings {
   enabled: boolean;
   defaultRowHeight: number;
@@ -14,6 +16,7 @@ export interface DragImageSettings {
   topBarSensitivity: number;
   ghostImageWidth: number;
   dragOpacity: number;
+  alignment: Alignment;
 }
 
 export interface IDragImagePlugin {
@@ -182,6 +185,21 @@ export class DragImageSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.enableDividers)
           .onChange(async (value) => {
             this.plugin.settings.enableDividers = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Image alignment")
+      .setDesc("Horizontal alignment of images within the row container.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("left", "Left")
+          .addOption("center", "Center")
+          .addOption("right", "Right")
+          .setValue(this.plugin.settings.alignment)
+          .onChange(async (value) => {
+            this.plugin.settings.alignment = value as Alignment;
             await this.plugin.saveSettings();
           })
       );

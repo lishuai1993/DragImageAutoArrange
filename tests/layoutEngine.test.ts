@@ -110,6 +110,21 @@ describe('computeRowHeight', () => {
     expect(h).toBe(2000);
   });
 
+  it('single image at min clamp (50px)', () => {
+    // Very wide image: 4000×100, aspect=40
+    // height = 800/40 = 20 → clamped to 50
+    const h = computeRowHeight([1], [m(4000, 100)], 800, 0, 200);
+    expect(h).toBe(50);
+  });
+
+  it('single image with gap (gap is ignored for n=1)', () => {
+    // Gap doesn't affect single image: availableWidth = containerWidth - 0
+    const hNoGap = computeRowHeight([1], [m(1600, 900)], 800, 0, 200);
+    const hWithGap = computeRowHeight([1], [m(1600, 900)], 800, 20, 200);
+    expect(hNoGap).toBe(450);
+    expect(hWithGap).toBe(450);
+  });
+
   it('two images with different flex', () => {
     // available = 800-4 = 796, totalGrow = 3
     // img0: w = 796*2/3 = 530.67, h = 530.67/(1600/900) = 298.5
@@ -196,6 +211,57 @@ describe('computeImageContentRect', () => {
     expect(r.width).toBe(543);
     expect(r.height).toBeCloseTo(543 / (500 / 654), 0); // 710
     expect(r.height).toBeLessThan(1000); // dead zone above image
+  });
+
+  // ── fill-width boundary (zoom mode transition point) ──
+  // fillWidthH = containerWidth * naturalHeight / naturalWidth
+  // At this height the image exactly fills the container width under
+  // object-fit:contain. Below it the image is height-constrained;
+  // above it the image is width-constrained and cannot grow further
+  // — which is why we switch to object-fit:cover in zoom mode.
+
+  it('at fill-width height, image content exactly fills container', () => {
+    // 1920×1440 (aspect 1.333) in 972px wide container
+    // fillWidthH = 972 * 1440 / 1920 = 729
+    const r = computeImageContentRect(972, 729, m(1920, 1440))!;
+    expect(r.width).toBeCloseTo(972, 0);
+    expect(r.height).toBeCloseTo(729, 0);
+  });
+
+  it('above fill-width height, contain mode caps content height at fillWidthH', () => {
+    // Same image at 900px tall — should still render at 729px content height
+    // imgAspect = 1.333, ctrAspect = 972/900 = 1.08
+    // imageAspect > containerAspect → width-constrained
+    const r = computeImageContentRect(972, 900, m(1920, 1440))!;
+    expect(r.width).toBeCloseTo(972, 0);
+    expect(r.height).toBeCloseTo(729, 0); // capped at fillWidthH, not 900
+  });
+
+  it('below fill-width height, image content fills container height', () => {
+    // Same image at 500px tall
+    // imgAspect = 1.333, ctrAspect = 972/500 = 1.944
+    // imageAspect < containerAspect → height-constrained
+    const r = computeImageContentRect(972, 500, m(1920, 1440))!;
+    expect(r.height).toBe(500);
+    expect(r.width).toBeCloseTo(500 * (1920 / 1440), 0); // 667
+  });
+
+  it('fill-width boundary for tall image (aspect < 1)', () => {
+    // 500×654 (aspect 0.765) in 800px wide container
+    // fillWidthH = 800 * 654 / 500 = 1046.4 → 1046
+    // At fillWidthH: ctrAspect = 800/1046 = 0.765 = imgAspect → height-constrained
+    const r = computeImageContentRect(800, 1046, m(500, 654))!;
+    expect(r.width).toBeCloseTo(800, 0);
+    expect(r.height).toBeCloseTo(1046, 0);
+  });
+
+  it('contain mode dead zone: tall image above fill-width stays capped', () => {
+    // Same image at 1500px tall — still at fillWidthH
+    // ctrAspect = 800/1500 = 0.533, imgAspect = 0.765
+    // imageAspect > containerAspect → width-constrained
+    const r = computeImageContentRect(800, 1500, m(500, 654))!;
+    expect(r.width).toBeCloseTo(800, 0);
+    expect(r.height).toBeCloseTo(1046, 0); // capped, not 1500
   });
 });
 

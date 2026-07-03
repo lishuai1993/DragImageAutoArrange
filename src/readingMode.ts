@@ -1,6 +1,7 @@
 import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
 import { CLASSES } from "./constants";
 import { ImageRowOptions } from "./imageRowWidget";
+import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
 
 /**
@@ -130,7 +131,8 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   const row = document.createElement("div");
   row.className = CLASSES.row;
   row.setAttribute("data-diaa-group", "true");
-  row.style.cssText = `display:flex;align-items:flex-start;gap:${options.gap}px;width:100%;overflow:hidden;`;
+  const { justifyContent, objectPosition } = alignmentToCSS(options.alignment);
+  row.style.cssText = `display:flex;align-items:flex-start;justify-content:${justifyContent};gap:${options.gap}px;width:100%;overflow:hidden;`;
 
   let rowH = options.defaultRowHeight;
   const firstImg = embeds[0].querySelector("img");
@@ -143,7 +145,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     b.style.cssText = `flex:1 1 0;overflow:hidden;min-width:50px;position:relative;margin:0;padding:0;`;
     const imgs = Array.from(b.querySelectorAll<HTMLImageElement>("img"));
     for (const img of imgs) {
-      img.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;";
+      img.style.cssText = `width:100%;height:100%;object-fit:contain;object-position:${objectPosition};display:block;`;
     }
     row.appendChild(b);
   }

@@ -1,8 +1,24 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE } from "./constants";
 import { ImageGroup, ImageEmbed, ImageMeta } from "./imageDetector";
 import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeDividerXPositions, findClosestDividerIndex } from "./layoutEngine";
-import { resolveImageSrc } from "./utils";
+import { resolveImageSrc, alignmentToCSS } from "./utils";
 import { logger } from "./logger";
+
+/**
+ * Preserved single-image rendered sizes keyed by group lineStart.
+ * When a widget is destroyed (e.g. due to alignment change) the current
+ * image size is stored here.  The new widget picks it up in applyLayout()
+ * so the image keeps the same rendered dimensions.
+ */
+const preservedImageSizes = new Map<number, { width: number; height: number }>();
+/** Preserved multi-image inline style dimensions keyed by group lineStart.
+ *  Saved on destroy, restored in applyLayout before any other layout path,
+ *  so corner-handle per-image height adjustments survive widget recreation. */
+const preservedMultiImageSizes = new Map<number, {
+  images: Array<{ styleW: string; styleH: string }>;
+  items: Array<{ flexGrow: string; styleH: string }>;
+  containerStyleH: string;
+}>();
 
 export interface ImageRowOptions {
   defaultRowHeight: number;
@@ -13,6 +29,7 @@ export interface ImageRowOptions {
   topBarSensitivity: number;
   ghostImageWidth: number;
   dragOpacity: number;
+  alignment: "left" | "center" | "right";
   getResourcePath: (fileName: string) => string;
 }
 
@@ -40,6 +57,10 @@ export class ImageRowWidget {
   private resizeHandles: HTMLElement[][] = [];
   private handleDefs: HandleDef[][] = [];
   private resizeObserver: ResizeObserver | null = null;
+  private edgeLeft: HTMLElement | null = null;
+  private edgeRight: HTMLElement | null = null;
+  private docDragOver: ((e: DragEvent) => void) | null = null;
+  private docDrop: ((e: DragEvent) => void) | null = null;
 
   private group: ImageGroup;
   private options: ImageRowOptions;
@@ -83,6 +104,106 @@ export class ImageRowWidget {
     return this.itemEls.map((el) => parseFloat(el.style.flexGrow || "1"));
   }
 
+  /** Update alignment in-place without recreating the widget. */
+  updateAlignment(alignment: "left" | "center" | "right"): void {
+    const css = alignmentToCSS(alignment);
+    this.options.alignment = alignment;
+    if (this.container) {
+      this.container.style.setProperty("justify-content", css.justifyContent, "important");
+    }
+    for (let i = 0; i < this.imageEls.length; i++) {
+      const img = this.imageEls[i];
+      const item = this.itemEls[i];
+      // Level 1: position img element within item
+      if (item) {
+        item.style.display = "flex";
+        item.style.setProperty("justify-content", css.justifyContent, "important");
+        item.style.alignItems = "flex-start";
+      }
+      // Level 2: position image content within img element
+      img.style.setProperty("object-position", css.objectPosition, "important");
+    }
+  }
+
+  /** Map the global alignment setting to CSS object-position value. */
+  private getObjectPosition(): string {
+    return alignmentToCSS(this.options.alignment).objectPosition;
+  }
+
+  /**
+   * Re-apply alignment CSS to container + all items + all img elements.
+   * Called at the end of every layout path.
+   *
+   * Two-level alignment:
+   *   Level 1 (item):   use flex justify-content on each item to position
+   *                      the img element within the item. This is the
+   *                      visible effect when the img is narrower than its
+   *                      item (e.g. after corner-handle resize).
+   *   Level 2 (img):    set object-position on the img so the image content
+   *                      is positioned within the img element (visible when
+   *                      the image content is narrower than the img element).
+   */
+  private applyAlignmentToAll(): void {
+    const css = alignmentToCSS(this.options.alignment);
+    logger.debug("applyAlignmentToAll", {
+      settingsAlignment: this.options.alignment,
+      cssObjectPosition: css.objectPosition,
+      imageCount: this.imageEls.length,
+    });
+    if (this.container) {
+      this.container.style.setProperty("justify-content", css.justifyContent, "important");
+    }
+    for (let i = 0; i < this.imageEls.length; i++) {
+      const img = this.imageEls[i];
+      const item = this.itemEls[i];
+      // Level 1: position img element within its item via flex
+      if (item) {
+        item.style.display = "flex";
+        item.style.setProperty("justify-content", css.justifyContent, "important");
+        item.style.alignItems = "flex-start";
+      }
+      // Level 2: position image content within img element
+      img.style.objectFit = "contain";
+      img.style.setProperty("object-position", css.objectPosition, "important");
+      logger.debug("applyAlignmentToAll per-image", {
+        index: i,
+        settingsAlignment: this.options.alignment,
+        writtenObjectPosition: img.style.objectPosition,
+        expectedObjectPosition: css.objectPosition,
+      });
+    }
+    // Delayed check: what does the browser ACTUALLY render?
+    // Inline "right top" with !important should win, but if computed
+    // stays "left top", something is overriding it after our write.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        for (let i = 0; i < this.imageEls.length; i++) {
+          const img = this.imageEls[i];
+          if (!img || !img.isConnected) continue;
+          const cs = getComputedStyle(img);
+          const rect = img.getBoundingClientRect();
+          const itemRect = this.itemEls[i]?.getBoundingClientRect();
+          const meta = this.loadedMetas.get(i);
+          logger.debug("applyAlignmentToAll COMPUTED check", {
+            index: i,
+            settingsAlignment: this.options.alignment,
+            inlineOP: img.style.objectPosition,
+            inlineOF: img.style.objectFit,
+            inlineW: img.style.width,
+            inlineH: img.style.height,
+            computedOP: cs.objectPosition,
+            computedOF: cs.objectFit,
+            imgRenderedW: Math.round(rect.width),
+            imgRenderedH: Math.round(rect.height),
+            itemRenderedW: itemRect ? Math.round(itemRect.width) : 0,
+            naturalW: meta?.naturalWidth ?? 0,
+            naturalH: meta?.naturalHeight ?? 0,
+          });
+        }
+      });
+    });
+  }
+
   /**
    * Create and return the root DOM element.
    */
@@ -105,8 +226,22 @@ export class ImageRowWidget {
     this.container.style.display = "flex";
     this.container.style.alignItems = "flex-start";
     this.container.style.gap = `${this.options.gap}px`;
+    // Apply alignment — use "important" to prevent CSS (Obsidian or our own) from overriding
+    this.container.style.setProperty("justify-content", alignmentToCSS(this.options.alignment).justifyContent, "important");
     this.container.style.width = "100%";
     this.container.style.overflow = "hidden";
+    this.container.style.position = "relative";
+
+    // Edge indicators: absolutely-positioned lines that render above images
+    // so they are always visible when the cursor targets the left/right edges.
+    const makeEdge = (side: "left" | "right") => {
+      const el = document.createElement("div");
+      el.style.cssText = `display:none;position:absolute;top:0;bottom:0;width:3px;${side}:0;background-color:#4a9eff;pointer-events:none;z-index:10`;
+      this.container!.appendChild(el);
+      return el;
+    };
+    this.edgeLeft = makeEdge("left");
+    this.edgeRight = makeEdge("right");
 
     // Top hover bar (visual indicator only — pointer-events: none so it
     // never blocks resize handles at the top edge of images).
@@ -159,6 +294,18 @@ export class ImageRowWidget {
       this.container.appendChild(item);
     }
 
+    // Set single-image base sizing immediately so it never appears at a wrong size.
+    if (images.length === 1) {
+      const preserved = preservedImageSizes.get(this.group.lineStart);
+      const h = preserved ? preserved.height : this.options.defaultRowHeight;
+      const w = preserved ? `${preserved.width}px` : "auto";
+      this.imageEls[0].style.width = w;
+      this.imageEls[0].style.height = `${h}px`;
+      this.itemEls[0].style.flex = "0 0 auto";
+      this.itemEls[0].style.height = "";
+      this.container.style.height = "";
+    }
+
     // ResizeObserver: auto-update handle positions when ANY layout change
     // occurs (our resize, Obsidian native resize, window resize, etc.)
     this.resizeObserver = new ResizeObserver(() => {
@@ -189,11 +336,20 @@ export class ImageRowWidget {
     const img = document.createElement("img");
     img.className = CLASSES.imageInner;
     img.alt = image.fileName;
+    // Prevent Obsidian from wrapping this img in .image-resize-container,
+    // which causes DOM mutations on hover that produce visual flashing.
+    img.contentEditable = "false";
     img.style.display = "block";
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.objectFit = "contain";
-    img.style.objectPosition = "left top";
+    img.style.setProperty("object-position", this.getObjectPosition(), "important");
+    logger.debug("buildImageItem object-position", {
+      index,
+      file: image.fileName,
+      settingsAlignment: this.options.alignment,
+      writtenObjectPosition: img.style.objectPosition,
+    });
     img.dataset.index = String(index);
 
     // Set onload BEFORE src so cached images don't fire synchronously
@@ -379,13 +535,26 @@ export class ImageRowWidget {
     // most recent style changes (height updates, flex-grow changes, etc.).
     void item.offsetHeight;
 
-    const cw = item.clientWidth;
-    const ch = item.clientHeight;
-
     const meta = this.loadedMetas.get(index);
     if (!meta || meta.naturalWidth === 0) return null;
 
-    return computeImageContentRect(cw, ch, meta);
+    // Use the img element's own dimensions (not the item's), because the
+    // img may be narrower/taller than the item when flex-aligned or when
+    // its inline width/height differ from the item.
+    const iw = img.clientWidth;
+    const ih = img.clientHeight;
+    const contentRect = computeImageContentRect(iw, ih, meta);
+    if (!contentRect) return null;
+
+    // When item is a flex container (e.g. for alignment), the img element
+    // may be offset from the item's top-left.  Add that offset so resize
+    // handles track the actual visual position of the image.
+    return {
+      left: contentRect.left + img.offsetLeft,
+      top: contentRect.top + img.offsetTop,
+      width: contentRect.width,
+      height: contentRect.height,
+    };
   }
 
   /** Reposition resize handles to match the actual image content rect. */
@@ -463,7 +632,6 @@ export class ImageRowWidget {
       let startHeight = 0;
       let startDisplayH = 0;
       let startItemHeights: number[] = [];
-      let maxHeight = 2000;
       let scale = 1;
       let nItems = 0;
       handle.onmousedown = (e) => {
@@ -487,7 +655,10 @@ export class ImageRowWidget {
         }
         startFlex = grows[index];
         startWidth = (startFlex / totalG) * AW;
-        startHeight = parseFloat(this.container!.style.height || "0");
+        // Container height may be auto for single-image rows; fall back to
+        // the actual rendered height from getBoundingClientRect.
+        const explicitH = parseFloat(this.container!.style.height || "");
+        startHeight = isNaN(explicitH) ? containerRect.height : explicitH;
 
         // Snapshot each image's current item height so resizing one
         // image doesn't overwrite manual height adjustments on others.
@@ -499,13 +670,12 @@ export class ImageRowWidget {
 
         // For single-image rows, cap height at the point where the image
         // fills the full container width — beyond that the image won't grow.
-        if (nItems === 1) {
-          const meta = this.loadedMetas.get(index);
-          if (meta && meta.naturalWidth > 0) {
-            const aspect = meta.naturalWidth / meta.naturalHeight;
-            maxHeight = aspect > 0 ? Math.round(AW / aspect) : 2000;
-          }
-        }
+        // In zoom mode (beyond fill-width), we switch to object-fit: cover
+        // so the image and container "lock" and grow together.
+        const meta = this.loadedMetas.get(index);
+        const fillWidthH = meta && meta.naturalWidth > 0
+          ? Math.round(AW * meta.naturalHeight / meta.naturalWidth)
+          : startHeight;
 
         // Scale: image-content width to item-width ratio.
         // When object-fit:contain makes the image narrower than the item,
@@ -530,9 +700,6 @@ export class ImageRowWidget {
             const ySign = hd.relY < 0.5 ? -1 : 1;
 
             // Weighted blend of dx/dy based on handle position.
-            // Edge handles track the perpendicular axis only;
-            // corner handles average both axes. This eliminates
-            // the discontinuous jump that a binary dominant-axis switch causes.
             const wx = 2 * Math.abs(hd.relX - 0.5);
             const wy = 2 * Math.abs(hd.relY - 0.5);
             const SENS = 1;
@@ -540,12 +707,39 @@ export class ImageRowWidget {
               ? (dx * xSign * wx + dy * ySign * wy) / (wx + wy) * SENS
               : 0;
 
-            const newHeight = Math.max(50, Math.min(maxHeight, Math.round(startHeight + delta)));
-            const h = `${newHeight}px`;
-            this.container!.style.height = h;
-            this.itemEls[0].style.height = h;
-            this.imageEls[0].style.height = h;
+            const newHeight = Math.max(50, Math.min(2000, Math.round(startHeight + delta)));
+
+            if (newHeight <= fillWidthH) {
+              // Normal mode: image height directly controls rendered size.
+              // width:auto preserves aspect ratio; flex:0 0 auto lets item
+              // shrink to image size so justify-content alignment is visible.
+              this.imageEls[0].style.objectFit = "contain";
+              this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(), "important");
+              this.imageEls[0].style.width = "auto";
+              this.imageEls[0].style.height = `${newHeight}px`;
+              this.itemEls[0].style.height = "";
+              this.itemEls[0].style.flex = "0 0 auto";
+              this.container!.style.height = "";
+            } else {
+              // Zoom mode: image and container "locked" together beyond fill-width.
+              // Switch to object-fit:cover so the image fills the element height,
+              // allowing growth past the width-constrained boundary.
+              this.imageEls[0].style.objectFit = "cover";
+              this.imageEls[0].style.setProperty("object-position", "center", "important");
+              this.imageEls[0].style.height = `${newHeight}px`;
+              this.itemEls[0].style.height = `${newHeight}px`;
+              this.container!.style.height = `${newHeight}px`;
+            }
+
+            // Force synchronous reflow so the container's height is
+            // recalculated before CodeMirror's dispatch reads it.
+            void this.container!.offsetHeight;
             this.updateHandlePositions(0);
+            logger.debug("resize-mousemove (single)", {
+              newHeight, fillWidthH, zoom: newHeight > fillWidthH,
+              containerH: this.container!.getBoundingClientRect().height,
+            });
+            this.onLayoutChange?.();
             return;
           }
 
@@ -578,6 +772,7 @@ export class ImageRowWidget {
           const containerH = Math.max(targetImageH, otherMax);
           this.container!.style.height = `${containerH}px`;
           this.updateHandlePositions(index);
+          this.onLayoutChange?.();
         };
 
         currentOnUp = () => {
@@ -635,6 +830,38 @@ export class ImageRowWidget {
     logger.debug("ImageRowWidget applyLayout", { allLoaded, hasExplicitWidth: this.group.images.some((img) => img.hasExplicitWidth), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
 
     if (allLoaded) {
+      // ── Restore preserved multi-image dimensions first (before any
+      // other layout path), so corner-handle per-image height adjustments
+      // survive widget recreation (e.g. alignment change).
+      if (this.group.images.length > 1) {
+        const preserved = preservedMultiImageSizes.get(this.group.lineStart);
+        if (preserved && preserved.images.length === metas.length) {
+          // Apply saved inline style values directly — no recomputation
+          for (let i = 0; i < this.imageEls.length && i < preserved.images.length; i++) {
+            this.imageEls[i].style.width = preserved.images[i].styleW;
+            this.imageEls[i].style.height = preserved.images[i].styleH;
+          }
+          for (let i = 0; i < this.itemEls.length && i < preserved.items.length; i++) {
+            this.itemEls[i].style.flexGrow = preserved.items[i].flexGrow;
+            this.itemEls[i].style.height = preserved.items[i].styleH;
+            this.group.images[i].flexGrow = parseFloat(preserved.items[i].flexGrow) || 1;
+          }
+          this.container.style.height = preserved.containerStyleH;
+          this.rowHeight = parseFloat(preserved.containerStyleH) || this.options.defaultRowHeight;
+          // Don't delete the entry — it acts as a lock preventing subsequent
+          // applyLayout/recalculateRowHeight calls from overwriting with uniform heights.
+          // It will be overwritten by the next destroy() when the widget is torn down.
+          logger.debug("ImageRowWidget layout restored from preserved", {
+            preservedSizes: preserved.images.map((pi) => `${pi.styleW}x${pi.styleH}`),
+          });
+          this.applyAlignmentToAll();
+          this.onLayoutChange?.();
+          void this.container!.offsetHeight;
+          this.updateAllHandlePositions();
+          return;
+        }
+      }
+
       // When flex-grows were loaded from markdown |width, use the current
       // distribution to calculate max height (avoids overwriting user adjustments).
       if (this.group.images.some((img) => img.hasExplicitWidth)) {
@@ -648,6 +875,45 @@ export class ImageRowWidget {
         requestAnimationFrame(() => this.applyLayout());
         return;
       }
+      // ── Single-image row ──
+      if (this.group.images.length === 1 && this.imageEls[0] && this.itemEls[0]) {
+        const meta = metas[0];
+        const aspect = meta.naturalWidth / meta.naturalHeight;
+        const fillWidthH = Math.max(50, Math.min(2000, Math.round(containerWidth / aspect)));
+        // Restore the previous rendered size if this widget was recreated
+        // (e.g. after an alignment change). Otherwise compute from defaults.
+        const preserved = preservedImageSizes.get(this.group.lineStart);
+        let imageH: number;
+        let imageWStyle: string;
+        if (preserved) {
+          imageH = preserved.height;
+          imageWStyle = `${preserved.width}px`;
+          preservedImageSizes.delete(this.group.lineStart);
+        } else {
+          imageH = Math.min(this.options.defaultRowHeight, fillWidthH);
+          imageWStyle = "auto";
+        }
+        this.imageEls[0].style.objectFit = "contain";
+        this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(), "important");
+        this.imageEls[0].style.height = `${imageH}px`;
+        this.imageEls[0].style.width = imageWStyle;
+        this.itemEls[0].style.height = "";
+        this.itemEls[0].style.flex = "0 0 auto";
+        this.container.style.height = "";
+        this.group.images[0].flexGrow = 1;
+        this.rowHeight = imageH;
+
+        logger.debug("ImageRowWidget layout applied (single)", {
+          containerWidth, aspect, fillWidthH, imageH, imageWStyle,
+          alignment: this.options.alignment,
+          restored: !!preserved,
+        });
+        this.onLayoutChange?.();
+        void this.container.offsetHeight;
+        this.updateAllHandlePositions();
+        return;
+      }
+
       const result = computeUniformHeight(
         metas,
         containerWidth,
@@ -656,7 +922,7 @@ export class ImageRowWidget {
         this.options.defaultRowHeight * 3
       );
       this.rowHeight = result.rowHeight;
-      const h = `${this.rowHeight}px`;
+      const h = `${result.rowHeight}px`;
       this.container.style.height = h;
 
       const grows = computeFlexGrows(metas);
@@ -677,6 +943,7 @@ export class ImageRowWidget {
         flexGrows: grows,
         imageCount: metas.length,
       });
+      this.applyAlignmentToAll();
       this.onLayoutChange?.();
       // Force reflow so handle positions use the new dimensions
       void this.container.offsetHeight;
@@ -727,14 +994,43 @@ export class ImageRowWidget {
     logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, grows, imageCount: n, clampedRowHeight: clamped });
 
     const h = `${clamped}px`;
-    this.container.style.height = h;
-    for (let i = 0; i < this.itemEls.length; i++) {
-      this.itemEls[i].style.height = h;
-    }
-    for (let i = 0; i < this.imageEls.length; i++) {
-      this.imageEls[i].style.height = h;
+    // For single-image rows.
+    if (n === 1) {
+      this.imageEls[0].style.objectFit = "contain";
+      this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(), "important");
+      // Restore previous rendered size if available, otherwise compute from defaults.
+      const preserved = preservedImageSizes.get(this.group.lineStart);
+      if (preserved) {
+        this.imageEls[0].style.height = `${preserved.height}px`;
+        this.imageEls[0].style.width = `${preserved.width}px`;
+      } else {
+        const constrainH = Math.min(this.options.defaultRowHeight, Math.max(50, clamped));
+        this.imageEls[0].style.height = `${constrainH}px`;
+        this.imageEls[0].style.width = "auto";
+      }
+      this.itemEls[0].style.height = "";
+      this.itemEls[0].style.flex = "0 0 auto";
+      this.container.style.height = "";
+    } else if (preservedMultiImageSizes.has(this.group.lineStart)) {
+      // Preserved per-image heights are active — don't overwrite with uniform h.
+      // Just update container height to match the tallest item.
+      let maxH = 0;
+      for (let i = 0; i < this.itemEls.length; i++) {
+        const ih = parseFloat(this.itemEls[i].style.height || "0");
+        if (ih > maxH) maxH = ih;
+      }
+      if (maxH > 0) this.container.style.height = `${maxH}px`;
+    } else {
+      this.container.style.height = h;
+      for (let i = 0; i < this.itemEls.length; i++) {
+        this.itemEls[i].style.height = h;
+      }
+      for (let i = 0; i < this.imageEls.length; i++) {
+        this.imageEls[i].style.height = h;
+      }
     }
 
+    this.applyAlignmentToAll();
     this.onLayoutChange?.();
     // Force reflow so handle positions use the new dimensions
     void this.container.offsetHeight;
@@ -802,6 +1098,11 @@ export class ImageRowWidget {
    * Update the flex-grow values from an external source (e.g., after reorder).
    */
   updateFlexGrows(grows: number[]): void {
+    // Skip if unchanged to avoid unnecessary reflow + onLayoutChange feedback loop.
+    if (this.flexGrows.length === grows.length &&
+        this.flexGrows.every((g, i) => g === grows[i])) {
+      return;
+    }
     this.flexGrows = grows;
     for (let i = 0; i < this.itemEls.length && i < grows.length; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
@@ -983,12 +1284,82 @@ export class ImageRowWidget {
         }
       });
     }
+
+    // ── Document-level capture listeners ──
+    // When the cursor moves outside the container bounds (e.g. past left/
+    // right page edges), container dragover/drop won't fire.  These capture-
+    // phase handlers detect when the cursor is near an edge divider position
+    // even when outside the container, so edge-insert hints and drops still work.
+    this.docDragOver = (e: DragEvent) => {
+      if (!this.container) return;
+      const types = e.dataTransfer?.types;
+      if (!types || !types.includes("text/plain")) return;
+
+      const containerRect = this.container.getBoundingClientRect();
+      if (e.clientY < containerRect.top - 20 || e.clientY > containerRect.bottom + 20) return;
+
+      const widths = this.itemEls.map(el => el.getBoundingClientRect().width);
+      const positions = computeDividerXPositions(containerRect.left, widths, this.options.gap);
+      const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
+      const threshold = Math.min(avgWidth * 0.4, 80);
+      const closestIdx = findClosestDividerIndex(e.clientX, positions, threshold);
+
+      if (closestIdx === 0 || closestIdx === positions.length - 1) {
+        e.preventDefault();
+        e.dataTransfer!.dropEffect = "move";
+        this.showDividerHint(e.clientX);
+      }
+    };
+
+    this.docDrop = (e: DragEvent) => {
+      if (!this.container) return;
+
+      const containerRect = this.container.getBoundingClientRect();
+      if (e.clientY < containerRect.top - 20 || e.clientY > containerRect.bottom + 20) return;
+
+      const data = e.dataTransfer?.getData("text/plain") || "";
+      if (!data.startsWith("diaa-row:") && !data.startsWith("diaa-standalone:") && !data.startsWith("obsidian://open")) return;
+
+      const widths = this.itemEls.map(el => el.getBoundingClientRect().width);
+      const positions = computeDividerXPositions(containerRect.left, widths, this.options.gap);
+      const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
+      const threshold = Math.min(avgWidth * 0.4, 80);
+      const closestIdx = findClosestDividerIndex(e.clientX, positions, threshold);
+
+      if (closestIdx !== 0 && closestIdx !== positions.length - 1) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.hideDividerHint();
+
+      const insertAt = closestIdx;
+
+      const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
+      if (rowMatch) {
+        const srcLineStart = parseInt(rowMatch[1], 10);
+        const srcIndex = parseInt(rowMatch[2], 10);
+        if (srcLineStart === this.group.lineStart) {
+          const toIndex = srcIndex < insertAt ? insertAt - 1 : insertAt;
+          if (srcIndex !== toIndex && this.reorderCallback) {
+            this.reorderCallback(srcIndex, toIndex);
+          }
+          return;
+        }
+      }
+
+      if (this.mergeExternalCallback) {
+        this.mergeExternalCallback(insertAt, data);
+      }
+    };
+
+    document.addEventListener("dragover", this.docDragOver, true);
+    document.addEventListener("drop", this.docDrop, true);
   }
 
   /**
    * Highlight the divider closest to cursorX during drag-over.
    * Uses existing divider elements for internal positions and
-   * inset box-shadow on the container for edge positions.
+   * absolutely-positioned edge overlays for edge positions.
    */
   private showDividerHint(cursorX: number): void {
     if (!this.container || this.itemEls.length === 0) return;
@@ -1022,12 +1393,12 @@ export class ImageRowWidget {
         this.dividerEls[divIndex].style.backgroundColor = "#4a9eff";
         this.dividerEls[divIndex].classList.add(CLASSES.dividerActive);
       }
-    } else if (closestIdx === 0) {
-      // Left edge → inset shadow on the container
-      this.container.style.boxShadow = "inset 3px 0 0 0 #4a9eff";
-    } else {
-      // Right edge
-      this.container.style.boxShadow = "inset -3px 0 0 0 #4a9eff";
+    } else if (closestIdx === 0 && this.edgeLeft) {
+      this.edgeLeft.style.height = `${containerRect.height}px`;
+      this.edgeLeft.style.display = "";
+    } else if (this.edgeRight) {
+      this.edgeRight.style.height = `${containerRect.height}px`;
+      this.edgeRight.style.display = "";
     }
   }
 
@@ -1052,9 +1423,8 @@ export class ImageRowWidget {
       div.style.backgroundColor = "";
       div.classList.remove(CLASSES.dividerActive);
     }
-    if (this.container) {
-      this.container.style.boxShadow = "";
-    }
+    if (this.edgeLeft) this.edgeLeft.style.display = "none";
+    if (this.edgeRight) this.edgeRight.style.display = "none";
   }
 
   /**
@@ -1071,6 +1441,37 @@ export class ImageRowWidget {
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    if (this.docDragOver) document.removeEventListener("dragover", this.docDragOver, true);
+    if (this.docDrop) document.removeEventListener("drop", this.docDrop, true);
+    this.docDragOver = null;
+    this.docDrop = null;
+    // Preserve single-image rendered size so the new widget (e.g. after
+    // alignment change) can restore the same dimensions.
+    if (this.group.images.length === 1 && this.imageEls[0]) {
+      const rect = this.imageEls[0].getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        preservedImageSizes.set(this.group.lineStart, {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        });
+      }
+    }
+    // Preserve multi-image inline styles so the new widget (e.g. after
+    // alignment change) restores the same visual sizes — including
+    // per-image height adjustments made by corner handles.
+    if (this.group.images.length > 1 && this.imageEls.length > 0) {
+      preservedMultiImageSizes.set(this.group.lineStart, {
+        images: this.imageEls.map((img) => ({
+          styleW: img.style.width,
+          styleH: img.style.height,
+        })),
+        items: this.itemEls.map((item) => ({
+          flexGrow: item.style.flexGrow,
+          styleH: item.style.height,
+        })),
+        containerStyleH: this.container?.style.height ?? "",
+      });
+    }
     this.imageEls = [];
     this.itemEls = [];
     this.dividerEls = [];
