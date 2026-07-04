@@ -32,7 +32,11 @@
       "Bash(chmod +x node_modules/.bin/vitest node_modules/.bin/vite)",
       "Bash(grep *)",
       "Bash(git checkout *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(kill 3773 3772 3752 3750)",
+      "Bash(killall -9 node)",
+      "Bash(kill -9 4204 4203 4178)",
+      "Bash(kill -9 5151 5148)"
     ]
   }
 }

@@ -57,6 +57,7 @@ export class ImageRowWidget {
   private resizeHandles: HTMLElement[][] = [];
   private handleDefs: HandleDef[][] = [];
   private resizeObserver: ResizeObserver | null = null;
+  private classMutationObservers: MutationObserver[] = [];
   private edgeLeft: HTMLElement | null = null;
   private edgeRight: HTMLElement | null = null;
   private docDragOver: ((e: DragEvent) => void) | null = null;
@@ -175,16 +176,20 @@ export class ImageRowWidget {
       // Obsidian also applies alignment classes (image-position-center etc.)
       // directly to the IMG element.  These can set margin:auto or similar
       // that overrides the item's flex justify-content.  Strip them.
+      const imgClassBefore = img.className;
       img.classList.remove("image-position-center", "image-position-left", "image-position-right", "image-converter-aligned", "image-no-wrap");
+      const imgClassAfter = img.className;
       logger.debug("applyAlignmentToAll per-image", {
         index: i,
         settingsAlignment: this.options.alignment,
         writtenObjectPosition: img.style.objectPosition,
         expectedObjectPosition: css.objectPosition,
+        imgClassBefore,
+        imgClassAfter,
+        classesStripped: imgClassBefore !== imgClassAfter,
         hasWrapper: img.parentElement !== item,
         wrapperTag: img.parentElement !== item ? img.parentElement?.tagName : null,
         wrapperClass: img.parentElement !== item ? img.parentElement?.className : null,
-        wrapperDisplayAfter: img.parentElement !== item ? img.parentElement?.style.display : null,
       });
     }
     // Delayed check: what does the browser ACTUALLY render?
@@ -333,6 +338,17 @@ export class ImageRowWidget {
 
     // Initial layout pass — will be refined as images load
     this.applyLayout();
+    // Always apply alignment, even before images load.  Otherwise on tab
+    // switch (when cached images may not fire onload) the items have no
+    // flex alignment and Obsidian's image-position-center class takes over.
+    this.applyAlignmentToAll();
+    // Obsidian may asynchronously add alignment classes to the img after
+    // our synchronous calls return.  Schedule a deferred re-application so
+    // we catch and strip any late-arriving classes (e.g. on tab switch
+    // where cached images fire onload synchronously).
+    requestAnimationFrame(() => {
+      this.applyAlignmentToAll();
+    });
 
     return this.container;
   }
@@ -341,6 +357,7 @@ export class ImageRowWidget {
     const item = document.createElement("div");
     item.className = CLASSES.imageItem;
     item.style.flex = `${image.flexGrow} 1 0%`;
+    item.style.flexGrow = `${image.flexGrow}`;
     item.style.position = "relative";
     item.style.overflow = "hidden";
     item.style.minWidth = "50px";
@@ -401,6 +418,75 @@ export class ImageRowWidget {
     item.appendChild(img);
     this.imageEls.push(img);
     this.itemEls.push(item);
+
+    // Watch for Obsidian asynchronously modifying the img element.
+    // Obsidian adds alignment CSS classes AND may set inline styles
+    // (e.g. height/width) directly via JS.  When detected, strip the
+    // classes and restore our inline height to match the item.
+    const classObserver = new MutationObserver((mutations) => {
+      let needsClassStrip = false;
+      let needsStyleRestore = false;
+      for (const m of mutations) {
+        if (m.type === "attributes" && m.attributeName === "class") {
+          needsClassStrip = true;
+        }
+        if (m.type === "attributes" && m.attributeName === "style") {
+          needsStyleRestore = true;
+        }
+      }
+      if (!needsClassStrip && !needsStyleRestore) return;
+
+      classObserver.disconnect();
+      for (const m of mutations) {
+        if (m.type !== "attributes") continue;
+        const t = m.target as HTMLElement;
+        if (m.attributeName === "class") {
+          const before = t.className;
+          t.classList.remove(
+            "image-position-center", "image-position-left", "image-position-right",
+            "image-converter-aligned", "image-no-wrap"
+          );
+          if (before !== t.className) {
+            logger.debug("MutationObserver stripped Obsidian classes", {
+              index,
+              before,
+              after: t.className,
+            });
+          }
+        }
+        if (m.attributeName === "style") {
+          // Obsidian may set inline styles (e.g. height) on the img.
+          // Restore the correct height from the item element.
+          const imgEl = t as HTMLImageElement;
+          const itemH = item.style.height;
+          if (itemH && imgEl.style.height !== itemH) {
+            logger.debug("MutationObserver restoring img height from item", {
+              index,
+              obsidianSet: imgEl.style.height,
+              restored: itemH,
+            });
+            imgEl.style.height = itemH;
+            imgEl.style.width = "auto";
+            imgEl.style.objectFit = "contain";
+            imgEl.style.setProperty("object-position", this.getObjectPosition(), "important");
+          }
+        }
+      }
+      classObserver.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
+    });
+    classObserver.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
+    this.classMutationObservers.push(classObserver);
+
+    // Diagnostic: log img class right after DOM insertion to detect if
+    // Obsidian's MutationObserver has already wrapped/re-classed it.
+    logger.debug("buildImageItem post-append", {
+      index,
+      file: image.fileName,
+      imgClass: img.className,
+      imgParentTag: img.parentElement?.tagName,
+      imgParentClass: img.parentElement?.className,
+      parentIsItem: img.parentElement === item,
+    });
 
     // Resize handles
     if (this.options.enableResize) {
@@ -797,6 +883,22 @@ export class ImageRowWidget {
         const explicitH = parseFloat(this.container!.style.height || "");
         startHeight = isNaN(explicitH) ? containerRect.height : explicitH;
 
+        // Sync: ensure all image inline heights match their item heights.
+        // A prior resize or layout pass may have left imageEls[i].style.height
+        // out of sync with itemEls[i].style.height, causing the image to be
+        // clipped (item has overflow:hidden) or letterboxed (image shorter).
+        for (let j = 0; j < nItems; j++) {
+          const itemH = this.itemEls[j].style.height;
+          if (itemH && itemH !== this.imageEls[j].style.height) {
+            logger.debug("resize-mousedown syncing img height to item", {
+              index: j,
+              itemH,
+              imgHBefore: this.imageEls[j].style.height,
+            });
+            this.imageEls[j].style.height = itemH;
+          }
+        }
+
         // Snapshot each image's current item height so resizing one
         // image doesn't overwrite manual height adjustments on others.
         startItemHeights = [];
@@ -804,6 +906,15 @@ export class ImageRowWidget {
           const h = parseFloat(this.itemEls[j].style.height || "0");
           startItemHeights[j] = h > 0 ? h : startHeight;
         }
+        logger.debug("resize-mousedown snapshot", {
+          index,
+          startItemHeights: [...startItemHeights],
+          itemStyleH: this.itemEls.map(el => el.style.height),
+          imgStyleH: this.imageEls.map(el => el.style.height),
+          imgStyleW: this.imageEls.map(el => el.style.width),
+          itemRects: this.itemEls.map(el => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+          imgRects: this.imageEls.map(el => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+        });
 
         // For single-image rows, cap height at the point where the image
         // fills the full container width — beyond that the image won't grow.
@@ -909,6 +1020,25 @@ export class ImageRowWidget {
           const containerH = Math.max(targetImageH, otherMax);
           this.container!.style.height = `${containerH}px`;
           this.updateHandlePositions(index);
+          // Diagnostic: detect image/item height mismatch that would cause clipping.
+          // item.style.overflow = "hidden" clips images whose rendered size exceeds the item.
+          const mismatches: { j: number; itemH: number; imgH: number; imgW: number; itemW: number }[] = [];
+          for (let j = 0; j < this.itemEls.length; j++) {
+            const ir = this.itemEls[j].getBoundingClientRect();
+            const imr = this.imageEls[j].getBoundingClientRect();
+            if (Math.abs(ir.height - imr.height) > 1 || Math.abs(ir.width - imr.width) > 1) {
+              mismatches.push({ j, itemH: Math.round(ir.height), imgH: Math.round(imr.height), imgW: Math.round(imr.width), itemW: Math.round(ir.width) });
+            }
+          }
+          if (mismatches.length > 0) {
+            logger.warn("resize-mousemove image/item mismatch (clipping risk)", {
+              activeIndex: index,
+              targetImageH,
+              containerH,
+              startItemHeights: [...startItemHeights],
+              mismatches,
+            });
+          }
           this.onLayoutChange?.();
         };
 
@@ -974,9 +1104,13 @@ export class ImageRowWidget {
         const preserved = preservedMultiImageSizes.get(this.group.lineStart);
         if (preserved && preserved.images.length === metas.length) {
           // Apply saved inline style values directly — no recomputation
-          for (let i = 0; i < this.imageEls.length && i < preserved.images.length; i++) {
+          // Use item height as the authoritative height for both item and
+          // image to prevent mismatch (item.style.height may have been
+          // updated by a subsequent layout pass while img.style.height was
+          // not, or vice versa).
+          for (let i = 0; i < this.imageEls.length && i < preserved.items.length; i++) {
             this.imageEls[i].style.width = preserved.images[i].styleW;
-            this.imageEls[i].style.height = preserved.images[i].styleH;
+            this.imageEls[i].style.height = preserved.items[i].styleH;
           }
           for (let i = 0; i < this.itemEls.length && i < preserved.items.length; i++) {
             this.itemEls[i].style.flexGrow = preserved.items[i].flexGrow;
@@ -1116,7 +1250,11 @@ export class ImageRowWidget {
     const grows: number[] = [];
     const metas: ImageMeta[] = [];
     for (let i = 0; i < n; i++) {
-      grows[i] = parseFloat(this.itemEls[i].style.flexGrow || "1");
+      const raw = this.itemEls[i].style.flexGrow;
+      const g = parseFloat(raw || "1");
+      // Single-image rows use flex="0 0 auto" so flexGrow is 0, but
+      // height calculation still needs a positive grow value.  Force 1.
+      grows[i] = n === 1 ? 1 : g;
       metas[i] = this.loadedMetas.get(i)!;
     }
 
@@ -1129,7 +1267,50 @@ export class ImageRowWidget {
     );
     this.rowHeight = clamped;
 
-    logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, grows, imageCount: n, clampedRowHeight: clamped });
+    logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, rawInlineFlexGrow: this.itemEls.map(el => el.style.flexGrow), parsedGrows: grows, imageCount: n, clampedRowHeight: clamped });
+
+    // ── Auto-fill missing flexGrow for images without |width in markdown ──
+    // When some images have explicit |width and others don't (e.g. after
+    // markdown corruption), the default flexGrow=1 can be severely wrong.
+    // Compute a proportional flexGrow from natural aspect ratio so the image
+    // renders at the same height as the rest of the row.
+    if (n > 1) {
+      const someExplicit = this.group.images.some(img => img.hasExplicitWidth);
+      const someMissing = this.group.images.some(img => !img.hasExplicitWidth);
+      if (someExplicit && someMissing && clamped > 0) {
+        let explicitSum = 0;
+        let missingArSum = 0;
+        for (let i = 0; i < n; i++) {
+          if (this.group.images[i].hasExplicitWidth) {
+            explicitSum += grows[i];
+          } else {
+            const m = metas[i];
+            missingArSum += m.naturalWidth / m.naturalHeight;
+          }
+        }
+        const AW = containerWidth - (n - 1) * this.options.gap;
+        const denom = AW - clamped * missingArSum;
+        if (denom > 0 && missingArSum > 0) {
+          const k = clamped * explicitSum / denom;
+          for (let i = 0; i < n; i++) {
+            if (!this.group.images[i].hasExplicitWidth) {
+              const ar = metas[i].naturalWidth / metas[i].naturalHeight;
+              grows[i] = k * ar;
+              this.itemEls[i].style.flexGrow = String(grows[i]);
+              this.itemEls[i].style.flex = `${grows[i]} 1 0%`;
+              this.group.images[i].flexGrow = grows[i];
+            }
+          }
+          logger.debug("ImageRowWidget autoFillMissingFlexGrow", {
+            originalGrows: this.itemEls.map(el => el.style.flexGrow).slice(0, n),
+            adjustedGrows: grows,
+            explicitSum,
+            missingArSum,
+            k,
+          });
+        }
+      }
+    }
 
     const h = `${clamped}px`;
     // For single-image rows.
@@ -1584,6 +1765,8 @@ export class ImageRowWidget {
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    for (const obs of this.classMutationObservers) obs.disconnect();
+    this.classMutationObservers = [];
     if (this.docDragOver) document.removeEventListener("dragover", this.docDragOver, true);
     if (this.docDrop) document.removeEventListener("drop", this.docDrop, true);
     this.docDragOver = null;
@@ -1604,9 +1787,10 @@ export class ImageRowWidget {
     // per-image height adjustments made by corner handles.
     if (this.group.images.length > 1 && this.imageEls.length > 0) {
       preservedMultiImageSizes.set(this.group.lineStart, {
-        images: this.imageEls.map((img) => ({
+        images: this.imageEls.map((img, i) => ({
           styleW: img.style.width,
-          styleH: img.style.height,
+          // Use item height as authoritative — see applyLayout preserved-path comment.
+          styleH: this.itemEls[i]?.style.height ?? img.style.height,
         })),
         items: this.itemEls.map((item) => ({
           flexGrow: item.style.flexGrow,
