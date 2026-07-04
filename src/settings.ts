@@ -26,7 +26,9 @@ export interface IDragImagePlugin {
 
 export async function loadSettings(plugin: { loadData(): Promise<any> }): Promise<DragImageSettings> {
   const data = await plugin.loadData();
-  return Object.assign({}, DEFAULT_SETTINGS, data ?? {});
+  // Support both new format ({ settings, preservedSizes }) and old format (settings directly)
+  const settings = data?.settings ?? data;
+  return Object.assign({}, DEFAULT_SETTINGS, settings ?? {});
 }
 
 export class DragImageSettingTab extends PluginSettingTab {

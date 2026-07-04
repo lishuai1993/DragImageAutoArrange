@@ -9,6 +9,9 @@ export interface ImageEmbed {
   /** flex-grow from |width in markdown (true) vs computed from aspect ratio (false) */
   hasExplicitWidth: boolean;
   flexGrow: number;
+  /** image-content-width / item-width ratio, persisted as second |param in markdown.
+   *  null means default (image fills item naturally, no resize applied). */
+  scale: number | null;
 }
 
 export interface ImageGroup {
@@ -39,6 +42,10 @@ export function parseImageLine(
   // Extract first number from param (handles |width, |WxH, |width|WxH)
   const firstNum = rawParam ? rawParam.match(/^\d+/) : null;
   const explicitWidth = firstNum ? parseInt(firstNum[0], 10) : null;
+  // Extract scale (second |param): image-content-width / item-width ratio × 100
+  // Format: ![[image.webp|740|48]] → flexGrow=7.40, scale=0.48
+  const scaleMatch = rawParam ? rawParam.match(/\|(\d+)/) : null;
+  const scale = scaleMatch ? parseInt(scaleMatch[1], 10) / 100 : null;
 
   return {
     line: lineIndex,
@@ -47,6 +54,7 @@ export function parseImageLine(
     explicitWidth,
     hasExplicitWidth: explicitWidth !== null,
     flexGrow: explicitWidth ? explicitWidth / 100 : 1,
+    scale,
   };
 }
 

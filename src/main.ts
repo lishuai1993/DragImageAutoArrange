@@ -7,7 +7,7 @@ import {
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged } from "./livePreview";
-import { ImageRowOptions } from "./imageRowWidget";
+import { ImageRowOptions, exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { logger } from "./logger";
 
 export default class DragImageAutoArrangePlugin
@@ -39,6 +39,12 @@ export default class DragImageAutoArrangePlugin
     logger.info("Plugin loading", { version: this.manifest.version });
 
     this.settings = await loadSettings(this);
+    // Restore preserved per-image sizes from previous session
+    const rawData = await this.loadData();
+    if (rawData?.preservedSizes) {
+      importPreservedSizes(rawData.preservedSizes);
+      logger.info("Preserved multi-image sizes restored from previous session");
+    }
     logger.info("Settings loaded", {
       enabled: this.settings.enabled,
       maxImagesPerRow: this.settings.maxImagesPerRow,
@@ -124,7 +130,10 @@ export default class DragImageAutoArrangePlugin
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    await this.saveData({
+      settings: this.settings,
+      preservedSizes: exportPreservedSizes(),
+    });
     // Notify both Live Preview and Reading Mode views so they rebuild with fresh options
     this.app.workspace.iterateAllLeaves((leaf) => {
       // Live Preview / Source mode: dispatch settingsChanged annotation to rebuild decorations
@@ -159,6 +168,7 @@ export default class DragImageAutoArrangePlugin
         }
         return url;
       },
+      sourcePath,
     };
   }
 

@@ -162,11 +162,13 @@ export function normalizeRaw(raw: string): string {
 function applyFlexGrowChanges(
   view: EditorView,
   images: ImageEmbed[],
-  grows: number[]
+  grows: number[],
+  scales?: (number | null)[]
 ): void {
   const changes: Array<{ from: number; to: number; insert: string }> = [];
   for (let i = 0; i < grows.length && i < images.length; i++) {
-    const newLine = updateImageLineWidth(images[i].raw, grows[i]);
+    const scale = scales ? scales[i] : undefined;
+    const newLine = updateImageLineWidth(images[i].raw, grows[i], scale);
     if (newLine === images[i].raw) continue;
 
     const line = images[i].line + 1; // 1-indexed
@@ -451,20 +453,21 @@ class StaticImageRowWidget extends WidgetType {
   destroy(): void {
     logger.debug("StaticImageRowWidget destroyed");
     if (this.persistTimer) clearTimeout(this.persistTimer);
-    // Persist flex-grows only for multi-image rows, and only when the values
-    // differ from the originals (avoids unnecessary doc changes for single-image
-    // rows where flex is always "0 0 auto", and for unchanged multi-image rows).
+    // Persist flex-grows and scale ratios for multi-image rows.
     if (this.editorView && this.innerWidget && this.group.images.length > 1) {
       const view = this.editorView;
       const images = this.group.images;
       const grows = this.innerWidget.getCurrentFlexGrows();
-      // Only persist if any flex-grow differs from the persisted markdown value
-      const hasChanges = grows.some((g, i) => {
+      const hasFlexChanges = grows.some((g, i) => {
         return Math.abs(g - images[i].flexGrow) > 0.005;
       });
-      if (hasChanges) {
+      const hasScaleChanges = this.innerWidget._scaleDirty;
+      if (hasFlexChanges || hasScaleChanges) {
+        const scales = hasScaleChanges
+          ? images.map((img) => img.scale)
+          : undefined;
         this.persistTimer = setTimeout(() => {
-          applyFlexGrowChanges(view, images, grows);
+          applyFlexGrowChanges(view, images, grows, scales);
         }, 0);
       }
     }
@@ -483,13 +486,25 @@ class StaticImageRowWidget extends WidgetType {
   }
 }
 
-/** Replace or remove the |width parameter in an image embed line. */
-export function updateImageLineWidth(raw: string, flexGrow: number): string {
+/** Replace or remove the |width and |scale parameters in an image embed line. */
+export function updateImageLineWidth(raw: string, flexGrow: number, scale?: number | null): string {
   const widthValue = Math.round(flexGrow * 100);
   // Strip everything between file extension and ]] (handles |width, |WxH, |width|WxH)
   let out = raw.replace(/\|[^\]]*(?=\]\])/, "");
-  if (widthValue === 100) return out; // default → omit
-  return out.replace(/\]\]/, `|${widthValue}]]`);
+  // Build the new parameter string
+  const params: string[] = [];
+  if (widthValue !== 100) {
+    params.push(String(widthValue));
+  }
+  if (scale != null && scale > 0 && scale < 1) {
+    const scaleValue = Math.round(scale * 100);
+    if (scaleValue > 0 && scaleValue < 100) {
+      if (params.length === 0) params.push("100"); // need a placeholder for flexGrow when scale is present
+      params.push(String(scaleValue));
+    }
+  }
+  if (params.length === 0) return out; // no params → omit |
+  return out.replace(/\]\]/, `|${params.join("|")}]]`);
 }
 
 // ── State field for decorations ─────────────────────────────────

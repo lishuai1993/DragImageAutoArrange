@@ -11,14 +11,33 @@ import { logger } from "./logger";
  * so the image keeps the same rendered dimensions.
  */
 const preservedImageSizes = new Map<number, { width: number; height: number }>();
-/** Preserved multi-image inline style dimensions keyed by group lineStart.
+
+function mkRowKey(sourcePath: string, lineStart: number): string {
+  return `${sourcePath}:${lineStart}`;
+}
+
+/** Serialize the preserved sizes map into a plain object for persistence. */
+export function exportPreservedSizes(): Record<string, MultiImageSizeData> {
+  const result: Record<string, MultiImageSizeData> = {};
+  for (const [key, val] of preservedMultiImageSizes) {
+    result[key] = val;
+  }
+  return result;
+}
+
+/** Restore the preserved sizes map from a previously exported plain object. */
+export function importPreservedSizes(data: Record<string, MultiImageSizeData>): void {
+  for (const [key, val] of Object.entries(data)) {
+    if (val && val.images && val.items) {
+      preservedMultiImageSizes.set(key, val as MultiImageSizeData);
+    }
+  }
+}
+
+/** Preserved multi-image inline style dimensions keyed by "sourcePath:lineStart".
  *  Saved on destroy, restored in applyLayout before any other layout path,
  *  so corner-handle per-image height adjustments survive widget recreation. */
-const preservedMultiImageSizes = new Map<number, {
-  images: Array<{ styleW: string; styleH: string }>;
-  items: Array<{ flexGrow: string; styleH: string }>;
-  containerStyleH: string;
-}>();
+export const preservedMultiImageSizes = new Map<string, MultiImageSizeData>();
 
 export interface ImageRowOptions {
   defaultRowHeight: number;
@@ -31,6 +50,15 @@ export interface ImageRowOptions {
   dragOpacity: number;
   alignment: "left" | "center" | "right";
   getResourcePath: (fileName: string) => string;
+  sourcePath: string;
+}
+
+export interface MultiImageSizeData {
+  images: Array<{ styleW: string; styleH: string }>;
+  items: Array<{ flexGrow: string; styleH: string }>;
+  containerStyleH: string;
+  /** file path + lineStart uniquely identify the row across sessions */
+  filePath: string;
 }
 
 export type ReorderCallback = (fromIndex: number, toIndex: number) => void;
@@ -76,6 +104,8 @@ export class ImageRowWidget {
   private rowHeight: number;
   private flexGrows: number[] = [];
   onLayoutChange: (() => void) | null = null;
+  /** True when resize has updated scale ratios that need persistence. */
+  _scaleDirty = false;
 
   constructor(group: ImageGroup, options: ImageRowOptions) {
     this.group = group;
@@ -1047,6 +1077,27 @@ export class ImageRowWidget {
           item.classList.remove(CLASSES.resizing);
           item.classList.remove(CLASSES.itemSnap);
 
+          // ── Persist scale ratio ──
+          // Compute image-content-width / item-width ratio.  This captures the
+          // resize state as a dimensionless number that survives container-width
+          // changes.  Persisted to markdown as ![[file|flexGrow|scale]].
+          if (nItems > 1) {
+            const itemRect = this.itemEls[index].getBoundingClientRect();
+            const contentRect = this.getImageContentRect(index);
+            if (itemRect.width > 0 && contentRect && contentRect.width > 0) {
+              const scale = contentRect.width / itemRect.width;
+              this.group.images[index].scale = scale;
+              // Mark dirty so destroy() knows to persist
+              this._scaleDirty = true;
+              logger.debug("resize-mouseup scale saved", {
+                index,
+                scale: Math.round(scale * 100),
+                contentW: Math.round(contentRect.width),
+                itemW: Math.round(itemRect.width),
+              });
+            }
+          }
+
           const finalFlex = parseFloat(item.style.flexGrow || "1");
           logger.debug("resize-mouseup", { index, finalFlex, nItems, timestamp: Date.now() });
           if (this.resizeEndCallback) {
@@ -1101,7 +1152,8 @@ export class ImageRowWidget {
       // other layout path), so corner-handle per-image height adjustments
       // survive widget recreation (e.g. alignment change).
       if (this.group.images.length > 1) {
-        const preserved = preservedMultiImageSizes.get(this.group.lineStart);
+        const key = mkRowKey(this.options.sourcePath, this.group.lineStart);
+        const preserved = preservedMultiImageSizes.get(key);
         if (preserved && preserved.images.length === metas.length) {
           // Apply saved inline style values directly — no recomputation
           // Use item height as the authoritative height for both item and
@@ -1330,7 +1382,7 @@ export class ImageRowWidget {
       this.itemEls[0].style.height = "";
       this.itemEls[0].style.flex = "0 0 auto";
       this.container.style.height = "";
-    } else if (preservedMultiImageSizes.has(this.group.lineStart)) {
+    } else if (preservedMultiImageSizes.has(mkRowKey(this.options.sourcePath, this.group.lineStart))) {
       // Preserved per-image heights are active — don't overwrite with uniform h.
       // Just update container height to match the tallest item.
       let maxH = 0;
@@ -1339,6 +1391,37 @@ export class ImageRowWidget {
         if (ih > maxH) maxH = ih;
       }
       if (maxH > 0) this.container.style.height = `${maxH}px`;
+    } else if (n > 1 && this.group.images.some((img) => img.scale != null)) {
+      // Restore per-image heights from scale ratios persisted in markdown.
+      // scale = imageContentWidth / itemWidth, a dimensionless ratio that
+      // survives container-width changes across sessions.
+      let totalG = 0;
+      for (let i = 0; i < n; i++) totalG += grows[i];
+      const AW = containerWidth - (n - 1) * this.options.gap;
+      let maxH = 0;
+      for (let i = 0; i < n; i++) {
+        const scale = this.group.images[i].scale;
+        let imageH: number;
+        if (scale != null && scale > 0 && scale < 1) {
+          const itemW = (grows[i] / totalG) * AW;
+          const meta = this.loadedMetas.get(i)!;
+          const ar = meta.naturalWidth / meta.naturalHeight;
+          imageH = Math.round(scale * itemW / ar);
+        } else {
+          imageH = clamped;
+        }
+        const hPx = `${imageH}px`;
+        this.imageEls[i].style.height = hPx;
+        this.imageEls[i].style.width = "auto";
+        this.itemEls[i].style.height = hPx;
+        maxH = Math.max(maxH, imageH);
+      }
+      this.container.style.height = `${maxH}px`;
+      logger.debug("ImageRowWidget scale-based heights restored", {
+        scales: this.group.images.map((img) => Math.round((img.scale ?? 0) * 100)),
+        heights: this.imageEls.map((el) => el.style.height),
+        containerH: `${maxH}px`,
+      });
     } else {
       this.container.style.height = h;
       for (let i = 0; i < this.itemEls.length; i++) {
@@ -1786,7 +1869,7 @@ export class ImageRowWidget {
     // alignment change) restores the same visual sizes — including
     // per-image height adjustments made by corner handles.
     if (this.group.images.length > 1 && this.imageEls.length > 0) {
-      preservedMultiImageSizes.set(this.group.lineStart, {
+      const data: MultiImageSizeData = {
         images: this.imageEls.map((img, i) => ({
           styleW: img.style.width,
           // Use item height as authoritative — see applyLayout preserved-path comment.
@@ -1797,7 +1880,9 @@ export class ImageRowWidget {
           styleH: item.style.height,
         })),
         containerStyleH: this.container?.style.height ?? "",
-      });
+        filePath: this.options.sourcePath,
+      };
+      preservedMultiImageSizes.set(mkRowKey(this.options.sourcePath, this.group.lineStart), data);
     }
     this.imageEls = [];
     this.itemEls = [];
