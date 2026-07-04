@@ -165,11 +165,26 @@ export class ImageRowWidget {
       // Level 2: position image content within img element
       img.style.objectFit = "contain";
       img.style.setProperty("object-position", css.objectPosition, "important");
+      // Neutralize any Obsidian wrapper (.image-resize-container) inserted
+      // between the item and the img.  Obsidian may set inline flex/alignment
+      // on the wrapper that overrides our item-level justify-content.  Using
+      // an inline !important ensures we win the cascade.
+      if (img.parentElement && img.parentElement !== item) {
+        img.parentElement.style.setProperty("display", "contents", "important");
+      }
+      // Obsidian also applies alignment classes (image-position-center etc.)
+      // directly to the IMG element.  These can set margin:auto or similar
+      // that overrides the item's flex justify-content.  Strip them.
+      img.classList.remove("image-position-center", "image-position-left", "image-position-right", "image-converter-aligned", "image-no-wrap");
       logger.debug("applyAlignmentToAll per-image", {
         index: i,
         settingsAlignment: this.options.alignment,
         writtenObjectPosition: img.style.objectPosition,
         expectedObjectPosition: css.objectPosition,
+        hasWrapper: img.parentElement !== item,
+        wrapperTag: img.parentElement !== item ? img.parentElement?.tagName : null,
+        wrapperClass: img.parentElement !== item ? img.parentElement?.className : null,
+        wrapperDisplayAfter: img.parentElement !== item ? img.parentElement?.style.display : null,
       });
     }
     // Delayed check: what does the browser ACTUALLY render?
@@ -531,6 +546,54 @@ export class ImageRowWidget {
     const img = this.imageEls[index];
     if (!item || !img) return null;
 
+    // Obsidian may asynchronously wrap the img in .image-resize-container
+    // with alignment classes (e.g. image-position-center) that override our
+    // item-level flex alignment.  Force display:contents on any wrapper so
+    // the img behaves as a direct flex child of the item.
+    if (img.parentElement && img.parentElement !== item) {
+      img.parentElement.style.setProperty("display", "contents", "important");
+    }
+    // Obsidian may also add alignment classes directly to the IMG element
+    // (not just the wrapper).  These set margin:auto etc. that override
+    // the flex container's justify-content.  Strip them here (defense in
+    // depth — applyAlignmentToAll also does this, but Obsidian may add them
+    // asynchronously after that runs).
+    img.classList.remove("image-position-center", "image-position-left", "image-position-right", "image-converter-aligned", "image-no-wrap");
+
+    // ── Diagnostic: trace full ancestor chain from img up to item ──
+    const ancestorChain: Array<{ tag: string; class: string; computedDisplay: string; computedJustify: string; isItem: boolean }> = [];
+    let el: HTMLElement | null = img;
+    while (el && el !== item.parentElement) {
+      const cs = getComputedStyle(el);
+      ancestorChain.push({
+        tag: el.tagName,
+        class: el.className?.toString() || "",
+        computedDisplay: cs.display,
+        computedJustify: cs.justifyContent,
+        isItem: el === item,
+      });
+      if (el === item) break;
+      el = el.parentElement;
+    }
+    // Also log computed styles on the img and item directly
+    const imgCS = getComputedStyle(img);
+    const itemCS = getComputedStyle(item);
+    logger.debug("getImageContentRect ANCESTOR CHAIN", {
+      index,
+      imgComputedDisplay: imgCS.display,
+      imgComputedJustify: imgCS.justifyContent,
+      imgComputedObjectPosition: imgCS.objectPosition,
+      imgComputedObjectFit: imgCS.objectFit,
+      imgInlineDisplay: img.style.display,
+      imgInlineObjectPosition: img.style.objectPosition,
+      itemComputedDisplay: itemCS.display,
+      itemComputedJustify: itemCS.justifyContent,
+      itemInlineDisplay: item.style.display,
+      itemInlineJustify: item.style.getPropertyValue("justify-content"),
+      alignmentSetting: this.options.alignment,
+      chain: ancestorChain,
+    });
+
     // Force synchronous reflow so clientWidth/clientHeight reflect the
     // most recent style changes (height updates, flex-grow changes, etc.).
     void item.offsetHeight;
@@ -566,8 +629,19 @@ export class ImageRowWidget {
       itemH: item.clientHeight,
       imgW: img.clientWidth,
       imgH: img.clientHeight,
-      imgOffsetLeft: offsetLeft,
-      imgOffsetTop: offsetTop,
+      // Diagnostic: check if Obsidian inserted a wrapper between item and img
+      imgParentTag: img.parentElement?.tagName ?? "none",
+      imgParentClass: img.parentElement?.className ?? "none",
+      offsetParentTag: (img.offsetParent as HTMLElement)?.tagName ?? "none",
+      offsetParentClass: (img.offsetParent as HTMLElement)?.className ?? "none",
+      imgParentIsItem: img.parentElement === item,
+      offsetParentIsItem: img.offsetParent === item,
+      // Old API (unreliable when wrapper present)
+      domOffsetLeft: img.offsetLeft,
+      domOffsetTop: img.offsetTop,
+      // New API (getBoundingClientRect delta — always accurate)
+      rectOffsetLeft: offsetLeft,
+      rectOffsetTop: offsetTop,
       contentLeft: contentRect.left,
       contentTop: contentRect.top,
       contentW: contentRect.width,
