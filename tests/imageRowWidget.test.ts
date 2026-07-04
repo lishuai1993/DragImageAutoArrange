@@ -1,0 +1,376 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Tests for ImageRowWidget alignment behavior.
+ *
+ * Focus: verify that after alignment changes (via widget recreation with
+ * preservedMultiImageSizes), every image element in a multi-image row ends
+ * up with the correct `object-position` CSS. This is the regression path
+ * where the third image in a resized row appeared not to respond to
+ * alignment setting changes.
+ */
+import { describe, it, expect, beforeEach } from 'vitest';
+import { ImageRowWidget, ImageRowOptions } from '../src/imageRowWidget';
+import { ImageGroup, ImageEmbed } from '../src/imageDetector';
+
+// ── Test helpers ─────────────────────────────────────────────────────
+
+function makeImage(fileName: string, line: number, flexGrow: number, hasExplicitWidth = false): ImageEmbed {
+  return {
+    line,
+    raw: hasExplicitWidth ? `![[${fileName}|${Math.round(flexGrow * 100)}]]` : `![[${fileName}]]`,
+    fileName,
+    explicitWidth: hasExplicitWidth ? Math.round(flexGrow * 100) : null,
+    hasExplicitWidth,
+    flexGrow,
+  };
+}
+
+function makeGroup(images: ImageEmbed[], lineStart = 17): ImageGroup {
+  return {
+    lineStart,
+    lineEnd: lineStart + images.length,
+    images,
+  };
+}
+
+function makeOptions(alignment: 'left' | 'center' | 'right' = 'left'): ImageRowOptions {
+  return {
+    defaultRowHeight: 200,
+    gap: 4,
+    enableDividers: true,
+    enableResize: true,
+    snapSensitivity: 3,
+    topBarSensitivity: 12,
+    ghostImageWidth: 120,
+    dragOpacity: 60,
+    alignment,
+    getResourcePath: (fn) => `mock://${fn}`,
+  };
+}
+
+/**
+ * Simulate image loading by directly writing naturalWidth/Height via
+ * Object.defineProperty and firing onload. Then poke internal loadedMetas
+ * via applyLayout invocations from the load handler.
+ */
+function simulateImagesLoaded(
+  widget: ImageRowWidget,
+  container: HTMLElement,
+  dims: Array<{ w: number; h: number }>
+): void {
+  const imgs = container.querySelectorAll('img');
+  for (let i = 0; i < imgs.length && i < dims.length; i++) {
+    const img = imgs[i] as HTMLImageElement;
+    Object.defineProperty(img, 'naturalWidth', { value: dims[i].w, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: dims[i].h, configurable: true });
+    Object.defineProperty(img, 'complete', { value: true, configurable: true });
+    if (img.onload) (img.onload as any)(new Event('load'));
+  }
+}
+
+// jsdom lacks ResizeObserver — polyfill so build() doesn't throw
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as any).ResizeObserver = MockResizeObserver;
+
+// jsdom lacks getBoundingClientRect that reflects layout — patch to
+// return a plausible container width so applyLayout doesn't retry via RAF.
+function patchBoundingRect(container: HTMLElement, width = 800): void {
+  const origGetBoundingClientRect = container.getBoundingClientRect.bind(container);
+  container.getBoundingClientRect = () => {
+    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: 200, width, height: 200, toJSON() {} } as DOMRect;
+  };
+}
+
+// ── Tests ───────────────────────────────────────────────────────────
+
+describe('ImageRowWidget alignment (single image)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('sets object-position to "left top" for left alignment', () => {
+    const group = makeGroup([makeImage('a.png', 5, 1)]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 800);
+    simulateImagesLoaded(widget, el, [{ w: 500, h: 654 }]);
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(img.style.objectPosition).toBe('left top');
+  });
+
+  it('sets object-position to "center top" for center alignment', () => {
+    const group = makeGroup([makeImage('a.png', 5, 1)]);
+    const widget = new ImageRowWidget(group, makeOptions('center'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 800);
+    simulateImagesLoaded(widget, el, [{ w: 500, h: 654 }]);
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(img.style.objectPosition).toBe('center top');
+  });
+
+  it('sets object-position to "right top" for right alignment', () => {
+    const group = makeGroup([makeImage('a.png', 5, 1)]);
+    const widget = new ImageRowWidget(group, makeOptions('right'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 800);
+    simulateImagesLoaded(widget, el, [{ w: 500, h: 654 }]);
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(img.style.objectPosition).toBe('right top');
+  });
+});
+
+describe('ImageRowWidget alignment (multi-image, all images)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('applies object-position to EVERY image in a 4-image row (left)', () => {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1),
+      makeImage('b.webp', 18, 4),
+      makeImage('c.webp', 19, 9.6),
+      makeImage('d.webp', 20, 4),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+      { w: 800, h: 1200 },
+    ]);
+    const imgs = el.querySelectorAll('img');
+    expect(imgs.length).toBe(4);
+    for (const img of imgs) {
+      expect((img as HTMLImageElement).style.objectPosition).toBe('left top');
+    }
+  });
+
+  it('applies object-position to EVERY image in a 4-image row (center)', () => {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1),
+      makeImage('b.webp', 18, 4),
+      makeImage('c.webp', 19, 9.6),
+      makeImage('d.webp', 20, 4),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('center'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+      { w: 800, h: 1200 },
+    ]);
+    const imgs = el.querySelectorAll('img');
+    for (const img of imgs) {
+      expect((img as HTMLImageElement).style.objectPosition).toBe('center top');
+    }
+  });
+
+  it('applies object-position to EVERY image in a 4-image row (right)', () => {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1),
+      makeImage('b.webp', 18, 4),
+      makeImage('c.webp', 19, 9.6),
+      makeImage('d.webp', 20, 4),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('right'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+      { w: 800, h: 1200 },
+    ]);
+    const imgs = el.querySelectorAll('img');
+    for (const img of imgs) {
+      expect((img as HTMLImageElement).style.objectPosition).toBe('right top');
+    }
+  });
+
+  it('applies object-position to every image when |width markdown gives hasExplicitWidth=true', () => {
+    // This is the actual regression case: images with |width in markdown,
+    // one of which (index 2, flexGrow=9.6) was previously resized by a
+    // corner-handle.
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1, true),
+      makeImage('b.webp', 18, 4, true),
+      makeImage('c.webp', 19, 9.6, true),
+      makeImage('d.webp', 20, 4, true),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('right'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+      { w: 800, h: 1200 },
+    ]);
+    const imgs = el.querySelectorAll('img');
+    for (let i = 0; i < imgs.length; i++) {
+      expect((imgs[i] as HTMLImageElement).style.objectPosition).toBe('right top');
+    }
+  });
+});
+
+describe('ImageRowWidget alignment persists across widget recreation (preserved sizes)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('after destroy+rebuild, all images use NEW alignment (not stale from preserved)', () => {
+    // Simulate the alignment-change flow:
+    //   1. Build widget A with 'left', let images load.
+    //   2. Destroy A → preservedMultiImageSizes populated.
+    //   3. Build widget B (same lineStart) with 'right', let images load.
+    //   4. All 4 img.style.objectPosition should be 'right top'.
+    const groupA = makeGroup([
+      makeImage('a.webp', 17, 1, true),
+      makeImage('b.webp', 18, 4, true),
+      makeImage('c.webp', 19, 9.6, true),
+      makeImage('d.webp', 20, 4, true),
+    ]);
+    const widgetA = new ImageRowWidget(groupA, makeOptions('left'));
+    const elA = widgetA.build();
+    document.body.appendChild(elA);
+    patchBoundingRect(elA, 944);
+    simulateImagesLoaded(widgetA, elA, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+      { w: 800, h: 1200 },
+    ]);
+    // Simulate corner-handle resize on image 2: set inline height
+    const imgsA = elA.querySelectorAll('img');
+    (imgsA[2] as HTMLImageElement).style.height = '361px';
+    const itemC = elA.querySelectorAll('.drag-img-item')[2] as HTMLElement;
+    itemC.style.height = '361px';
+    // Destroy — this saves preservedMultiImageSizes internally
+    widgetA.destroy();
+
+    // Build widget B with new alignment
+    const groupB = makeGroup([
+      makeImage('a.webp', 17, 1, true),
+      makeImage('b.webp', 18, 4, true),
+      makeImage('c.webp', 19, 9.6, true),
+      makeImage('d.webp', 20, 4, true),
+    ]);
+    const widgetB = new ImageRowWidget(groupB, makeOptions('right'));
+    const elB = widgetB.build();
+    document.body.appendChild(elB);
+    patchBoundingRect(elB, 944);
+    simulateImagesLoaded(widgetB, elB, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+      { w: 800, h: 1200 },
+    ]);
+    const imgsB = elB.querySelectorAll('img');
+    expect(imgsB.length).toBe(4);
+    for (let i = 0; i < imgsB.length; i++) {
+      const op = (imgsB[i] as HTMLImageElement).style.objectPosition;
+      expect(op, `img[${i}] object-position after alignment change`).toBe('right top');
+    }
+  });
+
+  it('after destroy+rebuild, container justify-content reflects NEW alignment', () => {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1, true),
+      makeImage('b.webp', 18, 4, true),
+    ]);
+    const widgetA = new ImageRowWidget(group, makeOptions('left'));
+    const elA = widgetA.build();
+    document.body.appendChild(elA);
+    patchBoundingRect(elA, 944);
+    simulateImagesLoaded(widgetA, elA, [{ w: 500, h: 654 }, { w: 800, h: 1200 }]);
+    widgetA.destroy();
+
+    const widgetB = new ImageRowWidget(group, makeOptions('center'));
+    const elB = widgetB.build();
+    document.body.appendChild(elB);
+    patchBoundingRect(elB, 944);
+    simulateImagesLoaded(widgetB, elB, [{ w: 500, h: 654 }, { w: 800, h: 1200 }]);
+
+    expect(elB.style.justifyContent).toBe('center');
+  });
+});
+
+describe('ImageRowWidget.updateAlignment (in-place)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('updates every image object-position without recreating widget', () => {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1),
+      makeImage('b.webp', 18, 4),
+      makeImage('c.webp', 19, 9.6),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+    ]);
+    let imgs = el.querySelectorAll('img');
+    for (const img of imgs) {
+      expect((img as HTMLImageElement).style.objectPosition).toBe('left top');
+    }
+
+    widget.updateAlignment('right');
+    imgs = el.querySelectorAll('img');
+    expect(imgs.length).toBe(3);
+    for (const img of imgs) {
+      expect((img as HTMLImageElement).style.objectPosition).toBe('right top');
+    }
+    // Verify item-level alignment (img element positioning within item)
+    const items = el.querySelectorAll('.drag-img-item');
+    for (const item of items) {
+      expect((item as HTMLElement).style.display).toBe('flex');
+      expect((item as HTMLElement).style.justifyContent).toBe('flex-end');
+    }
+    expect(el.style.justifyContent).toBe('flex-end');
+  });
+
+  it('applies item-level flex positioning for every image after build', () => {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1),
+      makeImage('b.webp', 18, 4),
+      makeImage('c.webp', 19, 9.6),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('center'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+      { w: 1920, h: 1440 },
+    ]);
+    const items = el.querySelectorAll('.drag-img-item');
+    expect(items.length).toBe(3);
+    for (const item of items) {
+      expect((item as HTMLElement).style.display).toBe('flex');
+      expect((item as HTMLElement).style.justifyContent).toBe('center');
+    }
+  });
+});

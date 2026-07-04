@@ -546,11 +546,13 @@ export class ImageRowWidget {
     const contentRect = computeImageContentRect(iw, ih, meta);
     if (!contentRect) return null;
 
-    // When item is a flex container (e.g. for alignment), the img element
-    // may be offset from the item's top-left.  Add that offset so resize
-    // handles track the actual visual position of the image.
-    const offsetLeft = img.offsetLeft;
-    const offsetTop = img.offsetTop;
+    // Use getBoundingClientRect to compute the img's offset from the item.
+    // Prefer this over img.offsetLeft/offsetTop because offsetParent may be
+    // a wrapper element inserted by Obsidian rather than the item itself.
+    const itemRect = item.getBoundingClientRect();
+    const imgRect = img.getBoundingClientRect();
+    const offsetLeft = imgRect.left - itemRect.left;
+    const offsetTop = imgRect.top - itemRect.top;
 
     const result = {
       left: contentRect.left + offsetLeft,
@@ -591,15 +593,45 @@ export class ImageRowWidget {
       hd.el.style.left = (rect.left + hd.relX * (rect.width - SZ)) + "px";
       hd.el.style.top = (rect.top + hd.relY * (rect.height - SZ)) + "px";
     }
+
+    // Diagnostic: compare our computed rect with the browser's actual
+    // rendered positions of the img element and the first handle.
+    const img = this.imageEls[index];
+    const item = this.itemEls[index];
+    const imgRect = img?.getBoundingClientRect();
+    const itemRect = item?.getBoundingClientRect();
+    const firstHandle = defs[0]?.el;
+    const hCS = firstHandle ? getComputedStyle(firstHandle) : null;
+    const hRect = firstHandle?.getBoundingClientRect();
     logger.debug("updateHandlePositions", {
       index,
+      // Our computed content rect (target)
       rectLeft: rect.left,
       rectTop: rect.top,
       rectW: rect.width,
       rectH: rect.height,
+      // img element actual rendered rect (relative to item)
+      imgOffsetLeft: img?.offsetLeft,
+      imgOffsetTop: img?.offsetTop,
+      imgClientW: img?.clientWidth,
+      imgClientH: img?.clientHeight,
+      // img & item absolute positions (for cross-check)
+      imgAbsLeft: Math.round(imgRect?.left ?? 0),
+      imgAbsTop: Math.round(imgRect?.top ?? 0),
+      imgAbsW: Math.round(imgRect?.width ?? 0),
+      imgAbsH: Math.round(imgRect?.height ?? 0),
+      itemAbsLeft: Math.round(itemRect?.left ?? 0),
+      itemAbsTop: Math.round(itemRect?.top ?? 0),
+      itemAbsW: Math.round(itemRect?.width ?? 0),
+      itemAbsH: Math.round(itemRect?.height ?? 0),
+      // First handle: our inline write vs browser computed vs browser rect
+      h1InlineLeft: defs[0]?.el.style.left,
+      h1InlineTop: defs[0]?.el.style.top,
+      h1ComputedLeft: hCS?.left,
+      h1ComputedTop: hCS?.top,
+      h1RectLeft: Math.round(hRect?.left ?? 0),
+      h1RectTop: Math.round(hRect?.top ?? 0),
       handleCount: defs.length,
-      firstHandleLeft: defs[0]?.el.style.left,
-      firstHandleTop: defs[0]?.el.style.top,
     });
   }
 
@@ -966,6 +998,7 @@ export class ImageRowWidget {
       }
       for (let i = 0; i < this.imageEls.length; i++) {
         this.imageEls[i].style.height = h;
+        this.imageEls[i].style.width = "auto";
       }
 
       logger.debug("ImageRowWidget layout applied", {
@@ -1058,6 +1091,11 @@ export class ImageRowWidget {
       }
       for (let i = 0; i < this.imageEls.length; i++) {
         this.imageEls[i].style.height = h;
+        // Let the image take its intrinsic width from the natural
+        // aspect ratio so that flex justify-content alignment within
+        // the item is visible (without "auto", width stays 100% and
+        // the img fills the item, hiding any alignment offset).
+        this.imageEls[i].style.width = "auto";
       }
     }
 
