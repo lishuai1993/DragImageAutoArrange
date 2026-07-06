@@ -72,6 +72,24 @@ export function createReadingModeProcessor(
           const parsed = parseImageLine(lines[i], i, re);
           if (parsed) parsedImages.push(parsed);
         }
+        logger.debug("ReadingMode parsed markdown", {
+          filePath: file.path,
+          totalLines: lines.length,
+          parsedCount: parsedImages.length,
+          parsed: parsedImages.map(p => ({
+            line: p.line,
+            fileName: p.fileName,
+            hasExplicitWidth: p.hasExplicitWidth,
+            explicitWidth: p.explicitWidth,
+            flexGrow: p.flexGrow,
+            scale: p.scale,
+          })),
+        });
+      } else {
+        logger.debug("ReadingMode file not found or not TFile", {
+          sourcePath: ctx.sourcePath,
+          abstractFile: String(file),
+        });
       }
     } catch (e) {
       logger.warn("ReadingMode failed to read file for scale data", { error: String(e) });
@@ -83,16 +101,38 @@ export function createReadingModeProcessor(
     // only sees a subset of embeds but parses the entire file.
     const fileNameCount = new Map<string, number>();
     let matchCount = 0;
-    for (const embed of imageEmbeds) {
+    let flexGrowSetCount = 0;
+    const matchDebug: Array<{ embedIdx: number; alt: string; extractedFn: string; matched: boolean; matchedLine: number | null; matchedFn: string | null; parsedHasExplicit: boolean; parsedScale: number | null; parsedFlexGrow: number }> = [];
+    for (let embedIdx = 0; embedIdx < imageEmbeds.length; embedIdx++) {
+      const embed = imageEmbeds[embedIdx];
       const alt = embed.getAttribute("alt") || "";
       const fn = alt.split("|")[0];
       const count = fileNameCount.get(fn) ?? 0;
       fileNameCount.set(fn, count + 1);
       // Find the (count+1)-th occurrence in parsedImages
       let occ = 0;
+      let matched = false;
+      let matchedLine: number | null = null;
+      let matchedFn: string | null = null;
+      let parsedHasExplicit = false;
+      let parsedScale: number | null = null;
+      let parsedFlexGrow = 0;
       for (const parsed of parsedImages) {
         if (parsed.fileName === fn) {
           if (occ === count) {
+            matched = true;
+            matchedLine = parsed.line;
+            matchedFn = parsed.fileName;
+            parsedHasExplicit = parsed.hasExplicitWidth;
+            parsedScale = parsed.scale;
+            parsedFlexGrow = parsed.flexGrow;
+            // Store flexGrow from parsed markdown.
+            // Only trust it when hasExplicitWidth is true; otherwise
+            // parseImageLine defaults to 1 which is unreliable.
+            if (parsed.hasExplicitWidth) {
+              embed.setAttribute("data-diaa-flexgrow", String(parsed.flexGrow));
+              flexGrowSetCount++;
+            }
             if (parsed.scale != null) {
               embed.setAttribute("data-diaa-scale", String(parsed.scale));
               matchCount++;
@@ -102,11 +142,14 @@ export function createReadingModeProcessor(
           occ++;
         }
       }
+      matchDebug.push({ embedIdx, alt, extractedFn: fn, matched, matchedLine, matchedFn, parsedHasExplicit, parsedScale, parsedFlexGrow });
     }
     logger.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
       parsedImages: parsedImages.length,
       matched: matchCount,
+      flexGrowSet: flexGrowSetCount,
+      details: matchDebug,
     });
 
     // --- Step 1: Group consecutive embeds (respect maxImagesPerRow) ---
@@ -230,39 +273,41 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   const firstBlock = findBlockParent(embeds[0]);
   if (!firstBlock) return;
 
-  // Collect image elements, natural metadata, markdown |width values, and scale ratios.
+  // Collect image elements, natural metadata, flexGrow from parsed markdown, and scale ratios.
+  // NOTE: do NOT read img.getAttribute("width") — Obsidian sets pixel widths on
+  // ALL <img> elements in Reading Mode that are NOT the flexGrow×100 values we need.
   const imgs: HTMLImageElement[] = [];
   const metas: ImageMeta[] = [];
-  const explicitWidths: Array<number | null> = [];
+  const parsedFlexGrows: Array<number | null> = [];
   const scales: Array<number | null> = [];
   for (const embed of embeds) {
     const img = embed.querySelector<HTMLImageElement>("img");
     const scaleAttr = embed.getAttribute("data-diaa-scale");
+    const fgAttr = embed.getAttribute("data-diaa-flexgrow");
     if (img) {
       imgs.push(img);
       metas.push({
         naturalWidth: img.naturalWidth || 0,
         naturalHeight: img.naturalHeight || 0,
       });
-      const wAttr = img.getAttribute("width");
-      explicitWidths.push(wAttr ? parseInt(wAttr, 10) : null);
+      parsedFlexGrows.push(fgAttr ? parseFloat(fgAttr) : null);
       scales.push(scaleAttr ? parseFloat(scaleAttr) : null);
     } else {
       metas.push({ naturalWidth: 0, naturalHeight: 0 });
-      explicitWidths.push(null);
+      parsedFlexGrows.push(null);
       scales.push(null);
     }
   }
   const hasScale = scales.some((s) => s != null);
 
   const allLoaded = metas.every((m) => m.naturalWidth > 0);
-  const hasExplicit = explicitWidths.some((w) => w !== null);
+  const hasParsedGrows = parsedFlexGrows.some((g) => g !== null);
 
-  // Build flex-grows: explicit |width takes priority, else compute from aspect ratio
+  // Build flex-grows: parsed markdown |width takes priority, else compute from aspect ratio
   const grows: number[] = [];
-  if (allLoaded && hasExplicit) {
+  if (allLoaded && hasParsedGrows) {
     for (let i = 0; i < metas.length; i++) {
-      grows[i] = explicitWidths[i] !== null ? explicitWidths[i]! / 100 : computeFlexGrows(metas)[i];
+      grows[i] = parsedFlexGrows[i] !== null ? parsedFlexGrows[i]! : computeFlexGrows(metas)[i];
     }
   } else if (allLoaded) {
     const cg = computeFlexGrows(metas);
@@ -369,20 +414,20 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     const allReady = currentMetas.every((m) => m.naturalWidth > 0);
     if (!allReady) return;
 
-    // Re-read explicit widths
-    const currentExplicits: Array<number | null> = [];
-    for (const img of imgs) {
-      const wAttr = img.getAttribute("width");
-      currentExplicits.push(wAttr ? parseInt(wAttr, 10) : null);
+    // Re-read parsed flexGrow from embed data attributes (set from markdown source).
+    const currentParsedGrows: Array<number | null> = [];
+    for (const embed of embeds) {
+      const fg = embed.getAttribute("data-diaa-flexgrow");
+      currentParsedGrows.push(fg ? parseFloat(fg) : null);
     }
-    const curHasExplicit = currentExplicits.some((w) => w !== null);
+    const curHasExplicit = currentParsedGrows.some((g) => g !== null);
 
     // Build final flex-grows
     const finalGrows: number[] = [];
     if (curHasExplicit) {
       const aspectGrows = computeFlexGrows(currentMetas);
       for (let i = 0; i < currentMetas.length; i++) {
-        finalGrows[i] = currentExplicits[i] !== null ? currentExplicits[i]! / 100 : aspectGrows[i];
+        finalGrows[i] = currentParsedGrows[i] !== null ? currentParsedGrows[i]! : aspectGrows[i];
       }
     } else {
       const cg = computeFlexGrows(currentMetas);
@@ -391,7 +436,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
 
     logger.debug("RM applySizes flexGrows", {
       containerWidth,
-      currentExplicits,
+      currentParsedGrows,
       curHasExplicit,
       finalGrows: [...finalGrows],
       scales: scales.map((s) => s == null ? null : Math.round(s * 100)),
@@ -412,7 +457,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
         const scale = scales[i];
         let imageH: number;
         let fallback = false;
-        if (scale != null && scale > 0 && scale < 1) {
+        if (scale != null && scale > 0 && scale <= 1) {
           const itemW = (finalGrows[i] / totalG) * AW;
           const meta = currentMetas[i];
           const ar = meta.naturalWidth / meta.naturalHeight;

@@ -1181,6 +1181,7 @@ export class ImageRowWidget {
           this.onLayoutChange?.();
           void this.container!.offsetHeight;
           this.updateAllHandlePositions();
+          requestAnimationFrame(() => this._logRenderedState("LivePreview"));
           return;
         }
       }
@@ -1234,6 +1235,7 @@ export class ImageRowWidget {
         this.onLayoutChange?.();
         void this.container.offsetHeight;
         this.updateAllHandlePositions();
+        requestAnimationFrame(() => this._logRenderedState("LivePreview"));
         return;
       }
 
@@ -1292,6 +1294,7 @@ export class ImageRowWidget {
       // Force reflow so handle positions use the new dimensions
       void this.container.offsetHeight;
       this.updateAllHandlePositions();
+      requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } else {
       // Use a sensible default until images load
       this.container.style.height = `${this.options.defaultRowHeight}px`;
@@ -1481,6 +1484,37 @@ export class ImageRowWidget {
     // Force reflow so handle positions use the new dimensions
     void this.container.offsetHeight;
     this.updateAllHandlePositions();
+    requestAnimationFrame(() => this._logRenderedState("LivePreview"));
+  }
+
+  private _logRenderedState(mode: string): void {
+    if (!this.container) return;
+    const containerRect = this.container.getBoundingClientRect();
+    const containerStyle = this.container.style;
+    const images = this.imageEls.map((img, i) => {
+      const imgRect = img.getBoundingClientRect();
+      const itemRect = this.itemEls[i]?.getBoundingClientRect() ?? imgRect;
+      const computed = window.getComputedStyle(img);
+      return {
+        index: i,
+        imgRect: { x: Math.round(imgRect.x), y: Math.round(imgRect.y), w: Math.round(imgRect.width), h: Math.round(imgRect.height) },
+        itemRect: { x: Math.round(itemRect.x), y: Math.round(itemRect.y), w: Math.round(itemRect.width), h: Math.round(itemRect.height) },
+        imgStyle: {
+          width: computed.width,
+          height: computed.height,
+          objectFit: computed.objectFit,
+          objectPosition: computed.objectPosition,
+        },
+        natural: { w: img.naturalWidth, h: img.naturalHeight },
+        scale: this.group.images[i]?.scale ?? null,
+      };
+    });
+    logger.info("RENDER_COMPARE " + mode, {
+      containerRect: { x: Math.round(containerRect.x), y: Math.round(containerRect.y), w: Math.round(containerRect.width), h: Math.round(containerRect.height) },
+      containerStyle: { height: containerStyle.height, justifyContent: containerStyle.justifyContent },
+      alignment: this.options.alignment,
+      images,
+    });
   }
 
   /**
