@@ -336,29 +336,72 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
 
   for (let i = 0; i < embeds.length; i++) {
     const flexGrow = grows[i] || 1;
-    embeds[i].style.cssText = [
-      `flex:${flexGrow} 1 0%`,
-      `overflow:hidden`,
-      `min-width:50px`,
-      `position:relative`,
-      `margin:0`,
-      `padding:0`,
-      `display:flex`,
-      `justify-content:${justifyContent}`,
-      `align-items:flex-start`,
-    ].join(";");
+    const embed = embeds[i];
+    // Use setProperty("important") for styles that Obsidian CSS classes may override
+    embed.style.setProperty("flex", `${flexGrow} 1 0%`, "important");
+    embed.style.setProperty("overflow", "hidden", "important");
+    embed.style.setProperty("min-width", "50px", "important");
+    embed.style.setProperty("position", "relative", "important");
+    embed.style.setProperty("margin", "0", "important");
+    embed.style.setProperty("padding", "0", "important");
+    embed.style.setProperty("display", "flex", "important");
+    embed.style.setProperty("justify-content", justifyContent, "important");
+    embed.style.setProperty("align-items", "flex-start", "important");
 
-    const embedImgs = Array.from(embeds[i].querySelectorAll<HTMLImageElement>("img"));
+    const embedImgs = Array.from(embed.querySelectorAll<HTMLImageElement>("img"));
     for (const img of embedImgs) {
-      img.style.cssText = [
-        `width:100%`,
-        `height:100%`,
-        `object-fit:contain`,
-        `object-position:${objectPosition}`,
-        `display:block`,
-      ].join(";");
+      // Strip Obsidian alignment classes that override our layout
+      img.classList.remove(
+        "image-position-center",
+        "image-position-left",
+        "image-position-right",
+        "image-converter-aligned",
+        "image-no-wrap"
+      );
+      img.style.setProperty("width", "100%", "important");
+      img.style.setProperty("height", "100%", "important");
+      img.style.setProperty("object-fit", "contain", "important");
+      img.style.setProperty("object-position", objectPosition, "important");
+      img.style.setProperty("display", "block", "important");
+      img.style.setProperty("margin", "0", "important");
+
+      // Defend against Obsidian asynchronously re-adding alignment classes
+      // and overwriting img height (Obsidian repeatedly sets it to defaultRowHeight-20).
+      const OBSIDIAN_ALIGN_CLASSES = [
+        "image-position-center",
+        "image-position-left",
+        "image-position-right",
+        "image-converter-aligned",
+        "image-no-wrap",
+      ];
+      const styleGuard = new MutationObserver((mutations, obs) => {
+        for (const m of mutations) {
+          if (m.type !== "attributes") continue;
+          const attr = m.attributeName;
+          if (attr !== "class" && attr !== "style") continue;
+          const target = m.target as HTMLImageElement;
+          const itemEl = target.closest<HTMLElement>(".internal-embed");
+          if (!itemEl) continue;
+          const itemH = itemEl.style.height;
+          const hasClasses = OBSIDIAN_ALIGN_CLASSES.some(c => target.classList.contains(c));
+          const heightMismatch = attr === "style" && itemH && target.style.height !== itemH;
+          if (!hasClasses && !heightMismatch) continue;
+          obs.disconnect();
+          if (hasClasses) {
+            target.classList.remove(...OBSIDIAN_ALIGN_CLASSES);
+          }
+          if (heightMismatch) {
+            target.style.setProperty("height", itemH, "important");
+          }
+          if (target.style.margin) {
+            target.style.setProperty("margin", "0", "important");
+          }
+          obs.observe(target, { attributes: true, attributeFilter: ["class", "style"] });
+        }
+      });
+      styleGuard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
     }
-    row.appendChild(embeds[i]);
+    row.appendChild(embed);
   }
 
   // ── Anchor-based insertion: insert before first block, then remove old block(s) ──
@@ -457,12 +500,21 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
         }
         debugHeights.push({ i, scale, itemW: (finalGrows[i] / totalG) * AW, ar: currentMetas[i].naturalWidth / currentMetas[i].naturalHeight, imageH, fallback });
         const hPx = `${imageH}px`;
-        embeds[i].style.flex = `${finalGrows[i]} 1 0%`;
-        embeds[i].style.height = hPx;
+        embeds[i].style.setProperty("flex", `${finalGrows[i]} 1 0%`, "important");
+        embeds[i].style.setProperty("height", hPx, "important");
         const embedImg = embeds[i].querySelector<HTMLImageElement>("img");
         if (embedImg) {
-          embedImg.style.height = hPx;
-          embedImg.style.width = "auto";
+          // Strip Obsidian alignment classes in case they were re-added
+          embedImg.classList.remove(
+            "image-position-center",
+            "image-position-left",
+            "image-position-right",
+            "image-converter-aligned",
+            "image-no-wrap"
+          );
+          embedImg.style.setProperty("height", hPx, "important");
+          embedImg.style.setProperty("width", "auto", "important");
+          embedImg.style.setProperty("margin", "0", "important");
         }
         maxH = Math.max(maxH, imageH);
       }
@@ -485,45 +537,60 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       );
       row.style.height = `${rowHeightPx}px`;
       for (let j = 0; j < n; j++) {
-        embeds[j].style.flex = `${finalGrows[j]} 1 0%`;
-        embeds[j].style.height = `${rowHeightPx}px`;
+        embeds[j].style.setProperty("flex", `${finalGrows[j]} 1 0%`, "important");
+        embeds[j].style.setProperty("height", `${rowHeightPx}px`, "important");
         const embedImg = embeds[j].querySelector<HTMLImageElement>("img");
         if (embedImg) {
-          embedImg.style.height = `${rowHeightPx}px`;
-          embedImg.style.width = "auto";
+          embedImg.classList.remove(
+            "image-position-center",
+            "image-position-left",
+            "image-position-right",
+            "image-converter-aligned",
+            "image-no-wrap"
+          );
+          embedImg.style.setProperty("height", `${rowHeightPx}px`, "important");
+          embedImg.style.setProperty("width", "auto", "important");
+          embedImg.style.setProperty("margin", "0", "important");
         }
       }
     }
 
-    // ── RENDER_COMPARE: cross-mode comparison log ──
-    requestAnimationFrame(() => {
-      const containerRect = row.getBoundingClientRect();
-      const containerCS = row.style;
-      const images = imgs.map((img, i) => {
+    // ── Row 1 Image 0 render-size tracker ──
+    if (embeds.length === 3 && imgs[0]?.isConnected) {
+      const trackImage0 = () => {
+        const img = imgs[0];
+        if (!img?.isConnected) return;
+        const containerRect = row.getBoundingClientRect();
+        const itemRect = embeds[0].getBoundingClientRect();
         const imgRect = img.getBoundingClientRect();
-        const itemRect = embeds[i]?.getBoundingClientRect() ?? imgRect;
-        const computed = getComputedStyle(img);
-        return {
-          index: i,
-          imgRect: { x: Math.round(imgRect.x), y: Math.round(imgRect.y), w: Math.round(imgRect.width), h: Math.round(imgRect.height) },
-          itemRect: { x: Math.round(itemRect.x), y: Math.round(itemRect.y), w: Math.round(itemRect.width), h: Math.round(itemRect.height) },
-          imgStyle: {
-            width: computed.width,
-            height: computed.height,
-            objectFit: computed.objectFit,
-            objectPosition: computed.objectPosition,
-          },
-          natural: { w: img.naturalWidth, h: img.naturalHeight },
-          scale: scales[i],
-        };
+        const cs = getComputedStyle(img);
+        const itemCS = getComputedStyle(embeds[0]);
+        logger.info("RM ROW1_IMG0 render snapshot", {
+          containerW: Math.round(containerRect.width),
+          containerH: Math.round(containerRect.height),
+          itemW: Math.round(itemRect.width),
+          itemH: Math.round(itemRect.height),
+          imgW: Math.round(imgRect.width),
+          imgH: Math.round(imgRect.height),
+          imgComputedW: cs.width,
+          imgComputedH: cs.height,
+          imgComputedMargin: cs.margin,
+          imgComputedDisplay: cs.display,
+          imgComputedObjectPos: cs.objectPosition,
+          imgClasses: Array.from(img.classList),
+          itemComputedDisplay: itemCS.display,
+          itemComputedJustify: itemCS.justifyContent,
+          inlineHeight: img.style.height,
+          inlineWidth: img.style.width,
+        });
+      };
+      requestAnimationFrame(() => {
+        trackImage0();
+        // Second frame to catch any async changes
+        requestAnimationFrame(() => trackImage0());
       });
-      logger.info("RENDER_COMPARE ReadingMode", {
-        containerRect: { x: Math.round(containerRect.x), y: Math.round(containerRect.y), w: Math.round(containerRect.width), h: Math.round(containerRect.height) },
-        containerStyle: { height: containerCS.height, justifyContent: containerCS.justifyContent },
-        alignment: options.alignment,
-        images,
-      });
-    });
+    }
+
   };
 
   if (allLoaded) {
