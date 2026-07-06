@@ -7,7 +7,8 @@ import {
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged } from "./livePreview";
-import { ImageRowOptions, exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
+import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
+import { ImageRowOptions } from "./types";
 import { logger } from "./logger";
 
 export default class DragImageAutoArrangePlugin
@@ -161,6 +162,8 @@ export default class DragImageAutoArrangePlugin
       ghostImageWidth: this.settings.ghostImageWidth,
       dragOpacity: this.settings.dragOpacity,
       alignment: this.settings.alignment,
+      maxImagesPerRow: this.settings.maxImagesPerRow,
+      imageExtensions: this.settings.imageExtensions,
       getResourcePath: (fileName: string) => {
         const url = this.resolveImagePath(fileName, sourcePath);
         if (!url) {

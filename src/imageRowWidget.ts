@@ -1253,6 +1253,26 @@ export class ImageRowWidget {
         this.itemEls[i].style.flexGrow = String(grows[i]);
         this.group.images[i].flexGrow = grows[i];
       }
+      // Auto-backfill: images without explicit |width or |scale in markdown
+      // get their computed flex-grow and scale persisted.
+      if (this.group.images.some((img) => !img.hasExplicitWidth || img.scale == null)) {
+        for (let i = 0; i < this.group.images.length; i++) {
+          this.group.images[i].hasExplicitWidth = true;
+        }
+        this._scaleDirty = true;
+        // Compute scale ratios after layout settles (RAF so DOM is painted).
+        requestAnimationFrame(() => {
+          for (let i = 0; i < this.group.images.length; i++) {
+            if (this.group.images[i].scale != null) continue;
+            const cr = this.getImageContentRect(i);
+            const ir = this.itemEls[i]?.getBoundingClientRect();
+            if (cr && cr.width > 0 && ir && ir.width > 0) {
+              this.group.images[i].scale = cr.width / ir.width;
+            }
+          }
+          this.persistCallback?.();
+        });
+      }
       for (let i = 0; i < this.itemEls.length; i++) {
         this.itemEls[i].style.height = h;
       }
@@ -1361,6 +1381,25 @@ export class ImageRowWidget {
             k,
           });
         }
+      }
+      // Auto-backfill: persist newly-computed flexGrows and scales.
+      if (someMissing || this.group.images.some(img => img.scale == null)) {
+        for (let i = 0; i < n; i++) {
+          this.group.images[i].hasExplicitWidth = true;
+        }
+        this._scaleDirty = true;
+        // Compute scale ratios after layout settles.
+        requestAnimationFrame(() => {
+          for (let i = 0; i < n; i++) {
+            if (this.group.images[i].scale != null) continue;
+            const cr = this.getImageContentRect(i);
+            const ir = this.itemEls[i]?.getBoundingClientRect();
+            if (cr && cr.width > 0 && ir && ir.width > 0) {
+              this.group.images[i].scale = cr.width / ir.width;
+            }
+          }
+          this.persistCallback?.();
+        });
       }
     }
 

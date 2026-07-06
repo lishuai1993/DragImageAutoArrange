@@ -1,8 +1,8 @@
 import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
-import { CLASSES } from "./constants";
-import { ImageRowOptions } from "./imageRowWidget";
-import { ImageMeta } from "./imageDetector";
-import { computeFlexGrows, computeUniformHeight, computeRowHeight } from "./layoutEngine";
+import { CLASSES, buildImageLineRe } from "./constants";
+import { ImageRowOptions } from "./types";
+import { ImageMeta, ImageEmbed, parseImageLine } from "./imageDetector";
+import { computeFlexGrows, computeRowHeight } from "./layoutEngine";
 import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
 
@@ -28,15 +28,9 @@ export function createReadingModeProcessor(
   getOptions: () => ImageRowOptions,
   enabled: () => boolean
 ) {
-  return (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+  return async (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
     if (!enabled()) return;
 
-    // In Reading Mode Obsidian creates .internal-embed placeholders first
-    // and loads <img> tags asynchronously later.  We cannot rely on
-    // .image-embed class or <img> being present when the post-processor
-    // runs.  Instead, detect .internal-embed elements, filter to image
-    // embeds by file extension, then use a MutationObserver to wait for
-    // <img> elements before applying the flex row layout.
     const allInternalEmbeds = Array.from(
       el.querySelectorAll(".internal-embed")
     ) as HTMLElement[];
@@ -59,15 +53,71 @@ export function createReadingModeProcessor(
 
     if (imageEmbeds.length < 2) return;
 
-    // --- Step 1: Group consecutive embeds ---
-    const groups = buildEmbedGroups(imageEmbeds);
     const options = getOptions();
+
+    // --- Step 0: Parse markdown to recover scale values ---
+    // Obsidian only preserves the first |param as the <img width> attribute.
+    // The scale (third |param) is lost in the DOM, so we read the file.
+    let parsedImages: ImageEmbed[] = [];
+    try {
+      const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
+      if (file instanceof TFile) {
+        // Yield to the next macrotask so pending live-preview persists
+        // (setTimeout 0) write their scale data before we read the file.
+        await new Promise(r => setTimeout(r, 0));
+        const content = await app.vault.cachedRead(file);
+        const re = buildImageLineRe(options.imageExtensions);
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const parsed = parseImageLine(lines[i], i, re);
+          if (parsed) parsedImages.push(parsed);
+        }
+      }
+    } catch (e) {
+      logger.warn("ReadingMode failed to read file for scale data", { error: String(e) });
+    }
+
+    // Match by file name + occurrence count.
+    // Post-processor may be called multiple times for different sections of the
+    // same file, so global position-based matching doesn't work — each invocation
+    // only sees a subset of embeds but parses the entire file.
+    const fileNameCount = new Map<string, number>();
+    let matchCount = 0;
+    for (const embed of imageEmbeds) {
+      const alt = embed.getAttribute("alt") || "";
+      const fn = alt.split("|")[0];
+      const count = fileNameCount.get(fn) ?? 0;
+      fileNameCount.set(fn, count + 1);
+      // Find the (count+1)-th occurrence in parsedImages
+      let occ = 0;
+      for (const parsed of parsedImages) {
+        if (parsed.fileName === fn) {
+          if (occ === count) {
+            if (parsed.scale != null) {
+              embed.setAttribute("data-diaa-scale", String(parsed.scale));
+              matchCount++;
+            }
+            break;
+          }
+          occ++;
+        }
+      }
+    }
+    logger.debug("ReadingMode scale matching", {
+      domEmbeds: imageEmbeds.length,
+      parsedImages: parsedImages.length,
+      matched: matchCount,
+    });
+
+    // --- Step 1: Group consecutive embeds (respect maxImagesPerRow) ---
+    const groups = buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
 
     logger.debug("ReadingMode processor", {
       embedCount: imageEmbeds.length,
       groupCount: groups.length,
       sourcePath: ctx.sourcePath,
       groups: groups.map((g) => g.length),
+      scaleMatches: imageEmbeds.filter((e) => e.hasAttribute("data-diaa-scale")).length,
     });
 
     // --- Step 2: Wait for images then wrap ---
@@ -84,9 +134,18 @@ export function createReadingModeProcessor(
 
 // ── Group detection ──────────────────────────────────────────
 
-function buildEmbedGroups(embeds: HTMLElement[]): HTMLElement[][] {
+function buildEmbedGroups(embeds: HTMLElement[], maxPerRow: number): HTMLElement[][] {
   const groups: HTMLElement[][] = [];
   let current: HTMLElement[] = [];
+
+  const flushGroup = () => {
+    while (current.length > maxPerRow) {
+      groups.push(current.slice(0, maxPerRow));
+      current = current.slice(maxPerRow);
+    }
+    if (current.length >= 2) groups.push([...current]);
+    current = [];
+  };
 
   for (let i = 0; i < embeds.length; i++) {
     const embed = embeds[i];
@@ -99,21 +158,14 @@ function buildEmbedGroups(embeds: HTMLElement[]): HTMLElement[][] {
     const prev = current[current.length - 1];
     const consecutive = areEmbedsConsecutive(prev, embed);
 
-    logger.debug("ReadingMode buildEmbedGroups decision", {
-      index: i,
-      areConsecutive: consecutive,
-      prevBlock: findBlockParent(prev)?.tagName ?? null,
-      currBlock: findBlockParent(embed)?.tagName ?? null,
-    });
-
     if (consecutive) {
       current.push(embed);
     } else {
-      if (current.length >= 2) groups.push([...current]);
+      flushGroup();
       current = [embed];
     }
   }
-  if (current.length >= 2) groups.push([...current]);
+  flushGroup();
 
   return groups;
 }
@@ -178,14 +230,14 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   const firstBlock = findBlockParent(embeds[0]);
   if (!firstBlock) return;
 
-  // Collect image elements, natural metadata, and markdown |width values.
-  // In Reading Mode Obsidian renders ![[file|960]] as <img width="960">,
-  // so we can recover the flex-grow from the HTML width attribute.
+  // Collect image elements, natural metadata, markdown |width values, and scale ratios.
   const imgs: HTMLImageElement[] = [];
   const metas: ImageMeta[] = [];
   const explicitWidths: Array<number | null> = [];
+  const scales: Array<number | null> = [];
   for (const embed of embeds) {
     const img = embed.querySelector<HTMLImageElement>("img");
+    const scaleAttr = embed.getAttribute("data-diaa-scale");
     if (img) {
       imgs.push(img);
       metas.push({
@@ -194,11 +246,14 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       });
       const wAttr = img.getAttribute("width");
       explicitWidths.push(wAttr ? parseInt(wAttr, 10) : null);
+      scales.push(scaleAttr ? parseFloat(scaleAttr) : null);
     } else {
       metas.push({ naturalWidth: 0, naturalHeight: 0 });
       explicitWidths.push(null);
+      scales.push(null);
     }
   }
+  const hasScale = scales.some((s) => s != null);
 
   const allLoaded = metas.every((m) => m.naturalWidth > 0);
   const hasExplicit = explicitWidths.some((w) => w !== null);
@@ -221,7 +276,16 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   row.className = CLASSES.row;
   row.setAttribute("data-diaa-group", "true");
   const { justifyContent, objectPosition } = alignmentToCSS(options.alignment);
-  row.style.cssText = `display:flex;align-items:stretch;justify-content:${justifyContent};gap:${options.gap}px;width:100%;overflow:hidden;`;
+  // Use flex-start when scales exist (per-image heights differ), stretch otherwise
+  const alignItems = hasScale ? "flex-start" : "stretch";
+  row.style.cssText = [
+    `display:flex`,
+    `align-items:${alignItems}`,
+    `justify-content:${justifyContent}`,
+    `gap:${options.gap}px`,
+    `width:100%`,
+    `overflow:hidden`,
+  ].join(";");
 
   // Set initial row height
   let rowH = options.defaultRowHeight;
@@ -231,9 +295,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   }
   row.style.height = `${rowH}px`;
 
-  // Apply styles to each embed directly (Reading Mode uses embed elements
-  // as flex items since all embeds may share the same block parent).
-  // Remove <br> separators between embeds first.
+  // Remove <br> separators between embeds
   for (const embed of embeds) {
     const next = embed.nextElementSibling;
     if (next?.tagName === "BR") next.remove();
@@ -266,7 +328,35 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     row.appendChild(embeds[i]);
   }
 
-  firstBlock.replaceWith(row);
+  // ── Anchor-based insertion: insert before first block, then remove old block(s) ──
+  firstBlock.before(row);
+  const blocksToRemove = new Set<HTMLElement>();
+  for (const embed of embeds) {
+    const block = findBlockParent(embed);
+    // Only remove blocks that are now empty or are the original firstBlock
+    if (block && block !== row) {
+      blocksToRemove.add(block);
+    }
+  }
+  for (const block of blocksToRemove) {
+    if (!block.querySelector(".internal-embed")) {
+      block.remove();
+    }
+  }
+
+  // ── display:contents walking: neutralize Obsidian's intermediate wrappers ──
+  // Obsidian wraps images in extra divs (.image-resize-container, etc).
+  // Set display:contents on wrappers BETWEEN img and the flex item (embed),
+  // but NOT on the embed itself—it is the flex item and must keep its box.
+  for (const img of imgs) {
+    let el: HTMLElement | null = img.parentElement;
+    while (el && el !== row) {
+      if (!(el instanceof HTMLElement && embeds.includes(el))) {
+        el.style.setProperty("display", "contents", "important");
+      }
+      el = el.parentElement;
+    }
+  }
 
   // Compute proper row height after DOM insertion (needs container width)
   const applySizes = () => {
@@ -279,7 +369,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     const allReady = currentMetas.every((m) => m.naturalWidth > 0);
     if (!allReady) return;
 
-    // Re-read explicit widths in case they changed
+    // Re-read explicit widths
     const currentExplicits: Array<number | null> = [];
     for (const img of imgs) {
       const wAttr = img.getAttribute("width");
@@ -299,78 +389,107 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       for (let i = 0; i < currentMetas.length; i++) finalGrows[i] = cg[i];
     }
 
-    // Use computeRowHeight when explicit widths exist (matches Live Preview
-    // recalculateRowHeight path), otherwise computeUniformHeight.
-    let rowHeightPx: number;
-    if (curHasExplicit) {
-      rowHeightPx = computeRowHeight(
+    logger.debug("RM applySizes flexGrows", {
+      containerWidth,
+      currentExplicits,
+      curHasExplicit,
+      finalGrows: [...finalGrows],
+      scales: scales.map((s) => s == null ? null : Math.round(s * 100)),
+      hasScale,
+      n: embeds.length,
+    });
+
+    const n = embeds.length;
+
+    // ── Scale-based heights (matches LivePreview recalculateRowHeight) ──
+    if (n > 1 && hasScale) {
+      let totalG = 0;
+      for (let i = 0; i < n; i++) totalG += finalGrows[i];
+      const AW = containerWidth - (n - 1) * options.gap;
+      let maxH = 0;
+      const debugHeights: Array<{ i: number; scale: number | null; itemW: number; ar: number; imageH: number; fallback: boolean }> = [];
+      for (let i = 0; i < n; i++) {
+        const scale = scales[i];
+        let imageH: number;
+        let fallback = false;
+        if (scale != null && scale > 0 && scale < 1) {
+          const itemW = (finalGrows[i] / totalG) * AW;
+          const meta = currentMetas[i];
+          const ar = meta.naturalWidth / meta.naturalHeight;
+          imageH = Math.round(scale * itemW / ar);
+        } else {
+          // Fall back to uniform height
+          imageH = computeRowHeight(finalGrows, currentMetas, containerWidth, options.gap, options.defaultRowHeight);
+          fallback = true;
+        }
+        debugHeights.push({ i, scale, itemW: (finalGrows[i] / totalG) * AW, ar: currentMetas[i].naturalWidth / currentMetas[i].naturalHeight, imageH, fallback });
+        const hPx = `${imageH}px`;
+        embeds[i].style.flex = `${finalGrows[i]} 1 0%`;
+        embeds[i].style.height = hPx;
+        const embedImg = embeds[i].querySelector<HTMLImageElement>("img");
+        if (embedImg) {
+          embedImg.style.height = hPx;
+          embedImg.style.width = "auto";
+        }
+        maxH = Math.max(maxH, imageH);
+      }
+      row.style.height = `${maxH}px`;
+      logger.debug("RM applySizes scale-based heights", {
+        totalG,
+        AW,
+        maxH,
+        heights: debugHeights,
+      });
+    } else {
+      // ── Uniform height (no scale data) ──
+      // Always use computeRowHeight to match LivePreview recalculateRowHeight.
+      const rowHeightPx = computeRowHeight(
         finalGrows,
         currentMetas,
         containerWidth,
         options.gap,
         options.defaultRowHeight
       );
-    } else {
-      const result = computeUniformHeight(
-        currentMetas,
-        containerWidth,
-        options.gap,
-        50,
-        options.defaultRowHeight * 3
-      );
-      rowHeightPx = result.rowHeight;
-    }
-
-    row.style.height = `${rowHeightPx}px`;
-    for (let j = 0; j < embeds.length; j++) {
-      embeds[j].style.flex = `${finalGrows[j]} 1 0%`;
-      embeds[j].style.height = `${rowHeightPx}px`;
-    }
-
-    // ── COMPUTED check: settings vs browser actual ──
-    requestAnimationFrame(() => {
-      for (let j = 0; j < embeds.length; j++) {
-        const embed = embeds[j];
-        const img = imgs[j];
-        if (!img || !img.isConnected) continue;
-        const cs = getComputedStyle(img);
-        const rect = img.getBoundingClientRect();
-        const embedRect = embed.getBoundingClientRect();
-        logger.debug("ReadingMode applySizes COMPUTED", {
-          index: j,
-          settings: {
-            alignment: options.alignment,
-            defaultRowHeight: options.defaultRowHeight,
-            gap: options.gap,
-            justifyContent,
-            objectPosition,
-          },
-          explicitWidth: currentExplicits[j],
-          finalFlexGrow: finalGrows[j],
-          rowHeightPx,
-          containerWidth,
-          naturalW: currentMetas[j].naturalWidth,
-          naturalH: currentMetas[j].naturalHeight,
-          inline: {
-            w: img.style.width,
-            h: img.style.height,
-            op: img.style.objectPosition,
-            of: img.style.objectFit,
-          },
-          computed: {
-            op: cs.objectPosition,
-            of: cs.objectFit,
-            w: cs.width,
-            h: cs.height,
-          },
-          rendered: {
-            imgW: Math.round(rect.width),
-            imgH: Math.round(rect.height),
-            embedW: Math.round(embedRect.width),
-            embedH: Math.round(embedRect.height),
-          },
-        });
+      row.style.height = `${rowHeightPx}px`;
+      for (let j = 0; j < n; j++) {
+        embeds[j].style.flex = `${finalGrows[j]} 1 0%`;
+        embeds[j].style.height = `${rowHeightPx}px`;
+        const embedImg = embeds[j].querySelector<HTMLImageElement>("img");
+        if (embedImg) {
+          embedImg.style.height = `${rowHeightPx}px`;
+          embedImg.style.width = "auto";
+        }
       }
+    }
+
+    // ── RENDER_COMPARE: cross-mode comparison log ──
+    requestAnimationFrame(() => {
+      const containerRect = row.getBoundingClientRect();
+      const containerCS = row.style;
+      const images = imgs.map((img, i) => {
+        const imgRect = img.getBoundingClientRect();
+        const itemRect = embeds[i]?.getBoundingClientRect() ?? imgRect;
+        const computed = getComputedStyle(img);
+        return {
+          index: i,
+          imgRect: { x: Math.round(imgRect.x), y: Math.round(imgRect.y), w: Math.round(imgRect.width), h: Math.round(imgRect.height) },
+          itemRect: { x: Math.round(itemRect.x), y: Math.round(itemRect.y), w: Math.round(itemRect.width), h: Math.round(itemRect.height) },
+          imgStyle: {
+            width: computed.width,
+            height: computed.height,
+            objectFit: computed.objectFit,
+            objectPosition: computed.objectPosition,
+          },
+          natural: { w: img.naturalWidth, h: img.naturalHeight },
+          scale: scales[i],
+        };
+      });
+      logger.info("RENDER_COMPARE ReadingMode", {
+        containerRect: { x: Math.round(containerRect.x), y: Math.round(containerRect.y), w: Math.round(containerRect.width), h: Math.round(containerRect.height) },
+        containerStyle: { height: containerCS.height, justifyContent: containerCS.justifyContent },
+        alignment: options.alignment,
+        images,
+      });
     });
   };
 

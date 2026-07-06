@@ -262,6 +262,19 @@ class StaticImageRowWidget extends WidgetType {
         this.handleMergeExternal(insertAtIndex, dataTransfer);
       });
 
+      // Auto-backfill: persist computed flexGrow + scale to markdown
+      // immediately (not waiting for widget destroy) so Reading Mode
+      // picks up the correct values without a tab-switch dance.
+      this.innerWidget.onPersist(() => {
+        if (!this.editorView) return;
+        const grows = this.innerWidget!.getCurrentFlexGrows();
+        const images = this.group.images;
+        const scales = images.map((img) => img.scale);
+        this.persistTimer = setTimeout(() => {
+          applyFlexGrowChanges(this.editorView!, images, grows, scales);
+        }, 0);
+      });
+
       return el;
     } catch (e) {
       logger.error("StaticImageRowWidget toDOM error", {
@@ -496,9 +509,9 @@ export function updateImageLineWidth(raw: string, flexGrow: number, scale?: numb
   if (widthValue !== 100) {
     params.push(String(widthValue));
   }
-  if (scale != null && scale > 0 && scale < 1) {
+  if (scale != null && scale > 0 && scale <= 1) {
     const scaleValue = Math.round(scale * 100);
-    if (scaleValue > 0 && scaleValue < 100) {
+    if (scaleValue > 0 && scaleValue <= 100) {
       if (params.length === 0) params.push("100"); // need a placeholder for flexGrow when scale is present
       params.push(String(scaleValue));
     }
