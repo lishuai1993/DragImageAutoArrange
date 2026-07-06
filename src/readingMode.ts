@@ -6,6 +6,16 @@ import { computeFlexGrows, computeRowHeight } from "./layoutEngine";
 import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
 
+/** Extract the filename from an .internal-embed by reading the <img> src attribute. */
+function getFileNameFromEmbed(embed: HTMLElement): string {
+  const img = embed.querySelector<HTMLImageElement>("img");
+  if (!img) return "";
+  const src = img.src || img.getAttribute("src") || "";
+  // Obsidian resource URL: app://local/.../filename.webp?timestamp
+  const match = src.match(/\/([^\/\?]+\.\w+)(?:\?|$)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 /** Check if an .internal-embed element is for an image file. */
 function isImageEmbed(el: HTMLElement): boolean {
   const src = el.getAttribute("src") || "";
@@ -95,61 +105,39 @@ export function createReadingModeProcessor(
       logger.warn("ReadingMode failed to read file for scale data", { error: String(e) });
     }
 
-    // Match by file name + occurrence count.
-    // Post-processor may be called multiple times for different sections of the
-    // same file, so global position-based matching doesn't work — each invocation
-    // only sees a subset of embeds but parses the entire file.
-    const fileNameCount = new Map<string, number>();
+    // Match by DOM global position index.
+    // DOM order of .internal-embed elements in Reading Mode always matches
+    // markdown source line order.  Each embed's position among ALL image
+    // embeds in the document maps directly to parsedImages by index.
+    // This bypasses filename-based matching and naturally handles duplicate
+    // filenames across different sections of the same file.
+    const allImageEmbeds = (Array.from(
+      document.querySelectorAll(".internal-embed")
+    ) as HTMLElement[]).filter(isImageEmbed);
     let matchCount = 0;
     let flexGrowSetCount = 0;
-    const matchDebug: Array<{ embedIdx: number; alt: string; extractedFn: string; matched: boolean; matchedLine: number | null; matchedFn: string | null; parsedHasExplicit: boolean; parsedScale: number | null; parsedFlexGrow: number }> = [];
-    for (let embedIdx = 0; embedIdx < imageEmbeds.length; embedIdx++) {
-      const embed = imageEmbeds[embedIdx];
-      const alt = embed.getAttribute("alt") || "";
-      const fn = alt.split("|")[0];
-      const count = fileNameCount.get(fn) ?? 0;
-      fileNameCount.set(fn, count + 1);
-      // Find the (count+1)-th occurrence in parsedImages
-      let occ = 0;
-      let matched = false;
-      let matchedLine: number | null = null;
-      let matchedFn: string | null = null;
-      let parsedHasExplicit = false;
-      let parsedScale: number | null = null;
-      let parsedFlexGrow = 0;
-      for (const parsed of parsedImages) {
-        if (parsed.fileName === fn) {
-          if (occ === count) {
-            matched = true;
-            matchedLine = parsed.line;
-            matchedFn = parsed.fileName;
-            parsedHasExplicit = parsed.hasExplicitWidth;
-            parsedScale = parsed.scale;
-            parsedFlexGrow = parsed.flexGrow;
-            // Store flexGrow from parsed markdown.
-            // Only trust it when hasExplicitWidth is true; otherwise
-            // parseImageLine defaults to 1 which is unreliable.
-            if (parsed.hasExplicitWidth) {
-              embed.setAttribute("data-diaa-flexgrow", String(parsed.flexGrow));
-              flexGrowSetCount++;
-            }
-            if (parsed.scale != null) {
-              embed.setAttribute("data-diaa-scale", String(parsed.scale));
-              matchCount++;
-            }
-            break;
-          }
-          occ++;
-        }
+    for (const embed of imageEmbeds) {
+      const globalIdx = allImageEmbeds.indexOf(embed);
+      if (globalIdx < 0 || globalIdx >= parsedImages.length) continue;
+      const parsed = parsedImages[globalIdx];
+      // Sanity check: extracted filename should match parsed filename
+      const embedFn = getFileNameFromEmbed(embed);
+      if (embedFn && embedFn !== parsed.fileName) continue;
+      if (parsed.hasExplicitWidth) {
+        embed.setAttribute("data-diaa-flexgrow", String(parsed.flexGrow));
+        flexGrowSetCount++;
       }
-      matchDebug.push({ embedIdx, alt, extractedFn: fn, matched, matchedLine, matchedFn, parsedHasExplicit, parsedScale, parsedFlexGrow });
+      if (parsed.scale != null) {
+        embed.setAttribute("data-diaa-scale", String(parsed.scale));
+        matchCount++;
+      }
     }
     logger.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
+      allEmbeds: allImageEmbeds.length,
       parsedImages: parsedImages.length,
       matched: matchCount,
       flexGrowSet: flexGrowSetCount,
-      details: matchDebug,
     });
 
     // --- Step 1: Group consecutive embeds (respect maxImagesPerRow) ---
