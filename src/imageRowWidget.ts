@@ -299,31 +299,37 @@ export class ImageRowWidget {
     topBar.className = CLASSES.topBar;
     this.container.appendChild(topBar);
 
-    // Double-click on container top edge → equalize all image heights
-    let topBarDblClickArmed = false;
+    // Double-click on container top edge → equalize all image heights.
+    // Uses real-time cursor position check instead of a mousemove-armed flag,
+    // which was fragile at the sensitivity boundary.
+    const sensitivity = this.options.topBarSensitivity;
     this.container.addEventListener("dblclick", (e) => {
-      if (!topBarDblClickArmed) return;
+      const rect = this.container!.getBoundingClientRect();
+      const offsetY = e.clientY - rect.top;
+      logger.debug("BALANCE topBar dblclick received", {
+        clientY: e.clientY,
+        containerTop: rect.top,
+        offsetY,
+        sensitivity,
+        passed: offsetY <= sensitivity,
+        imageCount: this.group.images.length,
+        targetTag: (e.target as HTMLElement)?.tagName,
+        targetClass: (e.target as HTMLElement)?.className,
+      });
+      if (offsetY > sensitivity) return;
       e.preventDefault();
       e.stopPropagation();
       this.snapAllToEquilibrium();
     });
 
     // Show/hide top bar based on mouse proximity to container top
-    const sensitivity = this.options.topBarSensitivity;
     this.container.addEventListener("mousemove", (e) => {
       const rect = this.container!.getBoundingClientRect();
       const offsetY = e.clientY - rect.top;
-      if (offsetY <= sensitivity) {
-        topBar.style.backgroundColor = "#4a9eff";
-        topBarDblClickArmed = true;
-      } else {
-        topBar.style.backgroundColor = "";
-        topBarDblClickArmed = false;
-      }
+      topBar.style.backgroundColor = offsetY <= sensitivity ? "#4a9eff" : "";
     });
     this.container.addEventListener("mouseleave", () => {
       topBar.style.backgroundColor = "";
-      topBarDblClickArmed = false;
     });
 
     const images = this.group.images;
@@ -550,6 +556,10 @@ export class ImageRowWidget {
     divider.ondblclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
+      logger.debug("BALANCE divider dblclick received", {
+        leftIndex,
+        totalImages: this.group.images.length,
+      });
       this.snapDividerToEquilibrium(leftIndex);
     };
 
@@ -1155,6 +1165,14 @@ export class ImageRowWidget {
         const key = mkRowKey(this.options.sourcePath, this.group.lineStart);
         const preserved = preservedMultiImageSizes.get(key);
         if (preserved && preserved.images.length === metas.length) {
+          // Skip stale entries saved before applyLayout ever ran (all images
+          // still at the "100%" default from build()).  Without this guard
+          // a previously-poisoned preserved map would permanently lock the
+          // widget into uniform sizing.
+          const isStale = preserved.images.every(
+            (pi) => pi.styleW === "100%" && pi.styleH === "100%"
+          );
+          if (!isStale) {
           // Apply saved inline style values directly — no recomputation
           // Use item height as the authoritative height for both item and
           // image to prevent mismatch (item.style.height may have been
@@ -1183,6 +1201,7 @@ export class ImageRowWidget {
           this.updateAllHandlePositions();
           requestAnimationFrame(() => this._logRenderedState("LivePreview"));
           return;
+          } // !isStale
         }
       }
 
@@ -1310,6 +1329,13 @@ export class ImageRowWidget {
     if (!this.container || this.itemEls.length === 0) return;
 
     const containerWidth = this.container.getBoundingClientRect().width;
+    logger.debug("BALANCE recalculateRowHeight entry", {
+      hasContainer: !!this.container,
+      itemCount: this.itemEls.length,
+      containerWidth,
+      currentHeights: this.itemEls.map(el => el.style.height),
+      currentFlexGrows: this.itemEls.map(el => el.style.flexGrow),
+    });
     if (containerWidth === 0) {
       requestAnimationFrame(() => this.recalculateRowHeight());
       return;
@@ -1521,13 +1547,30 @@ export class ImageRowWidget {
    * Double-click on divider: snap the two adjacent images to equal heights.
    */
   private snapDividerToEquilibrium(leftIndex: number): void {
+    logger.debug("BALANCE snapDividerToEquilibrium entry", {
+      leftIndex,
+      loadedMetasSize: this.loadedMetas.size,
+      itemElsLength: this.itemEls.length,
+    });
+
     const lm = this.loadedMetas.get(leftIndex);
     const rm = this.loadedMetas.get(leftIndex + 1);
-    if (!lm || !rm || lm.naturalWidth === 0 || rm.naturalWidth === 0) return;
+    if (!lm || !rm || lm.naturalWidth === 0 || rm.naturalWidth === 0) {
+      logger.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: metas not ready", {
+        hasLm: !!lm,
+        hasRm: !!rm,
+        lmNaturalW: lm?.naturalWidth,
+        rmNaturalW: rm?.naturalWidth,
+      });
+      return;
+    }
 
     const leftItem = this.itemEls[leftIndex];
     const rightItem = this.itemEls[leftIndex + 1];
-    if (!leftItem || !rightItem) return;
+    if (!leftItem || !rightItem) {
+      logger.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: items missing");
+      return;
+    }
 
     const total = parseFloat(leftItem.style.flexGrow || "1") + parseFloat(rightItem.style.flexGrow || "1");
     const { left, right } = computeDividerEquilibrium(lm, rm, total);
@@ -1535,6 +1578,32 @@ export class ImageRowWidget {
     leftItem.style.flexGrow = String(left);
     rightItem.style.flexGrow = String(right);
 
+    // Sync in-memory state before persisting
+    this.group.images[leftIndex].flexGrow = left;
+    this.group.images[leftIndex + 1].flexGrow = right;
+
+    // Set scales to 1 so images fill their items, and recalculateRowHeight's
+    // scale branch uses the else-clause (clamped uniform height) for these images.
+    // Using 1 (not null) prevents auto-backfill from re-computing scales.
+    this.group.images[leftIndex].scale = 1;
+    this.group.images[leftIndex + 1].scale = 1;
+    this.group.images[leftIndex].hasExplicitWidth = true;
+    this.group.images[leftIndex + 1].hasExplicitWidth = true;
+    this._scaleDirty = true;
+
+    // Clear preserved per-image sizes so recalculateRowHeight recomputes
+    // fresh heights instead of restoring stale saved dimensions.
+    preservedMultiImageSizes.delete(
+      mkRowKey(this.options.sourcePath, this.group.lineStart)
+    );
+
+    // Persist to markdown BEFORE recalculateRowHeight so that
+    // onLayoutChange → forceLayoutRefresh → updateDOM reads the new values.
+    logger.debug("BALANCE snapDividerToEquilibrium calling persistCallback", {
+      hasPersist: !!this.persistCallback,
+    });
+    this.persistCallback?.();
+    logger.debug("BALANCE snapDividerToEquilibrium calling recalculateRowHeight");
     this.recalculateRowHeight();
 
     logger.info("Divider dblclick snap to equilibrium", {
@@ -1552,13 +1621,27 @@ export class ImageRowWidget {
    */
   private snapAllToEquilibrium(): void {
     const n = this.itemEls.length;
-    if (n < 2) return;
+    logger.debug("BALANCE snapAllToEquilibrium entry", {
+      imageCount: n,
+      loadedMetasSize: this.loadedMetas.size,
+    });
+    if (n < 2) {
+      logger.debug("BALANCE snapAllToEquilibrium GUARD FAIL: n < 2");
+      return;
+    }
 
     const metas: ImageMeta[] = [];
     let totalGrow = 0;
     for (let i = 0; i < n; i++) {
       const meta = this.loadedMetas.get(i);
-      if (!meta || meta.naturalWidth === 0) return;
+      if (!meta || meta.naturalWidth === 0) {
+        logger.debug("BALANCE snapAllToEquilibrium GUARD FAIL: meta not ready", {
+          index: i,
+          hasMeta: !!meta,
+          naturalW: meta?.naturalWidth,
+        });
+        return;
+      }
       metas.push(meta);
       totalGrow += parseFloat(this.itemEls[i].style.flexGrow || "1");
     }
@@ -1567,8 +1650,28 @@ export class ImageRowWidget {
 
     for (let i = 0; i < n; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
+      this.group.images[i].flexGrow = grows[i];
+      // Set scale to 1 so images fill their items, and recalculateRowHeight's
+      // scale branch uses the else-clause (clamped uniform height).  Using 1
+      // (not null) prevents auto-backfill from re-computing scales.
+      this.group.images[i].scale = 1;
+      this.group.images[i].hasExplicitWidth = true;
     }
+    this._scaleDirty = true;
 
+    // Clear preserved per-image sizes so recalculateRowHeight recomputes
+    // fresh heights instead of restoring stale saved dimensions.
+    preservedMultiImageSizes.delete(
+      mkRowKey(this.options.sourcePath, this.group.lineStart)
+    );
+
+    // Persist to markdown BEFORE recalculateRowHeight so that
+    // onLayoutChange → forceLayoutRefresh → updateDOM reads the new values.
+    logger.debug("BALANCE snapAllToEquilibrium calling persistCallback", {
+      hasPersist: !!this.persistCallback,
+    });
+    this.persistCallback?.();
+    logger.debug("BALANCE snapAllToEquilibrium calling recalculateRowHeight");
     this.recalculateRowHeight();
 
     logger.info("Top bar dblclick global snap", { totalGrow, grows });
@@ -1581,8 +1684,17 @@ export class ImageRowWidget {
     // Skip if unchanged to avoid unnecessary reflow + onLayoutChange feedback loop.
     if (this.flexGrows.length === grows.length &&
         this.flexGrows.every((g, i) => g === grows[i])) {
+      logger.debug("BALANCE updateFlexGrows SKIPPED (unchanged)", {
+        flexGrows: this.flexGrows,
+        incoming: grows,
+      });
       return;
     }
+    logger.debug("BALANCE updateFlexGrows applying", {
+      oldFlexGrows: this.flexGrows,
+      newFlexGrows: grows,
+      currentDOM: this.itemEls.map(el => el.style.flexGrow),
+    });
     this.flexGrows = grows;
     for (let i = 0; i < this.itemEls.length && i < grows.length; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
@@ -1941,7 +2053,12 @@ export class ImageRowWidget {
     // Preserve multi-image inline styles so the new widget (e.g. after
     // alignment change) restores the same visual sizes — including
     // per-image height adjustments made by corner handles.
-    if (this.group.images.length > 1 && this.imageEls.length > 0) {
+    // Guard: skip if layout was never applied (all item heights still at
+    // the initial "100%" default from build()), to avoid poisoning the
+    // preserved map with pre-layout values when the widget is destroyed
+    // before applyLayout could run (e.g. plugin starts in Reading Mode).
+    if (this.group.images.length > 1 && this.imageEls.length > 0
+        && this.itemEls.some((el) => el.style.height && el.style.height !== "100%")) {
       const data: MultiImageSizeData = {
         images: this.imageEls.map((img, i) => ({
           styleW: img.style.width,

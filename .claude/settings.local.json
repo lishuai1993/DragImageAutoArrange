@@ -36,7 +36,9 @@
       "Bash(kill 3773 3772 3752 3750)",
       "Bash(killall -9 node)",
       "Bash(kill -9 4204 4203 4178)",
-      "Bash(kill -9 5151 5148)"
+      "Bash(kill -9 5151 5148)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(osascript *)"
     ]
   }
 }

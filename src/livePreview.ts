@@ -270,9 +270,12 @@ class StaticImageRowWidget extends WidgetType {
         const grows = this.innerWidget!.getCurrentFlexGrows();
         const images = this.group.images;
         const scales = images.map((img) => img.scale);
-        this.persistTimer = setTimeout(() => {
-          applyFlexGrowChanges(this.editorView!, images, grows, scales);
-        }, 0);
+        logger.debug("BALANCE StaticImageRowWidget onPersist", {
+          grows,
+          scales,
+          imageCount: images.length,
+        });
+        applyFlexGrowChanges(this.editorView!, images, grows, scales);
       });
 
       return el;
@@ -449,6 +452,10 @@ class StaticImageRowWidget extends WidgetType {
       grows.push(flex);
     }
     if (grows.length === this.group.images.length) {
+      logger.debug("BALANCE updateDOM syncing flex-grows from markdown", {
+        growsFromMarkdown: grows,
+        currentDOMFlexGrows: this.innerWidget.getCurrentFlexGrows(),
+      });
       this.innerWidget.updateFlexGrows(grows);
     }
     return true;
