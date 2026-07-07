@@ -481,11 +481,10 @@ class StaticImageRowWidget extends WidgetType {
       const hasFlexChanges = grows.some((g, i) => {
         return Math.abs(g - images[i].flexGrow) > 0.005;
       });
-      const hasScaleChanges = this.innerWidget._scaleDirty;
-      if (hasFlexChanges || hasScaleChanges) {
-        const scales = hasScaleChanges
-          ? images.map((img) => img.scale)
-          : undefined;
+      if (hasFlexChanges || this.innerWidget._scaleDirty) {
+        // Always include scales so they're preserved in markdown when
+        // flexGrow changes (e.g. divider drag) without a scale change.
+        const scales = images.map((img) => img.scale);
         this.persistTimer = setTimeout(() => {
           applyFlexGrowChanges(view, images, grows, scales);
         }, 0);
@@ -516,8 +515,10 @@ export function updateImageLineWidth(raw: string, flexGrow: number, scale?: numb
   if (widthValue !== 100) {
     params.push(String(widthValue));
   }
-  if (scale != null && scale > 0 && scale <= 1) {
-    const scaleValue = Math.round(scale * 100);
+  // Clamp to 1 — auto-backfill may compute slightly >1 from sub-pixel rendering
+  const safeScale = (scale != null && scale > 0) ? Math.min(1, scale) : null;
+  if (safeScale != null) {
+    const scaleValue = Math.round(safeScale * 100);
     if (scaleValue > 0 && scaleValue <= 100) {
       if (params.length === 0) params.push("100"); // need a placeholder for flexGrow when scale is present
       params.push(String(scaleValue));

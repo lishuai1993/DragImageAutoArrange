@@ -1,15 +1,91 @@
 {
-  "enabled": true,
-  "defaultRowHeight": 200,
-  "maxImagesPerRow": 10,
-  "gapSize": 4,
-  "snapSensitivity": 7,
-  "enableDragReorder": true,
-  "enableResize": true,
-  "enableDividers": true,
-  "imageExtensions": "png,jpg,jpeg,gif,webp,svg,bmp,avif",
-  "topBarSensitivity": 12,
-  "ghostImageWidth": 400,
-  "dragOpacity": 30,
-  "alignment": "right"
+  "settings": {
+    "enabled": true,
+    "defaultRowHeight": 200,
+    "maxImagesPerRow": 10,
+    "gapSize": 4,
+    "snapSensitivity": 7,
+    "enableDragReorder": true,
+    "enableResize": true,
+    "enableDividers": true,
+    "imageExtensions": "png,jpg,jpeg,gif,webp,svg,bmp,avif",
+    "topBarSensitivity": 12,
+    "ghostImageWidth": 400,
+    "dragOpacity": 30,
+    "alignment": "center"
+  },
+  "preservedSizes": {
+    "图片并排测试.md:20": {
+      "images": [
+        {
+          "styleW": "auto",
+          "styleH": "272px"
+        },
+        {
+          "styleW": "auto",
+          "styleH": "169px"
+        },
+        {
+          "styleW": "auto",
+          "styleH": "272px"
+        },
+        {
+          "styleW": "auto",
+          "styleH": "172px"
+        }
+      ],
+      "items": [
+        {
+          "flexGrow": "5.93",
+          "styleH": "272px"
+        },
+        {
+          "flexGrow": "10.34",
+          "styleH": "169px"
+        },
+        {
+          "flexGrow": "5.93",
+          "styleH": "272px"
+        },
+        {
+          "flexGrow": "5.17",
+          "styleH": "172px"
+        }
+      ],
+      "containerStyleH": "272px",
+      "filePath": "图片并排测试.md"
+    },
+    "图片并排测试.md:10": {
+      "images": [
+        {
+          "styleW": "auto",
+          "styleH": "337px"
+        },
+        {
+          "styleW": "auto",
+          "styleH": "337px"
+        },
+        {
+          "styleW": "auto",
+          "styleH": "337px"
+        }
+      ],
+      "items": [
+        {
+          "flexGrow": "23.23",
+          "styleH": "337px"
+        },
+        {
+          "flexGrow": "13.32",
+          "styleH": "337px"
+        },
+        {
+          "flexGrow": "13.32",
+          "styleH": "337px"
+        }
+      ],
+      "containerStyleH": "337px",
+      "filePath": "图片并排测试.md"
+    }
+  }
 }

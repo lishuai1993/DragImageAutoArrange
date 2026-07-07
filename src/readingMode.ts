@@ -309,11 +309,9 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   row.className = CLASSES.row;
   row.setAttribute("data-diaa-group", "true");
   const { justifyContent, objectPosition } = alignmentToCSS(options.alignment);
-  // Use flex-start when scales exist (per-image heights differ), stretch otherwise
-  const alignItems = hasScale ? "flex-start" : "stretch";
   row.style.cssText = [
     `display:flex`,
-    `align-items:${alignItems}`,
+    `align-items:flex-start`,
     `justify-content:${justifyContent}`,
     `gap:${options.gap}px`,
     `width:100%`,
@@ -488,7 +486,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
         const scale = scales[i];
         let imageH: number;
         let fallback = false;
-        if (scale != null && scale > 0 && scale <= 1) {
+        if (scale != null && scale > 0 && scale < 1) {
           const itemW = (finalGrows[i] / totalG) * AW;
           const meta = currentMetas[i];
           const ar = meta.naturalWidth / meta.naturalHeight;

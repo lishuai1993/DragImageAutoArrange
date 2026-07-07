@@ -1032,14 +1032,17 @@ export class ImageRowWidget {
           }
 
           // ── Multi-image row: direct image-height scaling (dividers stay fixed) ──
+          const dx = ev.clientX - e.clientX;
           const dy = ev.clientY - e.clientY;
           const ySign = hd.relY < 0.5 ? -1 : 1;
+          const xSign = hd.relX < 0.5 ? -1 : 1;
           const wy = 2 * Math.abs(hd.relY - 0.5);
           const wx = 2 * Math.abs(hd.relX - 0.5);
-          const sY = 1;
-          const yDelta = wx + wy > 0
-            ? (dy * ySign * wy) / (wx + wy) * sY
-            : 0;
+          const s = 1;
+          // wy > 0: vertical/corner handles use dy; wy === 0: horizontal handles use dx.
+          const yDelta = wy > 0
+            ? (dy * ySign * wy) / (wx + wy) * s
+            : dx * xSign * s;
           // Use image content height as delta baseline — not container height.
           // This eliminates the dead zone that occurs when container is taller
           // than the image (e.g. from a prior resize).
@@ -1173,6 +1176,12 @@ export class ImageRowWidget {
             (pi) => pi.styleW === "100%" && pi.styleH === "100%"
           );
           if (!isStale) {
+          // When scale data exists in markdown, the scale branch in
+          // recalculateRowHeight is authoritative.  Preserved pixel sizes
+          // may be stale (e.g. saved by an older plugin version), so skip
+          // them and let the scale-based layout recompute correct heights.
+          const hasScale = this.group.images.some(img => img.scale != null);
+          if (!hasScale) {
           // Apply saved inline style values directly — no recomputation
           // Use item height as the authoritative height for both item and
           // image to prevent mismatch (item.style.height may have been
@@ -1201,6 +1210,10 @@ export class ImageRowWidget {
           this.updateAllHandlePositions();
           requestAnimationFrame(() => this._logRenderedState("LivePreview"));
           return;
+          } // !hasScale
+          // hasScale: delete stale preserved entry so recalculateRowHeight
+          // can recompute heights from up-to-date scale ratios.
+          preservedMultiImageSizes.delete(key);
           } // !isStale
         }
       }
@@ -1329,12 +1342,19 @@ export class ImageRowWidget {
     if (!this.container || this.itemEls.length === 0) return;
 
     const containerWidth = this.container.getBoundingClientRect().width;
+    // Snapshot pre-change dimensions for jitter diagnostics.
+    const _beforeItemH = this.itemEls.map(el => el.style.height);
+    const _beforeImgH = this.imageEls.map(el => el.style.height);
+    const _beforeFlexG = this.itemEls.map(el => el.style.flexGrow);
+    const _beforeContainerH = this.container.style.height;
     logger.debug("BALANCE recalculateRowHeight entry", {
       hasContainer: !!this.container,
       itemCount: this.itemEls.length,
       containerWidth,
-      currentHeights: this.itemEls.map(el => el.style.height),
-      currentFlexGrows: this.itemEls.map(el => el.style.flexGrow),
+      currentHeights: _beforeItemH,
+      currentImgHeights: _beforeImgH,
+      currentFlexGrows: _beforeFlexG,
+      currentContainerH: _beforeContainerH,
     });
     if (containerWidth === 0) {
       requestAnimationFrame(() => this.recalculateRowHeight());
@@ -1505,6 +1525,29 @@ export class ImageRowWidget {
       }
     }
 
+    // Diagnose jitter: log any dimension changes caused by this recalc.
+    const _afterItemH = this.itemEls.map(el => el.style.height);
+    const _afterImgH = this.imageEls.map(el => el.style.height);
+    const _afterFlexG = this.itemEls.map(el => el.style.flexGrow);
+    const _afterContainerH = this.container.style.height;
+    const _diffs: Array<{ idx: number; itemH: string; imgH: string; flexG: string }> = [];
+    for (let _i = 0; _i < _beforeItemH.length; _i++) {
+      if (_beforeItemH[_i] !== _afterItemH[_i] || _beforeImgH[_i] !== _afterImgH[_i] || _beforeFlexG[_i] !== _afterFlexG[_i]) {
+        _diffs.push({
+          idx: _i,
+          itemH: `${_beforeItemH[_i]} → ${_afterItemH[_i]}`,
+          imgH: `${_beforeImgH[_i]} → ${_afterImgH[_i]}`,
+          flexG: `${_beforeFlexG[_i]} → ${_afterFlexG[_i]}`,
+        });
+      }
+    }
+    if (_diffs.length > 0) {
+      logger.debug("BALANCE recalculateRowHeight DIMENSION CHANGES", {
+        diffs: _diffs,
+        containerH: `${_beforeContainerH} → ${_afterContainerH}`,
+      });
+    }
+
     this.applyAlignmentToAll();
     this.onLayoutChange?.();
     // Force reflow so handle positions use the new dimensions
@@ -1591,20 +1634,41 @@ export class ImageRowWidget {
     this.group.images[leftIndex + 1].hasExplicitWidth = true;
     this._scaleDirty = true;
 
-    // Clear preserved per-image sizes so recalculateRowHeight recomputes
-    // fresh heights instead of restoring stale saved dimensions.
-    preservedMultiImageSizes.delete(
-      mkRowKey(this.options.sourcePath, this.group.lineStart)
-    );
+    // Set left and right images to uniform height; other images keep
+    // their current per-image heights. Don't delete preserved sizes and
+    // don't call recalculateRowHeight — that would recompute ALL heights.
+    const n = this.itemEls.length;
+    const allGrows: number[] = [];
+    const allMetas: ImageMeta[] = [];
+    for (let i = 0; i < n; i++) {
+      allGrows[i] = parseFloat(this.itemEls[i].style.flexGrow || "1");
+      const m = this.loadedMetas.get(i);
+      if (!m || m.naturalWidth === 0) return;
+      allMetas[i] = m;
+    }
+    const containerWidth = this.container!.getBoundingClientRect().width;
+    const clamped = computeRowHeight(allGrows, allMetas, containerWidth, this.options.gap, this.options.defaultRowHeight);
+    const hPx = `${clamped}px`;
+    this.itemEls[leftIndex].style.height = hPx;
+    this.itemEls[leftIndex + 1].style.height = hPx;
+    this.imageEls[leftIndex].style.height = hPx;
+    this.imageEls[leftIndex + 1].style.height = hPx;
+    this.imageEls[leftIndex].style.width = "auto";
+    this.imageEls[leftIndex + 1].style.width = "auto";
+    let maxH = clamped;
+    for (let j = 0; j < n; j++) {
+      if (j === leftIndex || j === leftIndex + 1) continue;
+      const h = parseFloat(this.itemEls[j].style.height || "0");
+      if (h > maxH) maxH = h;
+    }
+    this.container!.style.height = `${maxH}px`;
 
-    // Persist to markdown BEFORE recalculateRowHeight so that
-    // onLayoutChange → forceLayoutRefresh → updateDOM reads the new values.
+    // Persist to markdown — triggers widget rebuild, but preserved sizes
+    // (still intact) restore per-image heights for unaffected images.
     logger.debug("BALANCE snapDividerToEquilibrium calling persistCallback", {
       hasPersist: !!this.persistCallback,
     });
     this.persistCallback?.();
-    logger.debug("BALANCE snapDividerToEquilibrium calling recalculateRowHeight");
-    this.recalculateRowHeight();
 
     logger.info("Divider dblclick snap to equilibrium", {
       leftIndex,
@@ -1659,20 +1723,31 @@ export class ImageRowWidget {
     }
     this._scaleDirty = true;
 
-    // Clear preserved per-image sizes so recalculateRowHeight recomputes
-    // fresh heights instead of restoring stale saved dimensions.
-    preservedMultiImageSizes.delete(
-      mkRowKey(this.options.sourcePath, this.group.lineStart)
-    );
+    // Compute uniform row height with updated flexGrow distribution.
+    const allGrows2: number[] = [];
+    const allMetas2: ImageMeta[] = [];
+    for (let i = 0; i < n; i++) {
+      allGrows2[i] = parseFloat(this.itemEls[i].style.flexGrow || "1");
+      const m = this.loadedMetas.get(i);
+      if (!m || m.naturalWidth === 0) return;
+      allMetas2[i] = m;
+    }
+    const containerWidth2 = this.container!.getBoundingClientRect().width;
+    const clamped2 = computeRowHeight(allGrows2, allMetas2, containerWidth2, this.options.gap, this.options.defaultRowHeight);
+    const hPx2 = `${clamped2}px`;
+    for (let i = 0; i < n; i++) {
+      this.itemEls[i].style.height = hPx2;
+      this.imageEls[i].style.height = hPx2;
+      this.imageEls[i].style.width = "auto";
+    }
+    this.container!.style.height = hPx2;
 
-    // Persist to markdown BEFORE recalculateRowHeight so that
-    // onLayoutChange → forceLayoutRefresh → updateDOM reads the new values.
+    // Persist to markdown — triggers widget rebuild, but preserved sizes
+    // (still intact) restore the uniform heights correctly.
     logger.debug("BALANCE snapAllToEquilibrium calling persistCallback", {
       hasPersist: !!this.persistCallback,
     });
     this.persistCallback?.();
-    logger.debug("BALANCE snapAllToEquilibrium calling recalculateRowHeight");
-    this.recalculateRowHeight();
 
     logger.info("Top bar dblclick global snap", { totalGrow, grows });
   }
@@ -2057,8 +2132,13 @@ export class ImageRowWidget {
     // the initial "100%" default from build()), to avoid poisoning the
     // preserved map with pre-layout values when the widget is destroyed
     // before applyLayout could run (e.g. plugin starts in Reading Mode).
+    // Only save preserved sizes when the row has NO scale data.
+    // When scale ratios exist in markdown, per-image heights are derived
+    // from them on next load — preserved pixel values would be stale.
+    const hasScale = this.group.images.some(img => img.scale != null);
     if (this.group.images.length > 1 && this.imageEls.length > 0
-        && this.itemEls.some((el) => el.style.height && el.style.height !== "100%")) {
+        && this.itemEls.some((el) => el.style.height && el.style.height !== "100%")
+        && !hasScale) {
       const data: MultiImageSizeData = {
         images: this.imageEls.map((img, i) => ({
           styleW: img.style.width,
