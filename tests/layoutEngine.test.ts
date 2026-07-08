@@ -11,6 +11,9 @@ import {
   computeDividerXPositions,
   findClosestDividerIndex,
   findInsertIndex,
+  computeScaleBasedHeights,
+  computeFlexGrowsFromWidths,
+  computeSingleImageWidth,
 } from '../src/layoutEngine';
 import { ImageMeta } from '../src/imageDetector';
 
@@ -151,6 +154,122 @@ describe('computeRowHeight', () => {
     // aspect = 4, available = 400, w = 400/2 = 200, h = 200/4 = 50 for each
     // Actually 50 is below clamp of 50
     expect(h).toBe(50);
+  });
+});
+
+// ── computeScaleBasedHeights ──
+describe('computeScaleBasedHeights', () => {
+  it('applies scale ratio to compute per-image height', () => {
+    // 2 equal 16:9 images, container 804, gap 4 → AW = 800, itemW = 400 each.
+    // ar = 1600/900 = 1.777..; scale 0.5 → h = round(0.5 * 400 / 1.777..) = round(112.5) = 113
+    const r = computeScaleBasedHeights(
+      [1, 1], [m(1600, 900), m(1600, 900)], [0.5, 0.5], 804, 4, 200
+    );
+    expect(r.heights).toEqual([113, 113]);
+    expect(r.maxH).toBe(113);
+  });
+
+  it('mixes scale and null: null image falls back to uniform computeRowHeight', () => {
+    // Fallback = computeRowHeight([1,1], metas, 804, 4, 200)
+    const fallback = computeRowHeight([1, 1], [m(1600, 900), m(1600, 900)], 804, 4, 200);
+    const r = computeScaleBasedHeights(
+      [1, 1], [m(1600, 900), m(1600, 900)], [0.5, null], 804, 4, 200
+    );
+    expect(r.heights[0]).toBe(113);
+    expect(r.heights[1]).toBe(fallback);
+    expect(r.maxH).toBe(Math.max(113, fallback));
+  });
+
+  it('all-null scales → every height equals the uniform fallback', () => {
+    const fallback = computeRowHeight([2, 1], [m(1600, 900), m(800, 600)], 804, 4, 200);
+    const r = computeScaleBasedHeights(
+      [2, 1], [m(1600, 900), m(800, 600)], [null, null], 804, 4, 200
+    );
+    expect(r.heights).toEqual([fallback, fallback]);
+    expect(r.maxH).toBe(fallback);
+  });
+
+  it('scale == 1 uses each image\'s own full-width height (not the row max)', () => {
+    // grows [2,1], 16:9 + 4:3, container 804 gap 4 → AW=800.
+    // itemW0 = (2/3)*800 = 533.33 → h0 = 533.33/1.7778 = 300
+    // itemW1 = (1/3)*800 = 266.67 → h1 = 266.67/1.3333 = 200
+    // Old `scale < 1` would fall back to computeRowHeight (row max 300) for BOTH,
+    // wrongly resetting image 1 to the equilibrium max.
+    const r = computeScaleBasedHeights(
+      [2, 1], [m(1600, 900), m(800, 600)], [1, 1], 804, 4, 200
+    );
+    expect(r.heights).toEqual([300, 200]);
+    expect(r.maxH).toBe(300);
+  });
+
+  it('scale > 1 is treated as invalid and falls back to uniform', () => {
+    const fallback = computeRowHeight([1, 1], [m(1600, 900), m(1600, 900)], 804, 4, 200);
+    const r = computeScaleBasedHeights(
+      [1, 1], [m(1600, 900), m(1600, 900)], [1.5, 1.5], 804, 4, 200
+    );
+    expect(r.heights).toEqual([fallback, fallback]);
+  });
+});
+
+// ── computeFlexGrowsFromWidths ──
+describe('computeFlexGrowsFromWidths', () => {
+  it('returns [] for empty input', () => {
+    expect(computeFlexGrowsFromWidths([])).toEqual([]);
+  });
+
+  it('normalizes so the smallest width maps to flex-grow 1', () => {
+    // widths [400, 200, 600] → min 200 → [2, 1, 3]
+    expect(computeFlexGrowsFromWidths([400, 200, 600])).toEqual([2, 1, 3]);
+  });
+
+  it('rounds to two decimals', () => {
+    // widths [100, 333] → min 100 → [1, 3.33]
+    expect(computeFlexGrowsFromWidths([100, 333])).toEqual([1, 3.33]);
+  });
+
+  it('is proportional regardless of absolute magnitude', () => {
+    expect(computeFlexGrowsFromWidths([800, 400])).toEqual(
+      computeFlexGrowsFromWidths([200, 100])
+    );
+  });
+
+  it('falls back to 1 for non-positive widths and ignores them for the min basis', () => {
+    // positive min is 150 → 300/150=2, 150/150=1, zero → 1
+    expect(computeFlexGrowsFromWidths([300, 150, 0])).toEqual([2, 1, 1]);
+  });
+
+  it('handles all-zero widths as flex-grow 1', () => {
+    expect(computeFlexGrowsFromWidths([0, 0])).toEqual([1, 1]);
+  });
+});
+
+// ── computeSingleImageWidth ──
+describe('computeSingleImageWidth', () => {
+  it('natural: small image keeps its own pixel width', () => {
+    // 300px natural, 800 container → 300 (fits).
+    expect(computeSingleImageWidth('natural', 400, 300, 800)).toBe(300);
+  });
+
+  it('natural: wide image shrinks to the container width', () => {
+    // 1600px natural, 800 container → 800.
+    expect(computeSingleImageWidth('natural', 400, 1600, 800)).toBe(800);
+  });
+
+  it('fixed: uses the specified width', () => {
+    expect(computeSingleImageWidth('fixed', 400, 1600, 800)).toBe(400);
+  });
+
+  it('fixed: clamps width up to the minimum (100)', () => {
+    expect(computeSingleImageWidth('fixed', 40, 800, 800)).toBe(100);
+  });
+
+  it('fixed: clamps width down to the container width', () => {
+    expect(computeSingleImageWidth('fixed', 5000, 800, 800)).toBe(800);
+  });
+
+  it('returns 0 when dimensions are unknown', () => {
+    expect(computeSingleImageWidth('natural', 400, 0, 800)).toBe(0);
+    expect(computeSingleImageWidth('fixed', 400, 800, 0)).toBe(0);
   });
 });
 

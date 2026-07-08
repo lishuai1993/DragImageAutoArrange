@@ -2,6 +2,8 @@
 // Extracted from imageRowWidget.ts so reading mode can import types
 // without depending on live-preview widget code.
 
+import { SingleImageSizeMode } from "./constants";
+
 export interface ImageRowOptions {
   defaultRowHeight: number;
   gap: number;
@@ -14,6 +16,8 @@ export interface ImageRowOptions {
   alignment: "left" | "center" | "right";
   maxImagesPerRow: number;
   imageExtensions: string;
+  singleImageSizeMode: SingleImageSizeMode;
+  singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
   sourcePath: string;
 }

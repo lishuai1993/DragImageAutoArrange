@@ -19,7 +19,11 @@ import type { ImageGroup, ImageEmbed } from "./imageDetector";
 import { ImageRowWidget, ImageRowOptions } from "./imageRowWidget";
 import { DragImageSettings } from "./settings";
 import { CLASSES } from "./constants";
+import { computeFlexGrowsFromWidths } from "./layoutEngine";
 import { logger } from "./logger";
+import { clampFlexGrow, clampScale } from "./parameterValidator";
+import { isSingleImageManual, formatSingleImageLine, normalizeSingleImageParams } from "./singleImageParams";
+import { createDragGhost } from "./rowRenderer";
 
 /**
  * Parse the file path from an obsidian://open URI and search ALL document lines
@@ -148,6 +152,36 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
 }
 
 /**
+ * Measure the current rendered pixel width of every item in a rendered flex row.
+ * Locates the row container by its `data-line-start` attribute and reads each
+ * `.drag-img-item` child in document (index) order.  Returns null if the row
+ * isn't currently rendered.
+ */
+function measureItemWidths(view: EditorView, rowLineStart: number): number[] | null {
+  const container = view.dom.querySelector<HTMLElement>(
+    `.${CLASSES.row}[data-line-start="${rowLineStart}"]`
+  );
+  if (!container) return null;
+  const items = container.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
+  if (items.length === 0) return null;
+  return Array.from(items).map((el) => el.getBoundingClientRect().width);
+}
+
+/**
+ * Extract the persisted scale (second |param, ×100) from an image embed line.
+ * `![[a.webp|740|48]]` → 0.48; `![[a.webp|740]]` / `![[a.webp]]` → null.
+ */
+function parseScaleFromRaw(raw: string): number | null {
+  const paramsMatch = raw.match(/\|([^\]]*)\]\]/);
+  if (!paramsMatch) return null;
+  const parts = paramsMatch[1].split("|");
+  if (parts.length < 2) return null;
+  const v = parseInt(parts[1], 10);
+  return isFinite(v) && v > 0 ? v / 100 : null;
+}
+
+
+/**
  * CodeMirror Widget that renders a flex row of images with interactive features.
  */
 /** Strip everything between the first | and ]] so widget equality ignores
@@ -216,6 +250,13 @@ class StaticImageRowWidget extends WidgetType {
     if (this.options.gap !== other.options.gap) return false;
     if (this.options.enableResize !== other.options.enableResize) return false;
     if (this.options.enableDividers !== other.options.enableDividers) return false;
+    if (this.options.singleImageSizeMode !== other.options.singleImageSizeMode) return false;
+    if (this.options.singleImageWidth !== other.options.singleImageWidth) return false;
+    // Single-image manual flag (S) is stripped by normalizeRaw, so compare it
+    // explicitly — flipping S=1→0 (override reset) must force a rebuild.
+    if (a.images.length === 1 && b.images.length === 1) {
+      if (isSingleImageManual(a.images[0].scale) !== isSingleImageManual(b.images[0].scale)) return false;
+    }
     for (let i = 0; i < a.images.length; i++) {
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
     }
@@ -267,9 +308,14 @@ class StaticImageRowWidget extends WidgetType {
       // picks up the correct values without a tab-switch dance.
       this.innerWidget.onPersist(() => {
         if (!this.editorView) return;
-        const grows = this.innerWidget!.getCurrentFlexGrows();
         const images = this.group.images;
-        const scales = images.map((img) => img.scale);
+        // Single-image rows persist as `![[file|W|S]]` (W=px width, S=0/1 flag).
+        if (images.length === 1) {
+          this.persistSingleImage();
+          return;
+        }
+        const grows = this.innerWidget!.getCurrentFlexGrows().map((g) => clampFlexGrow(g));
+        const scales = images.map((img) => img.scale != null ? clampScale(img.scale) : null);
         logger.debug("BALANCE StaticImageRowWidget onPersist", {
           grows,
           scales,
@@ -308,6 +354,7 @@ class StaticImageRowWidget extends WidgetType {
     if (fromIndex < 0 || fromIndex >= images.length ||
         toIndex < 0 || toIndex >= images.length) return;
 
+    try {
     const fromLine = images[fromIndex].line;
     const toLine = images[toIndex].line;
 
@@ -393,6 +440,9 @@ class StaticImageRowWidget extends WidgetType {
         });
       }
     });
+    } catch (e) {
+      logger.error("LivePreview handleReorder error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+    }
   }
 
   /**
@@ -403,6 +453,7 @@ class StaticImageRowWidget extends WidgetType {
     if (!this.editorView) return;
     const view = this.editorView;
 
+    try {
     // Resolve source line from dataTransfer
     const srcLine = resolveSourceLine(view, dataTransfer, this.group);
     if (srcLine === null) {
@@ -418,12 +469,100 @@ class StaticImageRowWidget extends WidgetType {
       dataTransfer: dataTransfer.substring(0, 40),
     });
 
+    // Row → row: recompute BOTH rows' flex-grow from current item widths so
+    // the moved image participates in the target row's normalization and the
+    // source row's remaining items stay proportional.  Scale is preserved.
+    const rowMatch = dataTransfer.match(/^diaa-row:(\d+):(\d+)$/);
+    if (rowMatch) {
+      const srcRowLineStart = parseInt(rowMatch[1], 10);
+      const srcIndex = parseInt(rowMatch[2], 10);
+      this.recomputeFlexGrowsForMerge(view, srcRowLineStart, srcIndex, insertAtIndex);
+    }
+
     moveLine(view, srcLine, targetLine);
+    } catch (e) {
+      logger.error("LivePreview handleMergeExternal error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+    }
   }
+
+  /**
+   * Recompute flex-grow for the source and target rows from their current item
+   * pixel widths, preserving each line's scale.  Writes the new flex-grows in
+   * place (a single dispatch) before the caller relocates the moved line, so
+   * the moved image lands with a flex-grow on the target row's scale.
+   */
+  private recomputeFlexGrowsForMerge(
+    view: EditorView,
+    srcRowLineStart: number,
+    srcIndex: number,
+    insertAtIndex: number
+  ): void {
+    const srcWidths = measureItemWidths(view, srcRowLineStart);
+    const tgtWidths = measureItemWidths(view, this.group.lineStart);
+    if (!srcWidths || !tgtWidths) return;
+    if (srcIndex < 0 || srcIndex >= srcWidths.length) return;
+
+    const movedWidth = srcWidths[srcIndex];
+
+    // Source row: remaining items (moved one removed) → normalized flex-grow.
+    const srcRemaining = srcWidths.filter((_, j) => j !== srcIndex);
+    const srcGrows = computeFlexGrowsFromWidths(srcRemaining);
+
+    // Target row: insert the moved image's current width at insertAtIndex, then
+    // normalize the whole row so every item (moved included) participates.
+    const insertPos = Math.max(0, Math.min(insertAtIndex, tgtWidths.length));
+    const combined = [
+      ...tgtWidths.slice(0, insertPos),
+      movedWidth,
+      ...tgtWidths.slice(insertPos),
+    ];
+    const tgtGrows = computeFlexGrowsFromWidths(combined);
+
+    const doc = view.state.doc;
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    const rewrite = (line0: number, grow: number, dropScale = false): void => {
+      if (line0 < 0 || line0 >= doc.lines) return;
+      const lineObj = doc.line(line0 + 1);
+      const raw = lineObj.text;
+      // The moved line may arrive from a single-image row where the second param
+      // is a 0/1 flag, not a scale.  Drop it so the target multi-row backfills a
+      // real scale instead of mis-reading the flag as a tiny ratio.
+      const scale = dropScale ? null : parseScaleFromRaw(raw);
+      const newText = updateImageLineWidth(raw, grow, scale);
+      if (newText !== raw) {
+        changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
+      }
+    };
+
+    // Source remaining lines.
+    let k = 0;
+    for (let j = 0; j < srcWidths.length; j++) {
+      if (j === srcIndex) continue;
+      rewrite(srcRowLineStart + j, srcGrows[k++]);
+    }
+    // Moved line → its slot in the target row (drop any single-image S flag).
+    rewrite(srcRowLineStart + srcIndex, tgtGrows[insertPos], true);
+    // Existing target lines → their (shifted) slots.
+    for (let t = 0; t < tgtWidths.length; t++) {
+      const slot = t < insertPos ? t : t + 1;
+      rewrite(this.group.lineStart + t, tgtGrows[slot]);
+    }
+
+    if (changes.length === 0) return;
+    // Apply bottom-to-top so earlier line positions stay valid.
+    changes.sort((a, b) => b.from - a.from);
+    view.dispatch({ changes });
+    logger.info("LivePreview merge flex-grow recompute", {
+      srcRowLineStart, srcIndex, insertAtIndex,
+      srcGrows, tgtGrows, movedWidth: Math.round(movedWidth),
+    });
+  }
+
 
   updateDOM(_element: HTMLElement, view: EditorView): boolean {
     if (!this.innerWidget || !this.group) return false;
 
+    try {
     const doc = view.state.doc;
 
     // Detect whether the image group at this position has changed
@@ -443,6 +582,11 @@ class StaticImageRowWidget extends WidgetType {
       if (currentFiles[i] !== this.group.images[i].fileName) return false;
     }
 
+    // Single-image rows use the swapped `|S|W` param order; the flex-grow sync
+    // below assumes multi-image `|W|...`, so skip it (single sizing is handled
+    // by layoutSingleImage on rebuild).
+    if (this.group.images.length === 1) return true;
+
     // Group composition unchanged: just sync flex-grows, no DOM rebuild
     const grows: number[] = [];
     for (let line = this.group.lineStart; line < this.group.lineEnd; line++) {
@@ -452,13 +596,20 @@ class StaticImageRowWidget extends WidgetType {
       grows.push(flex);
     }
     if (grows.length === this.group.images.length) {
+      const safeGrows = grows.map((g) => clampFlexGrow(g));
       logger.debug("BALANCE updateDOM syncing flex-grows from markdown", {
         growsFromMarkdown: grows,
+        safeGrows,
         currentDOMFlexGrows: this.innerWidget.getCurrentFlexGrows(),
       });
-      this.innerWidget.updateFlexGrows(grows);
+      this.innerWidget.updateFlexGrows(safeGrows);
     }
     return true;
+    } catch (e) {
+      logger.error("LivePreview updateDOM error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      // Return false so CodeMirror safely destroys + recreates the widget.
+      return false;
+    }
   }
 
   ignoreEvent(event: Event): boolean {
@@ -481,17 +632,41 @@ class StaticImageRowWidget extends WidgetType {
       const hasFlexChanges = grows.some((g, i) => {
         return Math.abs(g - images[i].flexGrow) > 0.005;
       });
-      if (hasFlexChanges || this.innerWidget._scaleDirty) {
+      if (hasFlexChanges || this.innerWidget._scaleDirtyImages.size > 0) {
         // Always include scales so they're preserved in markdown when
         // flexGrow changes (e.g. divider drag) without a scale change.
         const scales = images.map((img) => img.scale);
-        this.persistTimer = setTimeout(() => {
+        // Try synchronous dispatch first; fall back to setTimeout if the
+        // view is already in a state where dispatch is illegal.
+        try {
           applyFlexGrowChanges(view, images, grows, scales);
-        }, 0);
+        } catch {
+          this.persistTimer = setTimeout(() => {
+            applyFlexGrowChanges(view, images, grows, scales);
+          }, 0);
+        }
       }
     }
     this.innerWidget?.destroy();
     this.innerWidget = null;
+  }
+
+  /** Synchronously persist pending flex-grow and scale changes.
+   *  Called before creating a new widget to avoid setTimeout races. */
+  flushPendingPersist(): void {
+    if (!this.editorView || !this.innerWidget || this.group.images.length <= 1) return;
+    const images = this.group.images;
+    const grows = this.innerWidget.getCurrentFlexGrows();
+    const hasFlexChanges = grows.some((g, i) => {
+      return Math.abs(g - images[i].flexGrow) > 0.005;
+    });
+    if (!hasFlexChanges && this.innerWidget._scaleDirtyImages.size === 0) return;
+    const scales = images.map(img => img.scale);
+    try {
+      applyFlexGrowChanges(this.editorView, images, grows, scales);
+    } catch {
+      // View not ready for dispatch; persist will happen in destroy()
+    }
   }
 
   /** Write current flex-grow values back to markdown as ![[file|width]]. */
@@ -502,6 +677,29 @@ class StaticImageRowWidget extends WidgetType {
       this.group.images,
       this.innerWidget.getCurrentFlexGrows()
     );
+  }
+
+  /**
+   * Persist a single-image row as `![[file|W|S]]`.  W = pixel width
+   * (flexGrow × 100), S = 0/1 manual flag (from the stored scale slot).
+   * Reads the current line text fresh and skips a no-op edit.
+   */
+  private persistSingleImage(): void {
+    if (!this.editorView) return;
+    const img = this.group.images[0];
+    if (!img) return;
+    const widthPx = Math.max(1, Math.round(img.flexGrow * 100));
+    const sFlag: 0 | 1 = isSingleImageManual(img.scale) ? 1 : 0;
+    const lineNum = img.line + 1; // 1-indexed
+    const doc = this.editorView.state.doc;
+    if (lineNum < 1 || lineNum > doc.lines) return;
+    const lineObj = doc.line(lineNum);
+    const newText = formatSingleImageLine(lineObj.text, widthPx, sFlag);
+    if (newText === lineObj.text) return;
+    this.editorView.dispatch({
+      changes: { from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText },
+    });
+    logger.debug("Single-image persist", { line: img.line, widthPx, sFlag });
   }
 }
 
@@ -526,6 +724,40 @@ export function updateImageLineWidth(raw: string, flexGrow: number, scale?: numb
   }
   if (params.length === 0) return out; // no params → omit |
   return out.replace(/\]\]/, `|${params.join("|")}]]`);
+}
+
+/**
+ * "Reset all single images to the current setting": flip the S flag of every
+ * manually-sized (S=1) single-image line to 0.  The eq() single-image manual
+ * comparison then forces those widgets to rebuild and re-derive W from the
+ * setting.  One-shot; invoked from the settings "override" action.
+ */
+export function resetSingleImageManualFlags(
+  view: EditorView,
+  maxImagesPerRow: number,
+  extensions: string
+): void {
+  const doc = view.state.doc;
+  const groups = detectImageGroups(doc.toString(), maxImagesPerRow, extensions);
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  for (const g of groups) {
+    if (g.images.length !== 1) continue;
+    normalizeSingleImageParams(g);
+    const img = g.images[0];
+    if (!isSingleImageManual(img.scale)) continue;
+    const lineNum = img.line + 1;
+    if (lineNum < 1 || lineNum > doc.lines) continue;
+    const lineObj = doc.line(lineNum);
+    const W = img.explicitWidth ?? Math.round(img.flexGrow * 100);
+    const newText = formatSingleImageLine(lineObj.text, W, 0);
+    if (newText !== lineObj.text) {
+      changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText });
+    }
+  }
+  if (changes.length === 0) return;
+  changes.sort((a, b) => b.from - a.from);
+  view.dispatch({ changes });
+  logger.info("LivePreview reset single-image manual flags", { count: changes.length });
 }
 
 // ── State field for decorations ─────────────────────────────────
@@ -566,6 +798,8 @@ function buildDecorations(
       settings.maxImagesPerRow,
       settings.imageExtensions
     );
+    // Re-map single-image `|S|W` params to the internal flexGrow/scale convention.
+    for (const g of groups) normalizeSingleImageParams(g);
 
     logger.debug("LivePreview buildDecorations", {
       groupCount: groups.length,
@@ -893,41 +1127,8 @@ export function createStandaloneDropPlugin(
 
           // Custom fully-opaque ghost that follows cursor via dragover
           const img = embed.querySelector("img") as HTMLImageElement | null;
-          if (img && img.naturalWidth > 0) {
-            // Hide browser's default semi-transparent ghost with a transparent 1x1 pixel
-            const pixel = document.createElement("canvas");
-            pixel.width = 1;
-            pixel.height = 1;
-            pixel.style.cssText = "position:fixed;left:0;top:0;pointer-events:none";
-            document.body.appendChild(pixel);
-            e.dataTransfer!.setDragImage(pixel, 0, 0);
-            setTimeout(() => pixel.remove(), 0);
-
-            // Custom fully-opaque ghost, initially at cursor (with DPR for sharpness)
-            const w = getSettings().ghostImageWidth;
-            const h = (img.naturalHeight / img.naturalWidth) * w;
-            const dpr = window.devicePixelRatio || 1;
-            const ghost = document.createElement("canvas");
-            ghost.width = w * dpr;
-            ghost.height = h * dpr;
-            ghost.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;width:${w}px;height:${h}px;pointer-events:none;z-index:2147483647`;
-            const ctx = ghost.getContext("2d")!;
-            ctx.scale(dpr, dpr);
-            ctx.drawImage(img, 0, 0, w, h);
-            document.body.appendChild(ghost);
-
-            const onDragOver = (ev: DragEvent) => {
-              ghost.style.left = ev.clientX + "px";
-              ghost.style.top = ev.clientY + "px";
-            };
-            const onDragEnd = () => {
-              document.removeEventListener("dragover", onDragOver, true);
-              ghost.remove();
-              embed.style.opacity = "";
-            };
-            document.addEventListener("dragover", onDragOver, true);
-            embed.addEventListener("dragend", onDragEnd, { once: true });
-          }
+          const cleanupGhost = createDragGhost(img, e, getSettings().ghostImageWidth);
+          embed.addEventListener("dragend", cleanupGhost, { once: true });
 
           logger.info("SD dragstart stored source line", { line, tag: domNode.tagName });
         };

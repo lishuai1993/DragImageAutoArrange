@@ -38,7 +38,16 @@
       "Bash(kill -9 4204 4203 4178)",
       "Bash(kill -9 5151 5148)",
       "Bash(echo \"exit: $?\")",
-      "Bash(osascript *)"
+      "Bash(osascript *)",
+      "Bash(defaults read *)",
+      "Bash(softwareupdate --history)",
+      "Read(//System/Library/CoreServices/**)",
+      "Bash(tccutil list *)",
+      "WebSearch",
+      "Bash(sed -i '' '780,1103d' src/imageRowWidget.ts)",
+      "Bash(sed -n '776,784p' src/imageRowWidget.ts)",
+      "Bash(sed -i '' '1468,1738d' src/imageRowWidget.ts)",
+      "Bash(sed -n '1462,1474p' src/imageRowWidget.ts)"
     ]
   }
 }

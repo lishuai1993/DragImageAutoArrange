@@ -1,4 +1,5 @@
 import { ImageMeta } from "./imageDetector";
+import { SingleImageSizeMode, SINGLE_IMAGE_MIN_WIDTH } from "./constants";
 
 export interface LayoutResult {
   /** Computed uniform row height in px */
@@ -87,6 +88,43 @@ export function computeFlexGrows(metas: ImageMeta[]): number[] {
 }
 
 /**
+ * Convert measured item pixel widths into flex-grow weights.
+ * Normalizes so the smallest positive width maps to flex-grow 1, rounded to two
+ * decimals — mirroring `computeFlexGrows` but keyed on rendered widths instead of
+ * aspect ratios.  Used when an image moves between rows: each row's flex-grows are
+ * recomputed from current item widths so proportions stay consistent across rows.
+ * Non-positive widths fall back to flex-grow 1.  Pure — no DOM.
+ */
+export function computeFlexGrowsFromWidths(widths: number[]): number[] {
+  if (widths.length === 0) return [];
+  const positive = widths.filter((w) => w > 0);
+  const min = positive.length > 0 ? Math.min(...positive) : 1;
+  return widths.map((w) => (w > 0 ? Math.round((w / min) * 100) / 100 : 1));
+}
+
+/**
+ * Compute the rendered width (px) of a setting-driven single-image row (S=0).
+ * - "natural": the image's own pixel width, shrunk to fit the container.
+ * - "fixed": a user-specified width, clamped to [SINGLE_IMAGE_MIN_WIDTH, containerWidth].
+ * The image keeps width:auto (height-driven), so the caller derives height from
+ * this width via the aspect ratio.  Returns 0 when dimensions are unknown.  Pure.
+ */
+export function computeSingleImageWidth(
+  mode: SingleImageSizeMode,
+  fixedWidth: number,
+  naturalWidth: number,
+  containerWidth: number
+): number {
+  if (naturalWidth <= 0 || containerWidth <= 0) return 0;
+  if (mode === "fixed") {
+    return Math.round(Math.min(Math.max(fixedWidth, SINGLE_IMAGE_MIN_WIDTH), containerWidth));
+  }
+  // natural: the image's real pixel width, shrunk to fit the container.
+  return Math.round(Math.min(naturalWidth, containerWidth));
+}
+
+
+/**
  * Calculate the row height for a flexbox-based image row.
  *
  * Given the flex-grow values, image natural dimensions, and container width,
@@ -122,6 +160,54 @@ export function computeRowHeight(
 
   const upperClamp = n === 1 ? 2000 : defaultRowHeight * 3;
   return Math.max(50, Math.min(upperClamp, Math.round(maxHeight)));
+}
+
+/** Result of computeScaleBasedHeights: per-image pixel heights + the tallest. */
+export interface ScaleBasedHeightsResult {
+  heights: number[];
+  maxH: number;
+}
+
+/**
+ * Compute per-image heights from persisted scale ratios.
+ * `scale = imageContentWidth / itemWidth` — a dimensionless ratio that survives
+ * container-width changes.  For each image with a valid scale (0 < scale ≤ 1)
+ * the height is `round(scale * itemW / aspectRatio)` — a per-image height, so a
+ * full-width image (scale = 1) keeps its own `itemW / aspectRatio` instead of
+ * the row max.  Images without a valid scale fall back to the uniform
+ * `computeRowHeight` value.  Pure — no DOM.
+ */
+export function computeScaleBasedHeights(
+  flexGrows: number[],
+  metas: ImageMeta[],
+  scales: Array<number | null>,
+  containerWidth: number,
+  gap: number,
+  defaultRowHeight: number
+): ScaleBasedHeightsResult {
+  const n = flexGrows.length;
+  const fallback = computeRowHeight(flexGrows, metas, containerWidth, gap, defaultRowHeight);
+  let totalG = 0;
+  for (let i = 0; i < n; i++) totalG += flexGrows[i];
+  const availableWidth = containerWidth - (n - 1) * gap;
+
+  const heights: number[] = [];
+  let maxH = 0;
+  for (let i = 0; i < n; i++) {
+    const scale = scales[i];
+    const meta = metas[i];
+    let imageH: number;
+    if (scale != null && scale > 0 && scale <= 1 && totalG > 0 && meta && meta.naturalHeight > 0) {
+      const itemW = (flexGrows[i] / totalG) * availableWidth;
+      const ar = meta.naturalWidth / meta.naturalHeight;
+      imageH = Math.round((scale * itemW) / ar);
+    } else {
+      imageH = fallback;
+    }
+    heights.push(imageH);
+    if (imageH > maxH) maxH = imageH;
+  }
+  return { heights, maxH };
 }
 
 /**

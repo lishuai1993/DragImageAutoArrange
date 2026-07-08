@@ -1,0 +1,372 @@
+import { CLASSES, RESIZE_HANDLE_SIZE } from "./constants";
+import { ImageMeta } from "./imageDetector";
+import { logger } from "./logger";
+
+export interface HandleDef {
+  el: HTMLElement;
+  relX: number; // 0=left, 0.5=center, 1=right (relative to image content rect)
+  relY: number; // 0=top, 0.5=center, 1=bottom (relative to image content rect)
+}
+
+/**
+ * Narrow host interface the ResizeHandleController needs from ImageRowWidget.
+ * Array accessors return the widget's *current* fields; geometry helpers
+ * (getImageContentRect/updateHandlePositions) live on the widget because they
+ * are shared with the layout core.
+ */
+export interface ResizeHost {
+  getContainer(): HTMLElement | null;
+  getItemEls(): HTMLElement[];
+  getImageEls(): HTMLImageElement[];
+  getGap(): number;
+  getLoadedMeta(index: number): ImageMeta | undefined;
+  getImageContentRect(index: number): { left: number; top: number; width: number; height: number } | null;
+  getObjectPosition(): string;
+  updateHandlePositions(index: number): void;
+  notifyLayoutChange(): void;
+  emitResizeEnd(index: number, flexGrow: number): void;
+  setImageScale(index: number, scale: number): void;
+  setSingleImageWidth(widthPx: number): void;
+}
+
+/**
+ * Builds the 8 resize handles (4 corners + 4 edge midpoints) for a flex item
+ * and wires their drag behaviour (feedforward width/height scaling with scale
+ * persistence on mouseup).  Returns the created handles plus their HandleDef
+ * array, which the widget stores for handle-position updates.
+ */
+export class ResizeHandleController {
+  constructor(private host: ResizeHost) {}
+
+  buildHandles(
+    item: HTMLElement,
+    index: number
+  ): { handles: HTMLElement[]; defs: HandleDef[] } {
+    const handles: HTMLElement[] = [];
+
+    const defs: HandleDef[] = [
+      { el: null!, relX: 0, relY: 0 },     // nw corner
+      { el: null!, relX: 1, relY: 0 },     // ne corner
+      { el: null!, relX: 0, relY: 1 },     // sw corner
+      { el: null!, relX: 1, relY: 1 },     // se corner
+      { el: null!, relX: 0.5, relY: 0 },   // n edge midpoint
+      { el: null!, relX: 0.5, relY: 1 },   // s edge midpoint
+      { el: null!, relX: 0, relY: 0.5 },   // w edge midpoint
+      { el: null!, relX: 1, relY: 0.5 },   // e edge midpoint
+    ];
+
+    const cursors = ["nw-resize", "ne-resize", "sw-resize", "se-resize",
+      "n-resize", "s-resize", "w-resize", "e-resize"];
+
+    for (let i = 0; i < defs.length; i++) {
+      const hd = defs[i];
+      const handle = document.createElement("div");
+      handle.className = CLASSES.resizeHandle;
+      // Use setProperty with "important" to defend against Obsidian CSS
+      // that may apply !important overrides inside .cm-embed-block elements.
+      const important = (k: string, v: string) => handle.style.setProperty(k, v, "important");
+      important("position", "absolute");
+      important("width", `${RESIZE_HANDLE_SIZE}px`);
+      important("height", `${RESIZE_HANDLE_SIZE}px`);
+      important("border-radius", "2px");
+      important("background-color", "#4a9eff");
+      important("border", "1px solid white");
+      important("z-index", "2");
+      handle.style.cursor = cursors[i];
+
+      // Resize drag — feedforward: compute target flex-grow directly
+      // from cursor position so the handle follows the cursor 1:1 without
+      // overshoot/oscillation.
+      let dragging = false;
+      let currentOnMove: ((e: MouseEvent) => void) | null = null;
+      let currentOnUp: (() => void) | null = null;
+
+      // Capture layout state at mousedown for width-based feedforward.
+      // Converts cursor dx → item width change → flex-grow, so left/right
+      // handles scale symmetrically despite the nonlinear flex→width mapping.
+      let AW = 0;
+      let totalG = 0;
+      let startFlex = 0;
+      let startWidth = 0;
+      let startHeight = 0;
+      let startDisplayH = 0;
+      let startItemHeights: number[] = [];
+      let scale = 1;
+      let nItems = 0;
+      handle.onmousedown = (e) => {
+        try {
+        dragging = true;
+        item.classList.add(CLASSES.resizing);
+        logger.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Snapshot layout state
+        const containerRect = this.host.getContainer()!.getBoundingClientRect();
+        nItems = this.host.getItemEls().length;
+        AW = containerRect.width - (nItems - 1) * this.host.getGap();
+
+        totalG = 0;
+        const grows: number[] = [];
+        for (let j = 0; j < nItems; j++) {
+          const g = parseFloat(this.host.getItemEls()[j].style.flexGrow || "1");
+          grows.push(g);
+          totalG += g;
+        }
+        startFlex = grows[index];
+        startWidth = (startFlex / totalG) * AW;
+        // Container height may be auto for single-image rows; fall back to
+        // the actual rendered height from getBoundingClientRect.
+        const explicitH = parseFloat(this.host.getContainer()!.style.height || "");
+        startHeight = isNaN(explicitH) ? containerRect.height : explicitH;
+
+        // Sync: ensure all image inline heights match their item heights.
+        // A prior resize or layout pass may have left imageEls[i].style.height
+        // out of sync with itemEls[i].style.height, causing the image to be
+        // clipped (item has overflow:hidden) or letterboxed (image shorter).
+        for (let j = 0; j < nItems; j++) {
+          const itemH = this.host.getItemEls()[j].style.height;
+          if (itemH && itemH !== this.host.getImageEls()[j].style.height) {
+            logger.debug("resize-mousedown syncing img height to item", {
+              index: j,
+              itemH,
+              imgHBefore: this.host.getImageEls()[j].style.height,
+            });
+            this.host.getImageEls()[j].style.height = itemH;
+          }
+        }
+
+        // Snapshot each image's current item height so resizing one
+        // image doesn't overwrite manual height adjustments on others.
+        startItemHeights = [];
+        for (let j = 0; j < nItems; j++) {
+          const h = parseFloat(this.host.getItemEls()[j].style.height || "0");
+          startItemHeights[j] = h > 0 ? h : startHeight;
+        }
+        logger.debug("resize-mousedown snapshot", {
+          index,
+          startItemHeights: [...startItemHeights],
+          itemStyleH: this.host.getItemEls().map(el => el.style.height),
+          imgStyleH: this.host.getImageEls().map(el => el.style.height),
+          imgStyleW: this.host.getImageEls().map(el => el.style.width),
+          itemRects: this.host.getItemEls().map(el => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+          imgRects: this.host.getImageEls().map(el => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+        });
+
+        // For single-image rows, cap height at the point where the image
+        // fills the full container width — beyond that the image won't grow.
+        // In zoom mode (beyond fill-width), we switch to object-fit: cover
+        // so the image and container "lock" and grow together.
+        const meta = this.host.getLoadedMeta(index);
+        const fillWidthH = meta && meta.naturalWidth > 0
+          ? Math.round(AW * meta.naturalHeight / meta.naturalWidth)
+          : startHeight;
+
+        // Scale: image-content width to item-width ratio.
+        // When object-fit:contain makes the image narrower than the item,
+        // a cursor dx maps to a larger item-width change so the handle
+        // visually tracks the cursor 1:1.
+        const displayRect = this.host.getImageContentRect(index);
+        const displayW = displayRect ? displayRect.width : startWidth;
+        startDisplayH = displayRect ? displayRect.height : startHeight;
+        scale = displayW > 0 ? startWidth / displayW : 1;
+        if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+        if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
+
+        currentOnMove = (ev: MouseEvent) => {
+          try {
+          if (!dragging) return;
+
+          // ── Single-image row: direct height scaling (flex-grow is meaningless) ──
+          if (nItems === 1) {
+            const dx = ev.clientX - e.clientX;
+            const dy = ev.clientY - e.clientY;
+
+            const xSign = hd.relX < 0.5 ? -1 : 1;
+            const ySign = hd.relY < 0.5 ? -1 : 1;
+
+            // Weighted blend of dx/dy based on handle position.
+            const wx = 2 * Math.abs(hd.relX - 0.5);
+            const wy = 2 * Math.abs(hd.relY - 0.5);
+            const SENS = 1;
+            const delta = wx + wy > 0
+              ? (dx * xSign * wx + dy * ySign * wy) / (wx + wy) * SENS
+              : 0;
+
+            const newHeight = Math.max(50, Math.min(2000, Math.round(startHeight + delta)));
+
+            if (newHeight <= fillWidthH) {
+              // Normal mode: image height directly controls rendered size.
+              // width:auto preserves aspect ratio; flex:0 0 auto lets item
+              // shrink to image size so justify-content alignment is visible.
+              this.host.getImageEls()[0].style.objectFit = "contain";
+              this.host.getImageEls()[0].style.setProperty("object-position", this.host.getObjectPosition(), "important");
+              this.host.getImageEls()[0].style.width = "auto";
+              this.host.getImageEls()[0].style.height = `${newHeight}px`;
+              this.host.getItemEls()[0].style.height = "";
+              this.host.getItemEls()[0].style.flex = "0 0 auto";
+              this.host.getContainer()!.style.height = "";
+            } else {
+              // Zoom mode: image and container "locked" together beyond fill-width.
+              // Switch to object-fit:cover so the image fills the element height,
+              // allowing growth past the width-constrained boundary.
+              this.host.getImageEls()[0].style.objectFit = "cover";
+              this.host.getImageEls()[0].style.setProperty("object-position", "center", "important");
+              this.host.getImageEls()[0].style.height = `${newHeight}px`;
+              this.host.getItemEls()[0].style.height = `${newHeight}px`;
+              this.host.getContainer()!.style.height = `${newHeight}px`;
+            }
+
+            // Force synchronous reflow so the container's height is
+            // recalculated before CodeMirror's dispatch reads it.
+            void this.host.getContainer()!.offsetHeight;
+            this.host.updateHandlePositions(0);
+            logger.debug("resize-mousemove (single)", {
+              newHeight, fillWidthH, zoom: newHeight > fillWidthH,
+              containerH: this.host.getContainer()!.getBoundingClientRect().height,
+            });
+            this.host.notifyLayoutChange();
+            return;
+          }
+
+          // ── Multi-image row: direct image-height scaling (dividers stay fixed) ──
+          const dx = ev.clientX - e.clientX;
+          const dy = ev.clientY - e.clientY;
+          const ySign = hd.relY < 0.5 ? -1 : 1;
+          const xSign = hd.relX < 0.5 ? -1 : 1;
+          const wy = 2 * Math.abs(hd.relY - 0.5);
+          const wx = 2 * Math.abs(hd.relX - 0.5);
+          const s = 1;
+          // wy > 0: vertical/corner handles use dy; wy === 0: horizontal handles use dx.
+          const yDelta = wy > 0
+            ? (dy * ySign * wy) / (wx + wy) * s
+            : dx * xSign * s;
+          // Use image content height as delta baseline — not container height.
+          // This eliminates the dead zone that occurs when container is taller
+          // than the image (e.g. from a prior resize).
+          const targetImageH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
+          const imageH = `${targetImageH}px`;
+          this.host.getImageEls()[index].style.height = imageH;
+          this.host.getItemEls()[index].style.height = imageH;
+          // Preserve each non-dragged image's original height (may differ
+          // from container height due to prior manual resizes).
+          let otherMax = 0;
+          for (let j = 0; j < this.host.getItemEls().length; j++) {
+            if (j === index) continue;
+            const h = `${startItemHeights[j]}px`;
+            this.host.getItemEls()[j].style.height = h;
+            this.host.getImageEls()[j].style.height = h;
+            otherMax = Math.max(otherMax, startItemHeights[j]);
+          }
+          const containerH = Math.max(targetImageH, otherMax);
+          this.host.getContainer()!.style.height = `${containerH}px`;
+          this.host.updateHandlePositions(index);
+          // Diagnostic: detect image/item height mismatch that would cause clipping.
+          // item.style.overflow = "hidden" clips images whose rendered size exceeds the item.
+          const mismatches: { j: number; itemH: number; imgH: number; imgW: number; itemW: number }[] = [];
+          for (let j = 0; j < this.host.getItemEls().length; j++) {
+            const ir = this.host.getItemEls()[j].getBoundingClientRect();
+            const imr = this.host.getImageEls()[j].getBoundingClientRect();
+            if (Math.abs(ir.height - imr.height) > 1 || Math.abs(ir.width - imr.width) > 1) {
+              mismatches.push({ j, itemH: Math.round(ir.height), imgH: Math.round(imr.height), imgW: Math.round(imr.width), itemW: Math.round(ir.width) });
+            }
+          }
+          if (mismatches.length > 0) {
+            logger.warn("resize-mousemove image/item mismatch (clipping risk)", {
+              activeIndex: index,
+              targetImageH,
+              containerH,
+              startItemHeights: [...startItemHeights],
+              mismatches,
+            });
+          }
+          this.host.notifyLayoutChange();
+          } catch (err) {
+            logger.error("ImageRowWidget resize mousemove error", { error: String(err) });
+            // Silently terminate the drag and clean up listeners.
+            dragging = false;
+            item.classList.remove(CLASSES.resizing);
+            item.classList.remove(CLASSES.itemSnap);
+            if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+            if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
+            currentOnMove = null;
+            currentOnUp = null;
+          }
+        };
+
+        currentOnUp = () => {
+          try {
+          dragging = false;
+          item.classList.remove(CLASSES.resizing);
+          item.classList.remove(CLASSES.itemSnap);
+
+          // ── Persist scale ratio ──
+          // Compute image-content-width / item-width ratio.  This captures the
+          // resize state as a dimensionless number that survives container-width
+          // changes.  Persisted to markdown as ![[file|flexGrow|scale]].
+          if (nItems > 1) {
+            const itemRect = this.host.getItemEls()[index].getBoundingClientRect();
+            const contentRect = this.host.getImageContentRect(index);
+            if (itemRect.width > 0 && contentRect && contentRect.width > 0) {
+              const scale = contentRect.width / itemRect.width;
+              this.host.setImageScale(index, scale);
+              logger.debug("resize-mouseup scale saved", {
+                index,
+                scale: Math.round(scale * 100),
+                contentW: Math.round(contentRect.width),
+                itemW: Math.round(itemRect.width),
+              });
+            }
+          } else {
+            // ── Single-image row: persist the manual pixel width as |W|1 ──
+            // Only in normal mode (image ≤ container width; container height is
+            // cleared).  Zoom mode (image enlarged past container width) isn't
+            // representable as a capped width, so it isn't persisted.
+            const isZoom = !!this.host.getContainer()?.style.height;
+            const contentRect = this.host.getImageContentRect(0);
+            if (!isZoom && contentRect && contentRect.width > 0) {
+              this.host.setSingleImageWidth(Math.round(contentRect.width));
+              logger.debug("resize-mouseup single width saved", {
+                widthPx: Math.round(contentRect.width),
+              });
+            }
+          }
+
+          const finalFlex = parseFloat(item.style.flexGrow || "1");
+          logger.debug("resize-mouseup", { index, finalFlex, nItems, timestamp: Date.now() });
+          this.host.emitResizeEnd(index, finalFlex);
+          document.removeEventListener("mousemove", currentOnMove!);
+          document.removeEventListener("mouseup", currentOnUp!);
+          currentOnMove = null;
+          currentOnUp = null;
+          } catch (err) {
+            logger.error("ImageRowWidget resize mouseup error", { error: String(err) });
+            if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+            if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
+            currentOnMove = null;
+            currentOnUp = null;
+          }
+        };
+
+        document.addEventListener("mousemove", currentOnMove);
+        document.addEventListener("mouseup", currentOnUp, { once: true });
+        } catch (err) {
+          logger.error("ImageRowWidget resize mousedown error", { error: String(err) });
+          dragging = false;
+          item.classList.remove(CLASSES.resizing);
+        }
+      };
+
+      handle._destroy = () => {
+        if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
+        if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
+      };
+
+      item.appendChild(handle);
+      hd.el = handle;
+      handles.push(handle);
+    }
+
+    return { handles, defs };
+  }
+}

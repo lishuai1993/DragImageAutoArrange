@@ -10,7 +10,7 @@
  * alignment setting changes.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ImageRowWidget, ImageRowOptions } from '../src/imageRowWidget';
+import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRowWidget';
 import { ImageGroup, ImageEmbed } from '../src/imageDetector';
 
 // ── Test helpers ─────────────────────────────────────────────────────
@@ -87,6 +87,69 @@ function patchBoundingRect(container: HTMLElement, width = 800): void {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
+
+describe('sanitizeOptions', () => {
+  it('passes through a valid options object unchanged in value', () => {
+    const opts = makeOptions('center');
+    const s = sanitizeOptions(opts);
+    expect(s.defaultRowHeight).toBe(200);
+    expect(s.gap).toBe(4);
+    expect(s.alignment).toBe('center');
+  });
+
+  it('defaults a missing sourcePath to ""', () => {
+    // makeOptions omits sourcePath entirely
+    const s = sanitizeOptions(makeOptions('left'));
+    expect(s.sourcePath).toBe('');
+  });
+
+  it('coerces non-finite numerics to DEFAULT_SETTINGS values', () => {
+    const bad = {
+      ...makeOptions('left'),
+      defaultRowHeight: NaN,
+      gap: Infinity,
+      snapSensitivity: -Infinity,
+    } as unknown as ImageRowOptions;
+    const s = sanitizeOptions(bad);
+    expect(s.defaultRowHeight).toBe(200);
+    expect(s.gap).toBe(4);
+    expect(s.snapSensitivity).toBe(3);
+  });
+
+  it('falls back to "left" for an invalid alignment', () => {
+    const bad = { ...makeOptions('left'), alignment: 'diagonal' } as unknown as ImageRowOptions;
+    expect(sanitizeOptions(bad).alignment).toBe('left');
+  });
+
+  it('provides an identity getResourcePath when missing', () => {
+    const bad = { ...makeOptions('left'), getResourcePath: undefined } as unknown as ImageRowOptions;
+    expect(sanitizeOptions(bad).getResourcePath('x.png')).toBe('x.png');
+  });
+
+  it('does not throw on an empty object', () => {
+    expect(() => sanitizeOptions({} as ImageRowOptions)).not.toThrow();
+  });
+
+  it('defaults singleImageSizeMode to "natural" and clamps width to a minimum of 100', () => {
+    const s = sanitizeOptions(makeOptions('left'));
+    expect(s.singleImageSizeMode).toBe('natural');
+    expect(s.singleImageWidth).toBe(400);
+  });
+
+  it('preserves a valid "fixed" mode and width', () => {
+    const opts = { ...makeOptions('left'), singleImageSizeMode: 'fixed', singleImageWidth: 640 } as unknown as ImageRowOptions;
+    const s = sanitizeOptions(opts);
+    expect(s.singleImageSizeMode).toBe('fixed');
+    expect(s.singleImageWidth).toBe(640);
+  });
+
+  it('falls back to "natural" for an invalid singleImageSizeMode and floors width at 100', () => {
+    const bad = { ...makeOptions('left'), singleImageSizeMode: 'huge', singleImageWidth: 20 } as unknown as ImageRowOptions;
+    const s = sanitizeOptions(bad);
+    expect(s.singleImageSizeMode).toBe('natural');
+    expect(s.singleImageWidth).toBe(100);
+  });
+});
 
 describe('ImageRowWidget alignment (single image)', () => {
   beforeEach(() => {

@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 
-import { Alignment } from "./constants";
+import { Alignment, SingleImageSizeMode } from "./constants";
 
 export interface DragImageSettings {
   enabled: boolean;
@@ -17,11 +17,15 @@ export interface DragImageSettings {
   ghostImageWidth: number;
   dragOpacity: number;
   alignment: Alignment;
+  singleImageSizeMode: SingleImageSizeMode;
+  singleImageWidth: number;
 }
 
 export interface IDragImagePlugin {
   settings: DragImageSettings;
   saveSettings(): Promise<void>;
+  /** One-shot: reset every single-image row to the current size setting. */
+  resetAllSingleImages(): void;
 }
 
 export async function loadSettings(plugin: { loadData(): Promise<any> }): Promise<DragImageSettings> {
@@ -205,6 +209,49 @@ export class DragImageSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName("Single image size")
+      .setDesc("How a lone image (a single-image row) is sized. Natural size shows the image at its real pixel size, shrunk to fit the editor width; Fixed width renders single images at a set width. Manual corner-resizes stick per image. \"Reset all to current setting\" is a one-shot that clears every single image's manual size and re-applies the current mode.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("natural", "Natural size")
+          .addOption("fixed", "Fixed width")
+          .addOption("__reset__", "Reset all to current setting")
+          .setValue(this.plugin.settings.singleImageSizeMode)
+          .onChange(async (value) => {
+            if (value === "__reset__") {
+              // One-shot action: reset all single images to the current mode,
+              // then revert the dropdown to the persistent mode.
+              this.plugin.resetAllSingleImages();
+              this.display();
+              return;
+            }
+            this.plugin.settings.singleImageSizeMode = value as SingleImageSizeMode;
+            await this.plugin.saveSettings();
+            // Re-render so the width input shows/hides for the chosen mode.
+            this.display();
+          })
+      );
+
+    if (this.plugin.settings.singleImageSizeMode === "fixed") {
+      new Setting(containerEl)
+        .setName("Single image width")
+        .setDesc("Fixed width (px) for single images. Minimum 100; larger than the editor width is capped to the editor width.")
+        .addText((text) => {
+          text.inputEl.type = "number";
+          text.inputEl.min = "100";
+          text
+            .setValue(String(this.plugin.settings.singleImageWidth))
+            .onChange(async (value) => {
+              const parsed = parseInt(value, 10);
+              this.plugin.settings.singleImageWidth = isFinite(parsed)
+                ? Math.max(100, parsed)
+                : DEFAULT_SETTINGS.singleImageWidth;
+              await this.plugin.saveSettings();
+            });
+        });
+    }
 
     new Setting(containerEl)
       .setName("Image extensions")

@@ -18,6 +18,10 @@ export const CLASSES = {
 
 export type Alignment = "left" | "center" | "right";
 
+/** How a single-image row is sized: at the image's natural size (shrunk to the
+ *  container width when wider) or at a fixed user-specified width. */
+export type SingleImageSizeMode = "natural" | "fixed";
+
 export const DEFAULT_SETTINGS = {
   enabled: true,
   defaultRowHeight: 200,
@@ -32,7 +36,11 @@ export const DEFAULT_SETTINGS = {
   ghostImageWidth: 120,
   dragOpacity: 60,
   alignment: "left" as Alignment,
+  singleImageSizeMode: "natural" as SingleImageSizeMode,
+  singleImageWidth: 400,
 } as const;
+
+export const SINGLE_IMAGE_MIN_WIDTH = 100;
 
 export const MIN_IMAGE_WIDTH = 50;
 export const DIVIDER_WIDTH = 4;

@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged } from "./livePreview";
+import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { logger } from "./logger";
@@ -29,6 +29,8 @@ export default class DragImageAutoArrangePlugin
     ghostImageWidth: 120,
     dragOpacity: 60,
     alignment: "left",
+    singleImageSizeMode: "natural",
+    singleImageWidth: 400,
   };
 
   async onload(): Promise<void> {
@@ -149,6 +151,28 @@ export default class DragImageAutoArrangePlugin
     });
   }
 
+  /**
+   * One-shot "override": clear every single-image row's manual size (S=1→0) in
+   * all open Live Preview editors, so each re-derives its width from the current
+   * size setting on the ensuing rebuild.
+   */
+  resetAllSingleImages(): void {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const cm = (leaf.view as any)?.editor?.cm;
+      if (cm?.dispatch) {
+        resetSingleImageManualFlags(
+          cm,
+          this.settings.maxImagesPerRow,
+          this.settings.imageExtensions
+        );
+      }
+      if (leaf.view instanceof MarkdownView && leaf.view.previewMode) {
+        leaf.view.previewMode.rerender(true);
+      }
+    });
+    logger.info("Command: reset all single images to current setting");
+  }
+
   private buildImageRowOptions(): ImageRowOptions {
     const activeFile = this.app.workspace.getActiveFile();
     const sourcePath = activeFile?.path ?? "";
@@ -164,6 +188,8 @@ export default class DragImageAutoArrangePlugin
       alignment: this.settings.alignment,
       maxImagesPerRow: this.settings.maxImagesPerRow,
       imageExtensions: this.settings.imageExtensions,
+      singleImageSizeMode: this.settings.singleImageSizeMode,
+      singleImageWidth: this.settings.singleImageWidth,
       getResourcePath: (fileName: string) => {
         const url = this.resolveImagePath(fileName, sourcePath);
         if (!url) {

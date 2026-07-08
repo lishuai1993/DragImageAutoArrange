@@ -2,9 +2,11 @@ import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
 import { CLASSES, buildImageLineRe } from "./constants";
 import { ImageRowOptions } from "./types";
 import { ImageMeta, ImageEmbed, parseImageLine } from "./imageDetector";
-import { computeFlexGrows, computeRowHeight } from "./layoutEngine";
+import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights } from "./layoutEngine";
 import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
+import { validateRowFlexGrows } from "./parameterValidator";
+import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
 function getFileNameFromEmbed(embed: HTMLElement): string {
@@ -258,6 +260,7 @@ function areEmbedsConsecutive(prev: HTMLElement, curr: HTMLElement): boolean {
 // ── Flex row wrapping ────────────────────────────────────────
 
 function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
+  try {
   const firstBlock = findBlockParent(embeds[0]);
   if (!firstBlock) return;
 
@@ -349,13 +352,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     const embedImgs = Array.from(embed.querySelectorAll<HTMLImageElement>("img"));
     for (const img of embedImgs) {
       // Strip Obsidian alignment classes that override our layout
-      img.classList.remove(
-        "image-position-center",
-        "image-position-left",
-        "image-position-right",
-        "image-converter-aligned",
-        "image-no-wrap"
-      );
+      stripObsidianClasses(img);
       img.style.setProperty("width", "100%", "important");
       img.style.setProperty("height", "100%", "important");
       img.style.setProperty("object-fit", "contain", "important");
@@ -365,13 +362,6 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
 
       // Defend against Obsidian asynchronously re-adding alignment classes
       // and overwriting img height (Obsidian repeatedly sets it to defaultRowHeight-20).
-      const OBSIDIAN_ALIGN_CLASSES = [
-        "image-position-center",
-        "image-position-left",
-        "image-position-right",
-        "image-converter-aligned",
-        "image-no-wrap",
-      ];
       const styleGuard = new MutationObserver((mutations, obs) => {
         for (const m of mutations) {
           if (m.type !== "attributes") continue;
@@ -381,12 +371,12 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
           const itemEl = target.closest<HTMLElement>(".internal-embed");
           if (!itemEl) continue;
           const itemH = itemEl.style.height;
-          const hasClasses = OBSIDIAN_ALIGN_CLASSES.some(c => target.classList.contains(c));
+          const hasClasses = hasObsidianAlignClass(target);
           const heightMismatch = attr === "style" && itemH && target.style.height !== itemH;
           if (!hasClasses && !heightMismatch) continue;
           obs.disconnect();
           if (hasClasses) {
-            target.classList.remove(...OBSIDIAN_ALIGN_CLASSES);
+            stripObsidianClasses(target);
           }
           if (heightMismatch) {
             target.style.setProperty("height", itemH, "important");
@@ -423,17 +413,12 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   // Set display:contents on wrappers BETWEEN img and the flex item (embed),
   // but NOT on the embed itself—it is the flex item and must keep its box.
   for (const img of imgs) {
-    let el: HTMLElement | null = img.parentElement;
-    while (el && el !== row) {
-      if (!(el instanceof HTMLElement && embeds.includes(el))) {
-        el.style.setProperty("display", "contents", "important");
-      }
-      el = el.parentElement;
-    }
+    neutralizeWrappers(img, row, embeds);
   }
 
   // Compute proper row height after DOM insertion (needs container width)
   const applySizes = () => {
+    try {
     const containerWidth = row.getBoundingClientRect().width;
     if (containerWidth === 0) return;
     const currentMetas = imgs.map((img) => ({
@@ -463,6 +448,10 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       for (let i = 0; i < currentMetas.length; i++) finalGrows[i] = cg[i];
     }
 
+    // Validate computed flexGrows before use
+    const validatedGrows = validateRowFlexGrows(finalGrows, currentMetas, containerWidth, options.gap);
+    for (let _i = 0; _i < finalGrows.length; _i++) finalGrows[_i] = validatedGrows[_i];
+
     logger.debug("RM applySizes flexGrows", {
       containerWidth,
       currentParsedGrows,
@@ -477,51 +466,26 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
 
     // ── Scale-based heights (matches LivePreview recalculateRowHeight) ──
     if (n > 1 && hasScale) {
-      let totalG = 0;
-      for (let i = 0; i < n; i++) totalG += finalGrows[i];
-      const AW = containerWidth - (n - 1) * options.gap;
-      let maxH = 0;
-      const debugHeights: Array<{ i: number; scale: number | null; itemW: number; ar: number; imageH: number; fallback: boolean }> = [];
+      const { heights, maxH } = computeScaleBasedHeights(
+        finalGrows, currentMetas, scales, containerWidth, options.gap, options.defaultRowHeight
+      );
       for (let i = 0; i < n; i++) {
-        const scale = scales[i];
-        let imageH: number;
-        let fallback = false;
-        if (scale != null && scale > 0 && scale < 1) {
-          const itemW = (finalGrows[i] / totalG) * AW;
-          const meta = currentMetas[i];
-          const ar = meta.naturalWidth / meta.naturalHeight;
-          imageH = Math.round(scale * itemW / ar);
-        } else {
-          // Fall back to uniform height
-          imageH = computeRowHeight(finalGrows, currentMetas, containerWidth, options.gap, options.defaultRowHeight);
-          fallback = true;
-        }
-        debugHeights.push({ i, scale, itemW: (finalGrows[i] / totalG) * AW, ar: currentMetas[i].naturalWidth / currentMetas[i].naturalHeight, imageH, fallback });
-        const hPx = `${imageH}px`;
+        const hPx = `${heights[i]}px`;
         embeds[i].style.setProperty("flex", `${finalGrows[i]} 1 0%`, "important");
         embeds[i].style.setProperty("height", hPx, "important");
         const embedImg = embeds[i].querySelector<HTMLImageElement>("img");
         if (embedImg) {
           // Strip Obsidian alignment classes in case they were re-added
-          embedImg.classList.remove(
-            "image-position-center",
-            "image-position-left",
-            "image-position-right",
-            "image-converter-aligned",
-            "image-no-wrap"
-          );
+          stripObsidianClasses(embedImg);
           embedImg.style.setProperty("height", hPx, "important");
           embedImg.style.setProperty("width", "auto", "important");
           embedImg.style.setProperty("margin", "0", "important");
         }
-        maxH = Math.max(maxH, imageH);
       }
       row.style.height = `${maxH}px`;
       logger.debug("RM applySizes scale-based heights", {
-        totalG,
-        AW,
         maxH,
-        heights: debugHeights,
+        heights,
       });
     } else {
       // ── Uniform height (no scale data) ──
@@ -539,13 +503,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
         embeds[j].style.setProperty("height", `${rowHeightPx}px`, "important");
         const embedImg = embeds[j].querySelector<HTMLImageElement>("img");
         if (embedImg) {
-          embedImg.classList.remove(
-            "image-position-center",
-            "image-position-left",
-            "image-position-right",
-            "image-converter-aligned",
-            "image-no-wrap"
-          );
+          stripObsidianClasses(embedImg);
           embedImg.style.setProperty("height", `${rowHeightPx}px`, "important");
           embedImg.style.setProperty("width", "auto", "important");
           embedImg.style.setProperty("margin", "0", "important");
@@ -589,6 +547,9 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       });
     }
 
+    } catch (e) {
+      logger.error("RM applySizes error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+    }
   };
 
   if (allLoaded) {
@@ -615,6 +576,9 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     if (remainingLoads === 0) {
       requestAnimationFrame(() => applySizes());
     }
+  }
+  } catch (e) {
+    logger.error("RM wrapAsFlexRow error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
   }
 }
 
