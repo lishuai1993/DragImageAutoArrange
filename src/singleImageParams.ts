@@ -46,16 +46,19 @@ export function normalizeSingleImageParams(group: ImageGroup): void {
   const img = group.images[0];
   const m = img.raw.match(/\|([^\]]*)\]\]/);
   const parts = m ? m[1].split("|") : [];
-  if (parts.length >= 2) {
-    const s = parseInt(parts[0], 10);
+  const s = parts.length >= 2 ? parseInt(parts[0], 10) : NaN;
+  if (parts.length >= 2 && (s === 0 || s === 1)) {
+    // Our single-image `|S|W` form (S is a 0/1 flag). W is the real pixel width.
     const w = parseInt(parts[1], 10);
     img.explicitWidth = isFinite(w) ? w : null;
     img.hasExplicitWidth = img.explicitWidth != null;
     img.flexGrow = img.explicitWidth != null && img.explicitWidth > 0 ? img.explicitWidth / 100 : 1;
     img.scale = s === 1 ? 0.01 : 0;
   } else {
-    // Bare `![[file]]` or a single legacy param: no manual size yet — follow the
-    // setting (layoutSingleImage will materialize `|0|W`).
+    // Anything else on a single-image line — a bare `![[file]]`, a legacy single
+    // `|W`, or a multi-image leftover `|W|S` (first param ≥ 2, i.e. a weight, not
+    // a single flag) that just became single — has no manual single size yet.
+    // Reset to setting-driven; layoutSingleImage will materialize `|0|W`.
     img.explicitWidth = null;
     img.hasExplicitWidth = false;
     img.flexGrow = 1;

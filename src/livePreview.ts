@@ -152,6 +152,43 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
 }
 
 /**
+ * Immediately convert any "orphaned" single-image line to a bare `![[file]]`.
+ * A single-image row is "clean" only as `![[file|S|W]]` with S ∈ {0,1}; a line
+ * that just left a multi-image row still carries `|W|S` (first param is a weight
+ * ≥ 2) and would be mis-read under single-image semantics.  Stripping it to bare
+ * at drop time makes the identity transition (multi member → single) explicit,
+ * so the rebuilt single widget re-derives the setting-driven width.  Idempotent.
+ */
+function convertOrphanedMultiSinglesToBare(
+  view: EditorView,
+  maxImagesPerRow: number,
+  extensions: string
+): void {
+  const doc = view.state.doc;
+  const groups = detectImageGroups(doc.toString(), maxImagesPerRow, extensions);
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  for (const g of groups) {
+    if (g.images.length !== 1) continue;
+    const lineNum = g.images[0].line + 1;
+    if (lineNum < 1 || lineNum > doc.lines) continue;
+    const lineObj = doc.line(lineNum);
+    const raw = lineObj.text;
+    const m = raw.match(/\|([^\]]*)\]\]/);
+    if (!m) continue; // already bare
+    const first = parseInt(m[1].split("|")[0], 10);
+    // Clean single `|S|W` (S ∈ {0,1}) → leave untouched.
+    if (m[1].includes("|") && (first === 0 || first === 1)) continue;
+    const bare = raw.replace(/\|[^\]]*(?=\]\])/, "");
+    if (bare !== raw) {
+      changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: bare });
+    }
+  }
+  if (changes.length === 0) return;
+  changes.sort((a, b) => b.from - a.from);
+  view.dispatch({ changes });
+}
+
+/**
  * Measure the current rendered pixel width of every item in a rendered flex row.
  * Locates the row container by its `data-line-start` attribute and reads each
  * `.drag-img-item` child in document (index) order.  Returns null if the row
@@ -206,7 +243,13 @@ function applyFlexGrowChanges(
     if (newLine === images[i].raw) continue;
 
     const line = images[i].line + 1; // 1-indexed
+    if (line < 1 || line > view.state.doc.lines) continue;
     const lineObj = view.state.doc.line(line);
+    // Anti-resurrection: a deferred persist may fire after a structural move
+    // (moveLine) relocated this image. If the cached line no longer references
+    // the same file, skip it — otherwise we'd rewrite a now-blank/different line
+    // and resurrect the moved embed at its old position.
+    if (!lineObj.text.includes(images[i].fileName)) continue;
     changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
   }
 
@@ -476,6 +519,11 @@ class StaticImageRowWidget extends WidgetType {
     if (rowMatch) {
       const srcRowLineStart = parseInt(rowMatch[1], 10);
       const srcIndex = parseInt(rowMatch[2], 10);
+      // Source row === target row: dropping a row onto itself is not an external
+      // merge. Intra-row reordering is handled by the reorder path; bail out here,
+      // otherwise the same line is measured/rewritten as both source and target and
+      // gets corrupted (duplicate embed on one line).
+      if (srcRowLineStart === this.group.lineStart) return;
       this.recomputeFlexGrowsForMerge(view, srcRowLineStart, srcIndex, insertAtIndex);
     }
 
@@ -508,16 +556,6 @@ class StaticImageRowWidget extends WidgetType {
     const srcRemaining = srcWidths.filter((_, j) => j !== srcIndex);
     const srcGrows = computeFlexGrowsFromWidths(srcRemaining);
 
-    // Target row: insert the moved image's current width at insertAtIndex, then
-    // normalize the whole row so every item (moved included) participates.
-    const insertPos = Math.max(0, Math.min(insertAtIndex, tgtWidths.length));
-    const combined = [
-      ...tgtWidths.slice(0, insertPos),
-      movedWidth,
-      ...tgtWidths.slice(insertPos),
-    ];
-    const tgtGrows = computeFlexGrowsFromWidths(combined);
-
     const doc = view.state.doc;
     const changes: Array<{ from: number; to: number; insert: string }> = [];
     const rewrite = (line0: number, grow: number, dropScale = false): void => {
@@ -533,19 +571,57 @@ class StaticImageRowWidget extends WidgetType {
         changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
       }
     };
+    // Strip every |param → bare `![[file]]`, so the rebuilt multi-image widget
+    // computes an equilibrium layout (equal heights) from natural aspect ratios.
+    const rewriteBare = (line0: number): void => {
+      if (line0 < 0 || line0 >= doc.lines) return;
+      const lineObj = doc.line(line0 + 1);
+      const raw = lineObj.text;
+      const newText = raw.replace(/\|[^\]]*(?=\]\])/, "");
+      if (newText !== raw) {
+        changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
+      }
+    };
 
     // Source remaining lines.
-    let k = 0;
-    for (let j = 0; j < srcWidths.length; j++) {
-      if (j === srcIndex) continue;
-      rewrite(srcRowLineStart + j, srcGrows[k++]);
+    if (srcRemaining.length === 1) {
+      // Source row drops to a single image → convert it to a setting-driven
+      // single immediately (bare embed), never leave it as a multi `|W|S` line.
+      const j = srcWidths.findIndex((_, idx) => idx !== srcIndex);
+      if (j >= 0) rewriteBare(srcRowLineStart + j);
+    } else {
+      let k = 0;
+      for (let j = 0; j < srcWidths.length; j++) {
+        if (j === srcIndex) continue;
+        rewrite(srcRowLineStart + j, srcGrows[k++]);
+      }
     }
-    // Moved line → its slot in the target row (drop any single-image S flag).
-    rewrite(srcRowLineStart + srcIndex, tgtGrows[insertPos], true);
-    // Existing target lines → their (shifted) slots.
-    for (let t = 0; t < tgtWidths.length; t++) {
-      const slot = t < insertPos ? t : t + 1;
-      rewrite(this.group.lineStart + t, tgtGrows[slot]);
+
+    if (tgtWidths.length === 1) {
+      // Target is a single-image row: single + incoming form a fresh multi-image
+      // row that should start in equilibrium. Write both the moved line and the
+      // existing target line as bare embeds (dropping the single-image `|S|W`
+      // params, which would otherwise be mis-read under multi-image `|W|S`
+      // semantics) and let the new widget balance them.
+      rewriteBare(srcRowLineStart + srcIndex);
+      rewriteBare(this.group.lineStart);
+    } else {
+      // Target already multi: insert the moved image's width and normalize the
+      // whole row so proportions stay consistent.
+      const insertPos = Math.max(0, Math.min(insertAtIndex, tgtWidths.length));
+      const combined = [
+        ...tgtWidths.slice(0, insertPos),
+        movedWidth,
+        ...tgtWidths.slice(insertPos),
+      ];
+      const tgtGrows = computeFlexGrowsFromWidths(combined);
+      // Moved line → its slot in the target row (drop any single-image S flag).
+      rewrite(srcRowLineStart + srcIndex, tgtGrows[insertPos], true);
+      // Existing target lines → their (shifted) slots.
+      for (let t = 0; t < tgtWidths.length; t++) {
+        const slot = t < insertPos ? t : t + 1;
+        rewrite(this.group.lineStart + t, tgtGrows[slot]);
+      }
     }
 
     if (changes.length === 0) return;
@@ -554,7 +630,7 @@ class StaticImageRowWidget extends WidgetType {
     view.dispatch({ changes });
     logger.info("LivePreview merge flex-grow recompute", {
       srcRowLineStart, srcIndex, insertAtIndex,
-      srcGrows, tgtGrows, movedWidth: Math.round(movedWidth),
+      tgtCount: tgtWidths.length, movedWidth: Math.round(movedWidth),
     });
   }
 
@@ -694,6 +770,9 @@ class StaticImageRowWidget extends WidgetType {
     const doc = this.editorView.state.doc;
     if (lineNum < 1 || lineNum > doc.lines) return;
     const lineObj = doc.line(lineNum);
+    // Anti-resurrection: skip if a structural move relocated this image and the
+    // cached line no longer references it.
+    if (!lineObj.text.includes(img.fileName)) return;
     const newText = formatSingleImageLine(lineObj.text, widthPx, sFlag);
     if (newText === lineObj.text) return;
     this.editorView.dispatch({
@@ -1214,6 +1293,10 @@ export function createStandaloneDropPlugin(
             e.preventDefault();
             e.stopPropagation();
             moveLine(this.view, srcLine, targetLine);
+            // Identity transition (multi member → single): strip the dragged line
+            // and any source-row leftover that just became single to bare, now.
+            const sdSettings = getSettings();
+            convertOrphanedMultiSinglesToBare(this.view, sdSettings.maxImagesPerRow, sdSettings.imageExtensions);
             return;
           }
 

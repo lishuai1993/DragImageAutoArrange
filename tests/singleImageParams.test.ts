@@ -105,6 +105,27 @@ describe('normalizeSingleImageParams', () => {
     expect(img.scale).toBe(null);
   });
 
+  it('resets a multi-image leftover |W|S (first param ≥ 2) to setting-driven', () => {
+    // A line that just left a multi-image row keeps `|W|S` (weight, scale). As a
+    // now-single group it must NOT be read as a manual single — reset fully.
+    const g = group('![[a.webp|150|100]]');
+    normalizeSingleImageParams(g);
+    const img = g.images[0];
+    expect(img.hasExplicitWidth).toBe(false);
+    expect(img.explicitWidth).toBe(null);
+    expect(img.flexGrow).toBe(1);
+    expect(img.scale).toBe(null);
+    expect(isSingleImageManual(img.scale)).toBe(false);
+  });
+
+  it('resets a legacy single-param |W to setting-driven', () => {
+    const g = group('![[a.webp|600]]');
+    normalizeSingleImageParams(g);
+    const img = g.images[0];
+    expect(img.hasExplicitWidth).toBe(false);
+    expect(img.scale).toBe(null);
+  });
+
   it('leaves multi-image groups untouched (keeps |W|S semantics)', () => {
     const g = group('![[a.webp|740|48]]', '![[b.webp|100|60]]');
     const before = g.images.map((i) => ({ ...i }));

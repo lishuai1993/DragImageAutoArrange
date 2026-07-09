@@ -30,6 +30,9 @@ export interface DragReorderHost {
 export class DragReorderController {
   private docDragOver: ((e: DragEvent) => void) | null = null;
   private docDrop: ((e: DragEvent) => void) | null = null;
+  /** True while a drag originated from THIS row — used to suppress the row's
+   *  own left/right insert lines (a row can't merge into itself). */
+  private draggingSelf = false;
 
   constructor(private host: DragReorderHost) {}
 
@@ -44,6 +47,7 @@ export class DragReorderController {
 
       item.ondragstart = (e) => {
         e.stopPropagation();
+        this.draggingSelf = true;
         e.dataTransfer!.effectAllowed = "move";
         // Encode source: group lineStart + index so any target can identify the source line
         const payload = `diaa-row:${this.host.getGroupLineStart()}:${i}`;
@@ -69,6 +73,7 @@ export class DragReorderController {
 
       item.ondragend = (e) => {
         e.stopPropagation();
+        this.draggingSelf = false;
         item.classList.remove(CLASSES.dragging);
         item.style.opacity = "";
         this.hideDividerHint();
@@ -78,7 +83,7 @@ export class DragReorderController {
         e.stopPropagation();
         e.preventDefault();
         e.dataTransfer!.dropEffect = "move";
-        this.showDividerHint(e.clientX);
+        this.showDividerHint(e.clientX, e.clientY);
       };
 
       item.ondragleave = (e) => {
@@ -132,7 +137,7 @@ export class DragReorderController {
       e.stopPropagation();
       e.preventDefault();
       e.dataTransfer!.dropEffect = "move";
-      this.showDividerHint(e.clientX);
+      this.showDividerHint(e.clientX, e.clientY);
     });
 
     container.addEventListener("dragleave", (e) => {
@@ -152,8 +157,25 @@ export class DragReorderController {
       if (!data) return;
 
       const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
+      if (rowMatch) {
+        const srcLineStart = parseInt(rowMatch[1], 10);
+        const srcIndex = parseInt(rowMatch[2], 10);
+        const insertAt = this.getInsertAt(e.clientX);
+        if (srcLineStart === this.host.getGroupLineStart()) {
+          // Same row dropped on its own container: intra-row reorder (no-op for
+          // single-image rows). Must NOT emit an external merge — that would
+          // merge the row into itself and corrupt the line.
+          const toIndex = srcIndex < insertAt ? insertAt - 1 : insertAt;
+          if (srcIndex !== toIndex) this.host.emitReorder(srcIndex, toIndex);
+          return;
+        }
+        logger.info("ImageRowWidget cross-row merge (container)", { insertAt });
+        this.host.emitMergeExternal(insertAt, data);
+        return;
+      }
+
       const isStandalone = data.startsWith("diaa-standalone:") || data.startsWith("obsidian://open");
-      if (rowMatch || isStandalone) {
+      if (isStandalone) {
         const insertAt = this.getInsertAt(e.clientX);
         logger.info("ImageRowWidget cross-row merge (container)", { insertAt });
         this.host.emitMergeExternal(insertAt, data);
@@ -183,7 +205,7 @@ export class DragReorderController {
       if (closestIdx === 0 || closestIdx === positions.length - 1) {
         e.preventDefault();
         e.dataTransfer!.dropEffect = "move";
-        this.showDividerHint(e.clientX);
+        this.showDividerHint(e.clientX, e.clientY);
       }
     };
 
@@ -236,10 +258,35 @@ export class DragReorderController {
    * Uses existing divider elements for internal positions and
    * absolutely-positioned edge overlays for edge positions.
    */
-  private showDividerHint(cursorX: number): void {
+  private showDividerHint(cursorX: number, cursorY: number): void {
     const container = this.host.getContainer();
     const itemEls = this.host.getItemEls();
     if (!container || itemEls.length === 0) return;
+
+    // Single-image row: split at the image's real (alignment-independent)
+    // horizontal center line, bounded vertically to the image height. Left of
+    // center → left insert line, right of center → right insert line. Reading
+    // the live image rect makes this correct under any justify-content mode.
+    if (itemEls.length === 1) {
+      this.hideDividerHint();
+      // Source row can't merge into itself → never show its own insert lines.
+      if (this.draggingSelf) return;
+      const img = this.host.getImageEls()[0];
+      const rect = (img ?? itemEls[0]).getBoundingClientRect();
+      if (cursorY < rect.top || cursorY > rect.bottom) return;
+      const containerRect = container.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const edgeLeft = this.host.getEdgeLeft();
+      const edgeRight = this.host.getEdgeRight();
+      if (cursorX < centerX && edgeLeft) {
+        edgeLeft.style.height = `${containerRect.height}px`;
+        edgeLeft.style.display = "";
+      } else if (edgeRight) {
+        edgeRight.style.height = `${containerRect.height}px`;
+        edgeRight.style.display = "";
+      }
+      return;
+    }
 
     const containerRect = container.getBoundingClientRect();
     const widths = itemEls.map(el => el.getBoundingClientRect().width);
@@ -273,10 +320,10 @@ export class DragReorderController {
         dividerEls[divIndex].style.backgroundColor = "#4a9eff";
         dividerEls[divIndex].classList.add(CLASSES.dividerActive);
       }
-    } else if (closestIdx === 0 && edgeLeft) {
+    } else if (!this.draggingSelf && closestIdx === 0 && edgeLeft) {
       edgeLeft.style.height = `${containerRect.height}px`;
       edgeLeft.style.display = "";
-    } else if (edgeRight) {
+    } else if (!this.draggingSelf && edgeRight) {
       edgeRight.style.height = `${containerRect.height}px`;
       edgeRight.style.display = "";
     }
@@ -291,6 +338,14 @@ export class DragReorderController {
     const container = this.host.getContainer();
     if (!container) return -1;
     const itemEls = this.host.getItemEls();
+
+    // Single-image row: match showDividerHint — split at the image center line.
+    if (itemEls.length === 1) {
+      const img = this.host.getImageEls()[0];
+      const rect = (img ?? itemEls[0]).getBoundingClientRect();
+      return cursorX < rect.left + rect.width / 2 ? 0 : 1;
+    }
+
     const containerRect = container.getBoundingClientRect();
     const widths = itemEls.map(el => el.getBoundingClientRect().width);
     const positions = computeDividerXPositions(containerRect.left, widths, this.host.getGap());

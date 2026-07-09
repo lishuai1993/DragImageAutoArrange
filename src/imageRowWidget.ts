@@ -397,7 +397,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // so they are always visible when the cursor targets the left/right edges.
     const makeEdge = (side: "left" | "right") => {
       const el = document.createElement("div");
-      el.style.cssText = `display:none;position:absolute;top:0;bottom:0;width:3px;${side}:0;background-color:#4a9eff;pointer-events:none;z-index:10`;
+      el.style.cssText = `display:none;position:absolute;top:0;bottom:0;width:${DIVIDER_WIDTH}px;${side}:0;background-color:#4a9eff;border-radius:2px;pointer-events:none;z-index:10`;
       this.container!.appendChild(el);
       return el;
     };
