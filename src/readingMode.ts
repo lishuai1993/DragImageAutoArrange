@@ -63,9 +63,22 @@ export function createReadingModeProcessor(
       enabled: enabled(),
     });
 
-    if (imageEmbeds.length < 2) return;
+    if (imageEmbeds.length === 0) return;
 
     const options = getOptions();
+
+    // Group consecutive image embeds (buildEmbedGroups returns only groups ≥2).
+    const groups = buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
+
+    // Standalone single images are rendered natively by Obsidian (always
+    // left-aligned regardless of the setting). Apply the configured alignment so
+    // they match the multi-image rows. Width is untouched (native |0|W render).
+    const groupedEmbeds = new Set<HTMLElement>(groups.flat());
+    for (const embed of imageEmbeds) {
+      if (!groupedEmbeds.has(embed)) applyStandaloneAlignment(embed, options.alignment);
+    }
+
+    if (imageEmbeds.length < 2) return;
 
     // --- Step 0: Parse markdown to recover scale values ---
     // Obsidian only preserves the first |param as the <img width> attribute.
@@ -142,8 +155,7 @@ export function createReadingModeProcessor(
       flexGrowSet: flexGrowSetCount,
     });
 
-    // --- Step 1: Group consecutive embeds (respect maxImagesPerRow) ---
-    const groups = buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
+    // --- Step 1: (consecutive-embed groups already computed above) ---
 
     logger.debug("ReadingMode processor", {
       embedCount: imageEmbeds.length,
@@ -221,6 +233,23 @@ function isImageOnlyBlock(block: HTMLElement | null): boolean {
   return children.every(
     (c) => c.classList.contains("internal-embed") || c.tagName === "BR"
   );
+}
+
+/**
+ * Apply the configured alignment to a standalone single-image embed that
+ * Obsidian renders natively (which always left-aligns).  Sets the parent
+ * block's text-align and makes the embed inline-block so it honours it.  Only
+ * touches image-only blocks and never changes the image width (still `|0|W`).
+ */
+function applyStandaloneAlignment(
+  embed: HTMLElement,
+  alignment: "left" | "center" | "right"
+): void {
+  const block = findBlockParent(embed);
+  if (!block || !isImageOnlyBlock(block)) return;
+  const textAlign = alignment === "center" ? "center" : alignment === "right" ? "right" : "left";
+  block.style.setProperty("text-align", textAlign, "important");
+  embed.style.setProperty("display", "inline-block", "important");
 }
 
 function areAdjacentSiblings(a: HTMLElement | null, b: HTMLElement | null): boolean {
@@ -420,13 +449,28 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   const applySizes = () => {
     try {
     const containerWidth = row.getBoundingClientRect().width;
-    if (containerWidth === 0) return;
+    if (containerWidth === 0) {
+      // Row not laid out yet (common on re-render / section rebuild). Retry next
+      // frame — matches LivePreview's applyLayout. Without this the row stays at
+      // its initial defaultRowHeight while images render at natural height, and
+      // the row's overflow:hidden clips them to "top only". Stop if detached.
+      if (row.isConnected) requestAnimationFrame(() => applySizes());
+      return;
+    }
     const currentMetas = imgs.map((img) => ({
       naturalWidth: img.naturalWidth || 0,
       naturalHeight: img.naturalHeight || 0,
     }));
     const allReady = currentMetas.every((m) => m.naturalWidth > 0);
-    if (!allReady) return;
+    if (!allReady) {
+      // Images haven't finished decoding yet (naturalWidth still 0 even
+      // though the <img> element exists and load handlers already fired).
+      // Retry next frame — matching the width-0 guard above — so the row
+      // never gets permanently stuck at its initial defaultRowHeight while
+      // images render taller and get clipped by overflow:hidden.
+      if (row.isConnected) requestAnimationFrame(() => applySizes());
+      return;
+    }
 
     // Re-read parsed flexGrow from embed data attributes (set from markdown source).
     const currentParsedGrows: Array<number | null> = [];
@@ -511,6 +555,56 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       }
     }
 
+    // ── Diagnostic: rendered vs set heights + ancestor overflow (Problem 1) ──
+    // A "top only" truncation means some clip box is shorter than the image.
+    // Capture, after paint, each row/item/img's SET height vs RENDERED height,
+    // and any ancestor whose overflow-y clips.  Two frames to catch async resets.
+    const rowDiagnostic = () => {
+      try {
+        const rowRect = row.getBoundingClientRect();
+        const items = embeds.map((embed, i) => {
+          const img = embed.querySelector<HTMLImageElement>("img");
+          return {
+            i,
+            itemSetH: embed.style.height || "",
+            itemRectH: Math.round(embed.getBoundingClientRect().height),
+            imgSetH: img?.style.height || "",
+            imgRectH: img ? Math.round(img.getBoundingClientRect().height) : 0,
+            imgNatural: img ? `${img.naturalWidth}x${img.naturalHeight}` : "",
+            imgObjectFit: img ? getComputedStyle(img).objectFit : "",
+          };
+        });
+        const clippers: Array<{ tag: string; cls: string; overflowY: string; clientH: number }> = [];
+        let cur: HTMLElement | null = row.parentElement;
+        for (let d = 0; cur && d < 8; d++) {
+          const cs = getComputedStyle(cur);
+          if (cs.overflowY !== "visible") {
+            clippers.push({
+              tag: cur.tagName,
+              cls: (cur.className && cur.className.substring) ? cur.className.substring(0, 50) : "",
+              overflowY: cs.overflowY,
+              clientH: cur.clientHeight,
+            });
+          }
+          cur = cur.parentElement;
+        }
+        logger.info("RM ROW render diagnostic", {
+          n: embeds.length,
+          rowSetH: row.style.height,
+          rowRectH: Math.round(rowRect.height),
+          rowOverflow: getComputedStyle(row).overflow,
+          items,
+          clippers,
+        });
+      } catch (e) {
+        logger.warn("RM ROW render diagnostic error", { error: String(e) });
+      }
+    };
+    requestAnimationFrame(() => {
+      rowDiagnostic();
+      requestAnimationFrame(() => rowDiagnostic());
+    });
+
     // ── Row 1 Image 0 render-size tracker ──
     if (embeds.length === 3 && imgs[0]?.isConnected) {
       const trackImage0 = () => {
@@ -551,6 +645,39 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       logger.error("RM applySizes error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
     }
   };
+
+  // ResizeObserver: when the row first gets a non-zero width (layout complete),
+  // or when the editor content width changes (sidebar drag / toggle), re-run
+  // applySizes.  This is the RM analogue of the per-widget ResizeObserver width
+  // guard in LivePreview's imageRowWidget.ts.  Without it the fragile rAF retry
+  // chain inside applySizes is the only trigger — and it dies silently when
+  // Obsidian tears down and rebuilds the section mid-chain, leaving the row
+  // permanently stuck at its initial defaultRowHeight with images clipped.
+  let lastRowWidth = 0;
+  const sizeObserver = new ResizeObserver(() => {
+    const w = row.isConnected ? Math.round(row.getBoundingClientRect().width) : 0;
+    // Width guard: only run when the width actually changed. applySizes
+    // mutates heights, not row width, so its own resize callback re-enters
+    // here with the same width and is filtered out — no feedback loop.
+    if (w > 0 && w !== lastRowWidth) {
+      lastRowWidth = w;
+      applySizes();
+    }
+  });
+  sizeObserver.observe(row);
+
+  // Clean up the observer when the row is removed from the DOM. MutationObserver
+  // on the parent catches removal; resizeObserver on the row catches disconnect.
+  const cleanupObserver = () => { sizeObserver.disconnect(); };
+  if (row.parentElement) {
+    const parentObserver = new MutationObserver((_mutations, obs) => {
+      if (!row.isConnected) {
+        obs.disconnect();
+        cleanupObserver();
+      }
+    });
+    parentObserver.observe(row.parentElement, { childList: true });
+  }
 
   if (allLoaded) {
     requestAnimationFrame(() => applySizes());

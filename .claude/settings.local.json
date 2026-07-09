@@ -47,7 +47,9 @@
       "Bash(sed -i '' '780,1103d' src/imageRowWidget.ts)",
       "Bash(sed -n '776,784p' src/imageRowWidget.ts)",
       "Bash(sed -i '' '1468,1738d' src/imageRowWidget.ts)",
-      "Bash(sed -n '1462,1474p' src/imageRowWidget.ts)"
+      "Bash(sed -n '1462,1474p' src/imageRowWidget.ts)",
+      "Bash(git --no-pager diff --stat 59972e6 -- src/)",
+      "Read(//tmp/**)"
     ]
   }
 }

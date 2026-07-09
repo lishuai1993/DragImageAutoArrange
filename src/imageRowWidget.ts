@@ -15,6 +15,33 @@ function mkRowKey(sourcePath: string, _lineStart: number, fileNames: string[]): 
   return `${sourcePath}:${sorted}`;
 }
 
+/** Read the current left/right sidebar widths from the workspace DOM (diagnostic
+ *  only).  Returns pixel width, or 0 when the split is collapsed, or -1 when the
+ *  element is not present.  Used to correlate layout/flicker events with sidebar
+ *  state — sidebars change the editor content width, which drives row heights. */
+export function getSidebarWidths(): { left: number; right: number } {
+  const measure = (sel: string): number => {
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return -1;
+    if (el.classList.contains("is-collapsed")) return 0;
+    return Math.round(el.getBoundingClientRect().width);
+  };
+  return {
+    left: measure(".workspace-split.mod-left-split"),
+    right: measure(".workspace-split.mod-right-split"),
+  };
+}
+
+/** Reliable editor content width: the `.cm-content` ancestor is always laid out
+ *  and reports a correct width even when an individual (detached / mid-reflow)
+ *  widget container measures 0.  Diagnostic use — to verify it can replace the
+ *  unreliable per-widget getBoundingClientRect width.  Returns 0 if unavailable. */
+export function getEditorContentWidth(container: HTMLElement | null): number {
+  if (!container) return 0;
+  const content = container.closest(".cm-content") as HTMLElement | null;
+  return content ? Math.round(content.getBoundingClientRect().width) : 0;
+}
+
 /** Serialize the preserved sizes map into a plain object for persistence. */
 export function exportPreservedSizes(): Record<string, MultiImageSizeData> {
   const result: Record<string, MultiImageSizeData> = {};
@@ -40,6 +67,34 @@ export function importPreservedSizes(data: Record<string, MultiImageSizeData>): 
  *  Saved on destroy, restored in applyLayout before any other layout path,
  *  so corner-handle per-image height adjustments survive widget recreation. */
 export const preservedMultiImageSizes = new Map<string, MultiImageSizeData>();
+
+/** Cache the last successfully rendered pixel dimensions (container height +
+ *  per-item / per-image sizes).  key = mkRowKey(sourcePath, lineStart, fileNames).
+ *
+ *  On widget rebuild during scroll the container is momentarily detached from the
+ *  layout tree (measured width 0), so every layout-changed path defers to rAF.
+ *  The rebuild frame therefore starts at defaultRowHeight (200 px) while the real
+ *  height (e.g. 755 px) only arrives one frame later — a visible jump.
+ *
+ *  This cache is applied synchronously in build() (pure CSS assignment, no
+ *  computation / no dispatch) so the very first frame already has the correct
+ *  dimensions.  The subsequent rAF-based recalculateRowHeight computes the same
+ *  values (container width is unchanged during scroll) and the layoutChanged
+ *  guard skips the onLayoutChange dispatch — zero visible flicker. */
+const lastRenderedSizes = new Map<string, {
+  containerH: string;
+  itemHs: string[];
+  imgHs: string[];
+  imgWs: string[];
+  atWidth: number;
+}>();
+
+/** Document-uniform editor content width from the most recent successful layout
+ *  (all image rows share the same `.cm-line` content width).  Used ONLY to scale
+ *  the cached pixel heights in build() when the editor width has changed since
+ *  they were cached (e.g. after opening the right sidebar) — never fed into a
+ *  layout computation. */
+let lastMeasuredWidth = 0;
 
 export interface ImageRowOptions {
   defaultRowHeight: number;
@@ -196,6 +251,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
   emitResizeEnd(index: number, flexGrow: number): void {
     this.resizeEndCallback?.(index, flexGrow);
+    // Persist immediately so Reading Mode picks up the current scale + flexGrow
+    // without needing a widget-destroy cycle (which may race with RM's file read).
+    this.persistCallback?.();
   }
   setImageScale(index: number, scale: number): void {
     this.group.images[index].scale = clampScale(scale);
@@ -368,7 +426,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   /**
    * Create and return the root DOM element.
    */
-  build(): HTMLElement {
+  build(currentEditorWidth?: number): HTMLElement {
     logger.debug("ImageRowWidget build", {
       imageCount: this.group.images.length,
       files: this.group.images.map((i) => i.fileName),
@@ -466,15 +524,99 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (images.length === 1) {
       this.imageEls[0].style.width = "auto";
       this.imageEls[0].style.height = `${this.options.defaultRowHeight}px`;
+      // Cap width to the container so a cached (wide-editor) height restored on
+      // scroll-in rebuild can never overflow a narrow editor and get left-right
+      // clipped; object-fit:contain then degrades it to a vertical letterbox
+      // until recalc lands the exact height.
+      this.imageEls[0].style.maxWidth = "100%";
       this.itemEls[0].style.flex = "0 0 auto";
       this.itemEls[0].style.height = "";
+      this.itemEls[0].style.maxWidth = "100%";
       this.container.style.height = "";
     }
 
-    // ResizeObserver: auto-update handle positions when ANY layout change
-    // occurs (our resize, Obsidian native resize, window resize, etc.)
+    // Restore last rendered pixel dimensions so the very first frame after a
+    // scroll-in rebuild already has the correct height (zero flicker).  Pure
+    // CSS assignment — no layout computation, no dispatch, no persist.
+    {
+      const key = mkRowKey(this.options.sourcePath, this.group.lineStart, this.group.images.map(i => i.fileName));
+      const cached = lastRenderedSizes.get(key);
+      if (cached && cached.itemHs.length === this.itemEls.length) {
+        // If the editor width has changed since the cache was written (e.g. the
+        // right sidebar was opened), scale the cached heights by the available-
+        // width ratio.  Multi-image scale-row heights are ~linear in container
+        // width (the only non-linear term is the fixed inter-item gap), so the
+        // scaled values land within a sub-pixel of what recalculateRowHeight
+        // will compute next frame — no visible jump.  Single-image height is a
+        // clamped (non-linear) function of width, so we never scale it (n>1 only).
+        //
+        // Current-width source: prefer the value the caller measured this frame
+        // (LivePreview passes view.contentDOM width — always laid out, current
+        // even while this widget is still detached in toDOM). Fall back to the
+        // .cm-content ancestor (valid once attached, e.g. Reading Mode), then to
+        // the module-global lastMeasuredWidth. lastMeasuredWidth alone is stale:
+        // it reflects the *previous* recalc's width, so after a sidebar resize it
+        // still reads the old (wide) width and the cached wide heights get
+        // restored verbatim into a now-narrow editor — the scroll-up flicker.
+        const n = this.itemEls.length;
+        const gapTotal = (n - 1) * this.options.gap;
+        const curWidth =
+          (currentEditorWidth && currentEditorWidth > 0)
+            ? currentEditorWidth
+            : (getEditorContentWidth(this.container) || lastMeasuredWidth);
+        let k = 1;
+        if (n > 1 && curWidth > 0 && cached.atWidth > 0 && curWidth !== cached.atWidth) {
+          const curAvail = curWidth - gapTotal;
+          const cachedAvail = cached.atWidth - gapTotal;
+          if (curAvail > 0 && cachedAvail > 0) k = curAvail / cachedAvail;
+        }
+        const scaleH = (v: string): string => {
+          if (k === 1) return v;
+          const px = parseFloat(v);
+          return isFinite(px) ? `${Math.round(px * k)}px` : v;
+        };
+        for (let i = 0; i < this.itemEls.length; i++) {
+          if (cached.imgHs[i]) this.imageEls[i].style.height = scaleH(cached.imgHs[i]);
+          if (cached.imgWs[i]) this.imageEls[i].style.width = cached.imgWs[i];
+          this.itemEls[i].style.height = scaleH(cached.itemHs[i]);
+        }
+        this.container.style.height = scaleH(cached.containerH);
+        logger.debug("ImageRowWidget restored cached rendered sizes", {
+          containerH: cached.containerH,
+          itemHs: cached.itemHs,
+          cachedAtWidth: cached.atWidth,
+          curWidth,
+          currentEditorWidth,
+          lastMeasuredWidth,
+          scale: k,
+          sidebars: getSidebarWidths(),
+        });
+      }
+    }
+
+    // ResizeObserver: keep handle positions in sync on ANY layout change
+    // (our resize, Obsidian native resize, window resize, etc.), and re-run the
+    // full row layout whenever the *editor width* changes. The container is
+    // width:100%, so its measured width equals the editor content width — a
+    // change there means a sidebar was dragged / toggled and every mounted row
+    // must re-lay-out to match the new width (otherwise rows that CM6 didn't
+    // recreate keep their old-width heights and render out of sync).
+    let lastObservedWidth = currentEditorWidth && currentEditorWidth > 0
+      ? Math.round(currentEditorWidth)
+      : 0;
     this.resizeObserver = new ResizeObserver(() => {
       this.updateAllHandlePositions();
+      const w = this.container
+        ? Math.round(this.container.getBoundingClientRect().width)
+        : 0;
+      // Width guard: recalc only when the width actually changed. recalc mutates
+      // heights (not container width), so its own resize callback re-enters here
+      // with an unchanged width and is filtered out — no feedback loop. Height-
+      // only changes (image load, our own layout) never trigger a recalc here.
+      if (w > 0 && w !== lastObservedWidth) {
+        lastObservedWidth = w;
+        this.recalculateRowHeight();
+      }
     });
     this.resizeObserver.observe(this.container);
     for (const item of this.itemEls) {
@@ -833,33 +975,53 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const aspect = meta.naturalWidth / meta.naturalHeight;
     const manual = isSingleImageManual(img.scale);
 
-    let widthPx: number;
+    // Intended width — deliberately NOT clamped to the (possibly transient)
+    // container width. Persisting this instead of the clamped render width keeps
+    // `|S|W` stable across scroll/re-layout; otherwise a momentarily-narrow
+    // container on widget rebuild rewrites W every frame and churns the document
+    // (the scroll flicker).
+    let intendedWidth: number;
     if (manual) {
-      widthPx = Math.min(Math.max(1, Math.round(img.flexGrow * 100)), Math.round(containerWidth));
+      intendedWidth = Math.max(1, Math.round(img.flexGrow * 100));
+    } else if (this.options.singleImageSizeMode === "fixed") {
+      intendedWidth = Math.max(SINGLE_IMAGE_MIN_WIDTH, Math.round(this.options.singleImageWidth));
     } else {
-      widthPx = computeSingleImageWidth(
+      intendedWidth = Math.round(meta.naturalWidth);
+    }
+
+    // Rendered width: clamp to the container so the image always fits. Behaviour
+    // is identical to before (setting-driven reuses computeSingleImageWidth).
+    let renderWidth: number;
+    if (manual) {
+      renderWidth = Math.min(intendedWidth, Math.round(containerWidth));
+    } else {
+      renderWidth = computeSingleImageWidth(
         this.options.singleImageSizeMode,
         this.options.singleImageWidth,
         meta.naturalWidth,
         containerWidth
       );
     }
-    const imageH = Math.max(1, Math.round(widthPx / aspect));
+    renderWidth = Math.max(1, renderWidth);
+    const imageH = Math.max(1, Math.round(renderWidth / aspect));
 
     this.imageEls[0].style.objectFit = "contain";
     this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(), "important");
     this.imageEls[0].style.height = `${imageH}px`;
     this.imageEls[0].style.width = "auto";
+    this.imageEls[0].style.maxWidth = "100%";
     this.itemEls[0].style.height = "";
     this.itemEls[0].style.flex = "0 0 auto";
+    this.itemEls[0].style.maxWidth = "100%";
     if (this.container) this.container.style.height = "";
 
-    // Update the data model and materialize `|W|S` into markdown when it drifts.
+    // Update the data model and materialize `|S|W` into markdown when it drifts.
+    // Persist the container-independent intended width so it stays stable.
     const sFlag: 0 | 1 = manual ? 1 : 0;
-    img.flexGrow = Math.max(0.1, widthPx / 100);
+    img.flexGrow = Math.max(0.1, intendedWidth / 100);
     img.scale = singleImageScaleFor(manual);
     img.hasExplicitWidth = true;
-    const target = formatSingleImageLine(img.raw, widthPx, sFlag);
+    const target = formatSingleImageLine(img.raw, intendedWidth, sFlag);
     if (target !== img.raw) {
       img.raw = target;
       requestAnimationFrame(() => this.persistCallback?.());
@@ -875,6 +1037,11 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private applyLayout(): void {
     if (!this.container || this.group.images.length === 0) return;
     try {
+
+    // Snapshot container height before layout so we can skip onLayoutChange
+    // when nothing actually changed (avoids the same feedback cascade that
+    // updateFlexGrows already guards against).
+    const preLayoutContainerH = this.container.style.height;
 
     const metas: ImageMeta[] = [];
     for (let i = 0; i < this.group.images.length; i++) {
@@ -934,7 +1101,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
             preservedSizes: preserved.images.map((pi) => `${pi.styleW}x${pi.styleH}`),
           });
           this.applyAlignmentToAll();
-          this.onLayoutChange?.();
+          if (this.container.style.height !== preLayoutContainerH) {
+            this.onLayoutChange?.();
+          }
           void this.container!.offsetHeight;
           this.updateAllHandlePositions();
           requestAnimationFrame(() => this._logRenderedState("LivePreview"));
@@ -968,7 +1137,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           alignment: this.options.alignment,
           manual: isSingleImageManual(this.group.images[0].scale),
         });
-        this.onLayoutChange?.();
+        if (this.container.style.height !== preLayoutContainerH) {
+          this.onLayoutChange?.();
+        }
         void this.container.offsetHeight;
         this.updateAllHandlePositions();
         requestAnimationFrame(() => this._logRenderedState("LivePreview"));
@@ -1027,14 +1198,20 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         imageCount: metas.length,
       });
       this.applyAlignmentToAll();
-      this.onLayoutChange?.();
+      if (this.container.style.height !== preLayoutContainerH) {
+        this.onLayoutChange?.();
+      }
       // Force reflow so handle positions use the new dimensions
       void this.container.offsetHeight;
       this.updateAllHandlePositions();
       requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } else {
-      // Use a sensible default until images load
-      this.container.style.height = `${this.options.defaultRowHeight}px`;
+      // Use a sensible default until images load.  Prefer the last rendered
+      // container height (cached from a previous successful layout) so the
+      // rebuild frame keeps the correct height instead of snapping to 200px.
+      const key = mkRowKey(this.options.sourcePath, this.group.lineStart, this.group.images.map(i => i.fileName));
+      const cachedH = lastRenderedSizes.get(key)?.containerH;
+      this.container.style.height = cachedH || `${this.options.defaultRowHeight}px`;
     }
     } catch (e) {
       logger.error("ImageRowWidget applyLayout error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
@@ -1073,6 +1250,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       hasContainer: !!this.container,
       itemCount: this.itemEls.length,
       containerWidth,
+      sidebars: getSidebarWidths(),
       currentHeights: _beforeItemH,
       currentImgHeights: _beforeImgH,
       currentFlexGrows: _beforeFlexG,
@@ -1081,6 +1259,38 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (containerWidth === 0) {
       requestAnimationFrame(() => this.recalculateRowHeight());
       return;
+    }
+    // Record the document-uniform width so build() can scale stale cached
+    // heights if the editor width has changed since they were cached.
+    lastMeasuredWidth = containerWidth;
+
+    // FLICKER_DIAG: capture the transient PAINTED state right before recalc
+    // changes anything — this is the frame the user sees flicker on.  Compare
+    // the rendered image widths/heights against the real container width and
+    // the reliable content-DOM width to confirm whether the widget was showing
+    // dimensions sized for a *different* (wider) editor width.
+    {
+      const cRect = this.container.getBoundingClientRect();
+      const imgs = this.imageEls.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height), styleH: el.style.height };
+      });
+      const ancW = (sel: string): number => {
+        const el = this.container?.closest(sel) as HTMLElement | null;
+        return el ? Math.round(el.getBoundingClientRect().width) : -1;
+      };
+      logger.info("FLICKER_DIAG transient@recalc", {
+        lineStart: this.group.lineStart,
+        imageCount: this.imageEls.length,
+        containerRectW: Math.round(cRect.width),
+        containerRectH: Math.round(cRect.height),
+        cmContentW: ancW(".cm-content"),
+        cmScrollerW: ancW(".cm-scroller"),
+        cmEditorW: ancW(".cm-editor"),
+        lastMeasuredWidth,
+        sidebars: getSidebarWidths(),
+        imgs,
+      });
     }
 
     // Guard: all images must be loaded (we need natural dimensions)
@@ -1238,7 +1448,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         });
       }
     }
-    if (_diffs.length > 0) {
+    const layoutChanged = _diffs.length > 0 || _beforeContainerH !== _afterContainerH;
+    if (layoutChanged) {
       logger.debug("BALANCE recalculateRowHeight DIMENSION CHANGES", {
         diffs: _diffs,
         containerH: `${_beforeContainerH} → ${_afterContainerH}`,
@@ -1246,10 +1457,27 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
 
     this.applyAlignmentToAll();
-    this.onLayoutChange?.();
+    // Only notify CodeMirror when the layout actually changed.  An unconditional
+    // dispatch re-enters buildDecorations → layout → onLayoutChange, a feedback
+    // cascade of forced full-layout refreshes (the scroll flicker).  Mirrors the
+    // guard already present in updateFlexGrows.
+    if (layoutChanged) this.onLayoutChange?.();
     // Force reflow so handle positions use the new dimensions
     void this.container.offsetHeight;
     this.updateAllHandlePositions();
+    // Cache the rendered pixel dimensions so the next rebuild (e.g. scroll-in
+    // with container temporarily detached) can start from the correct height
+    // instead of defaultRowHeight, eliminating the transient flash.
+    {
+      const key = mkRowKey(this.options.sourcePath, this.group.lineStart, this.group.images.map(i => i.fileName));
+      lastRenderedSizes.set(key, {
+        containerH: this.container.style.height,
+        itemHs: this.itemEls.map(el => el.style.height),
+        imgHs: this.imageEls.map(el => el.style.height),
+        imgWs: this.imageEls.map(el => el.style.width),
+        atWidth: containerWidth,
+      });
+    }
     requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } catch (e) {
       logger.error("ImageRowWidget recalculateRowHeight error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });

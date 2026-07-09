@@ -12,7 +12,7 @@
     "topBarSensitivity": 12,
     "ghostImageWidth": 400,
     "dragOpacity": 30,
-    "alignment": "center",
+    "alignment": "right",
     "singleImageSizeMode": "fixed",
     "singleImageWidth": 600
   },

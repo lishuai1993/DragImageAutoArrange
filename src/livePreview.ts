@@ -16,7 +16,7 @@ import {
 import { editorLivePreviewField } from "obsidian";
 import { detectImageGroups } from "./imageDetector";
 import type { ImageGroup, ImageEmbed } from "./imageDetector";
-import { ImageRowWidget, ImageRowOptions } from "./imageRowWidget";
+import { ImageRowWidget, ImageRowOptions, getSidebarWidths } from "./imageRowWidget";
 import { DragImageSettings } from "./settings";
 import { CLASSES } from "./constants";
 import { computeFlexGrowsFromWidths } from "./layoutEngine";
@@ -308,13 +308,29 @@ class StaticImageRowWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     try {
+      logger.info("SCROLL_DIAG widget build (toDOM)", {
+        lineStart: this.group.lineStart,
+        lineEnd: this.group.lineEnd,
+        imageCount: this.group.images.length,
+        raws: this.group.images.map((i) => i.raw.slice(0, 40)),
+        sidebars: getSidebarWidths(),
+      });
       logger.debug("StaticImageRowWidget toDOM", {
         imageCount: this.group.images.length,
         files: this.group.images.map((i) => i.fileName),
       });
       this.editorView = view;
       this.innerWidget = new ImageRowWidget(this.group, this.options);
-      const el = this.innerWidget.build();
+      // Pass the current editor content width. view.contentDOM is the CM6
+      // `.cm-content` element — always laid out and current, even though this
+      // widget is still detached at toDOM time. Lets build()'s cache-restore
+      // scale stale (wide-editor) heights to the current width instead of
+      // relying on the stale module-global lastMeasuredWidth (the scroll-up
+      // flicker after a sidebar resize).
+      const editorContentWidth = Math.round(
+        view.contentDOM.getBoundingClientRect().width
+      );
+      const el = this.innerWidget.build(editorContentWidth);
 
       // Notify CodeMirror when the widget height changes.
       // Use StateEffect to force an actual state change so CM6 runs
@@ -352,6 +368,10 @@ class StaticImageRowWidget extends WidgetType {
       this.innerWidget.onPersist(() => {
         if (!this.editorView) return;
         const images = this.group.images;
+        logger.info("SCROLL_DIAG persist fired", {
+          lineStart: this.group.lineStart,
+          imageCount: images.length,
+        });
         // Single-image rows persist as `![[file|W|S]]` (W=px width, S=0/1 flag).
         if (images.length === 1) {
           this.persistSingleImage();
@@ -698,7 +718,10 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   destroy(): void {
-    logger.debug("StaticImageRowWidget destroyed");
+    logger.info("SCROLL_DIAG widget destroy", {
+      lineStart: this.group.lineStart,
+      imageCount: this.group.images.length,
+    });
     if (this.persistTimer) clearTimeout(this.persistTimer);
     // Persist flex-grows and scale ratios for multi-image rows.
     if (this.editorView && this.innerWidget && this.group.images.length > 1) {
