@@ -72,6 +72,20 @@ describe('formatSingleImageLine (|S|W order)', () => {
   it('preserves surrounding text and leading whitespace', () => {
     expect(formatSingleImageLine('  ![[a.webp|1|50]]', 200, 0)).toBe('  ![[a.webp|0|200]]');
   });
+
+  it('adds alignment prepended to S|W', () => {
+    expect(formatSingleImageLine('![[a.webp]]', 350, 0, 'left')).toBe('![[a.webp|left|0|350]]');
+    expect(formatSingleImageLine('![[a.webp]]', 700, 1, 'center')).toBe('![[a.webp|center|1|700]]');
+  });
+
+  it('replaces existing params with alignment', () => {
+    expect(formatSingleImageLine('![[a.webp|0|350]]', 700, 1, 'right')).toBe('![[a.webp|right|1|700]]');
+    expect(formatSingleImageLine('![[a.webp|left|0|350]]', 500, 0, 'center')).toBe('![[a.webp|center|0|500]]');
+  });
+
+  it('omits alignment when undefined', () => {
+    expect(formatSingleImageLine('![[a.webp]]', 350, 0)).toBe('![[a.webp|0|350]]');
+  });
 });
 
 describe('normalizeSingleImageParams', () => {
@@ -132,5 +146,43 @@ describe('normalizeSingleImageParams', () => {
     normalizeSingleImageParams(g);
     expect(g.images[0]).toEqual(before[0]);
     expect(g.images[1]).toEqual(before[1]);
+  });
+
+  // ── alignment in single-image params ──
+
+  it('maps |left|1|350 to alignment=left, flexGrow=3.5, scale=0.01', () => {
+    const g = group('![[a.webp|left|1|350]]');
+    normalizeSingleImageParams(g);
+    const img = g.images[0];
+    expect(img.alignment).toBe('left');
+    expect(img.explicitWidth).toBe(350);
+    expect(img.flexGrow).toBeCloseTo(3.5);
+    expect(isSingleImageManual(img.scale)).toBe(true);
+  });
+
+  it('maps |center|0|420 to alignment=center, S=0 (setting-driven)', () => {
+    const g = group('![[a.webp|center|0|420]]');
+    normalizeSingleImageParams(g);
+    const img = g.images[0];
+    expect(img.alignment).toBe('center');
+    expect(img.explicitWidth).toBe(420);
+    expect(img.scale).toBe(0);
+    expect(isSingleImageManual(img.scale)).toBe(false);
+  });
+
+  it('maps |right|0|300 to alignment=right', () => {
+    const g = group('![[a.webp|right|0|300]]');
+    normalizeSingleImageParams(g);
+    expect(g.images[0].alignment).toBe('right');
+    expect(g.images[0].explicitWidth).toBe(300);
+  });
+
+  it('handles alignment-only without S|W (resets to setting-driven)', () => {
+    const g = group('![[a.webp|left]]');
+    normalizeSingleImageParams(g);
+    const img = g.images[0];
+    expect(img.alignment).toBe('left');
+    expect(img.hasExplicitWidth).toBe(false);
+    expect(img.scale).toBe(null);
   });
 });

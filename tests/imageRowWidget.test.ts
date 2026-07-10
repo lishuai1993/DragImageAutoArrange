@@ -9,7 +9,16 @@
  * where the third image in a resized row appeared not to respond to
  * alignment setting changes.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+vi.mock('obsidian', () => ({
+  Menu: vi.fn().mockImplementation(() => ({
+    addItem: vi.fn().mockReturnThis(),
+    addSeparator: vi.fn().mockReturnThis(),
+    showAtMouseEvent: vi.fn(),
+  })),
+}));
+
 import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRowWidget';
 import { ImageGroup, ImageEmbed } from '../src/imageDetector';
 

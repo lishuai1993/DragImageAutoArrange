@@ -7,6 +7,7 @@ import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
 import { validateRowFlexGrows } from "./parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
+import { showImageAlignmentMenu } from "./alignmentContextMenu";
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
 function getFileNameFromEmbed(embed: HTMLElement): string {
@@ -70,15 +71,7 @@ export function createReadingModeProcessor(
     // Group consecutive image embeds (buildEmbedGroups returns only groups ≥2).
     const groups = buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
 
-    // Standalone single images are rendered natively by Obsidian (always
-    // left-aligned regardless of the setting). Apply the configured alignment so
-    // they match the multi-image rows. Width is untouched (native |0|W render).
     const groupedEmbeds = new Set<HTMLElement>(groups.flat());
-    for (const embed of imageEmbeds) {
-      if (!groupedEmbeds.has(embed)) applyStandaloneAlignment(embed, options.alignment);
-    }
-
-    if (imageEmbeds.length < 2) return;
 
     // --- Step 0: Parse markdown to recover scale values ---
     // Obsidian only preserves the first |param as the <img width> attribute.
@@ -146,6 +139,9 @@ export function createReadingModeProcessor(
         embed.setAttribute("data-diaa-scale", String(parsed.scale));
         matchCount++;
       }
+      if (parsed.alignment) {
+        embed.setAttribute("data-diaa-alignment", parsed.alignment);
+      }
     }
     logger.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
@@ -154,6 +150,13 @@ export function createReadingModeProcessor(
       matched: matchCount,
       flexGrowSet: flexGrowSetCount,
     });
+
+    // Apply alignment to standalone single images NOW (after data-diaa-*
+    // attributes have been set from markdown), so that per-image alignment
+    // takes priority over the global default.
+    for (const embed of imageEmbeds) {
+      if (!groupedEmbeds.has(embed)) applyStandaloneAlignment(embed, options.alignment);
+    }
 
     // --- Step 1: (consecutive-embed groups already computed above) ---
 
@@ -168,7 +171,7 @@ export function createReadingModeProcessor(
     // --- Step 2: Wait for images then wrap ---
     for (const group of groups) {
       if (group.length >= 2) {
-        waitForImagesThenWrap(group, options);
+        waitForImagesThenWrap(group, options, app, ctx.sourcePath);
       }
     }
 
@@ -243,10 +246,13 @@ function isImageOnlyBlock(block: HTMLElement | null): boolean {
  */
 function applyStandaloneAlignment(
   embed: HTMLElement,
-  alignment: "left" | "center" | "right"
+  defaultAlignment: "left" | "center" | "right"
 ): void {
   const block = findBlockParent(embed);
   if (!block || !isImageOnlyBlock(block)) return;
+  // Per-image alignment (from markdown |alignment|S|W) overrides global default
+  const perImage = embed.getAttribute("data-diaa-alignment") as "left" | "center" | "right" | null;
+  const alignment = perImage ?? defaultAlignment;
   const textAlign = alignment === "center" ? "center" : alignment === "right" ? "right" : "left";
   block.style.setProperty("text-align", textAlign, "important");
   embed.style.setProperty("display", "inline-block", "important");
@@ -288,7 +294,7 @@ function areEmbedsConsecutive(prev: HTMLElement, curr: HTMLElement): boolean {
 
 // ── Flex row wrapping ────────────────────────────────────────
 
-function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
+function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, app?: App, sourcePath?: string): void {
   try {
   const firstBlock = findBlockParent(embeds[0]);
   if (!firstBlock) return;
@@ -300,10 +306,12 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   const metas: ImageMeta[] = [];
   const parsedFlexGrows: Array<number | null> = [];
   const scales: Array<number | null> = [];
+  const alignments: Array<"left" | "center" | "right" | undefined> = [];
   for (const embed of embeds) {
     const img = embed.querySelector<HTMLImageElement>("img");
     const scaleAttr = embed.getAttribute("data-diaa-scale");
     const fgAttr = embed.getAttribute("data-diaa-flexgrow");
+    const alignAttr = embed.getAttribute("data-diaa-alignment") as "left" | "center" | "right" | null;
     if (img) {
       imgs.push(img);
       metas.push({
@@ -312,10 +320,12 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       });
       parsedFlexGrows.push(fgAttr ? parseFloat(fgAttr) : null);
       scales.push(scaleAttr ? parseFloat(scaleAttr) : null);
+      alignments.push(alignAttr || undefined);
     } else {
       metas.push({ naturalWidth: 0, naturalHeight: 0 });
       parsedFlexGrows.push(null);
       scales.push(null);
+      alignments.push(undefined);
     }
   }
   const hasScale = scales.some((s) => s != null);
@@ -340,7 +350,9 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   const row = document.createElement("div");
   row.className = CLASSES.row;
   row.setAttribute("data-diaa-group", "true");
-  const { justifyContent, objectPosition } = alignmentToCSS(options.alignment);
+  const { justifyContent, objectPosition } = alignmentToCSS(
+    embeds.length === 1 ? (alignments[0] ?? options.alignment) : options.alignment
+  );
   row.style.cssText = [
     `display:flex`,
     `align-items:flex-start`,
@@ -367,6 +379,8 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
   for (let i = 0; i < embeds.length; i++) {
     const flexGrow = grows[i] || 1;
     const embed = embeds[i];
+    const perImageAlign = alignments[i] ?? options.alignment;
+    const { justifyContent: ji, objectPosition: oi } = alignmentToCSS(perImageAlign);
     // Use setProperty("important") for styles that Obsidian CSS classes may override
     embed.style.setProperty("flex", `${flexGrow} 1 0%`, "important");
     embed.style.setProperty("overflow", "hidden", "important");
@@ -375,7 +389,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
     embed.style.setProperty("margin", "0", "important");
     embed.style.setProperty("padding", "0", "important");
     embed.style.setProperty("display", "flex", "important");
-    embed.style.setProperty("justify-content", justifyContent, "important");
+    embed.style.setProperty("justify-content", ji, "important");
     embed.style.setProperty("align-items", "flex-start", "important");
 
     const embedImgs = Array.from(embed.querySelectorAll<HTMLImageElement>("img"));
@@ -385,7 +399,7 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
       img.style.setProperty("width", "100%", "important");
       img.style.setProperty("height", "100%", "important");
       img.style.setProperty("object-fit", "contain", "important");
-      img.style.setProperty("object-position", objectPosition, "important");
+      img.style.setProperty("object-position", oi, "important");
       img.style.setProperty("display", "block", "important");
       img.style.setProperty("margin", "0", "important");
 
@@ -417,6 +431,29 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
         }
       });
       styleGuard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
+
+      // Per-image alignment context menu
+      img.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentAlign = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
+        showImageAlignmentMenu(e, currentAlign, (newAlign) => {
+          if (newAlign) {
+            embed.setAttribute("data-diaa-alignment", newAlign);
+          } else {
+            embed.removeAttribute("data-diaa-alignment");
+          }
+          // Re-apply styles
+          const align = newAlign ?? options.alignment;
+          const { justifyContent: j2, objectPosition: o2 } = alignmentToCSS(align);
+          embed.style.setProperty("justify-content", j2, "important");
+          img.style.setProperty("object-position", o2, "important");
+          // Persist to markdown
+          if (app && sourcePath) {
+            persistAlignmentToMarkdown(app, sourcePath, embed, newAlign, options.alignment);
+          }
+        });
+      });
     }
     row.appendChild(embed);
   }
@@ -711,10 +748,10 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions): void {
 
 // ── Wait for async image loading ─────────────────────────────
 
-function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOptions): void {
+function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOptions, app?: App, sourcePath?: string): void {
   // Check if images are already present
   if (embeds.every((e) => e.querySelector("img"))) {
-    wrapAsFlexRow(embeds, options);
+    wrapAsFlexRow(embeds, options, app, sourcePath);
     return;
   }
 
@@ -731,7 +768,7 @@ function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOptions):
         observer.disconnect();
         if (readyCount >= totalNeeded) {
           for (const o of observers) o.disconnect();
-          wrapAsFlexRow(embeds, options);
+          wrapAsFlexRow(embeds, options, app, sourcePath);
         }
       }
     });
@@ -744,7 +781,7 @@ function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOptions):
   setTimeout(() => {
     for (const o of observers) o.disconnect();
     if (embeds.some((e) => e.querySelector("img"))) {
-      wrapAsFlexRow(embeds, options);
+      wrapAsFlexRow(embeds, options, app, sourcePath);
     }
   }, 5000);
 }
@@ -909,4 +946,39 @@ function isImageEmbedLine(line: string): boolean {
   // Width specifier is INSIDE [[...]], not after ]]
   const re = /^\s*!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|webp|svg|bmp|avif))(?:\|\d+)?\]\]\s*$/i;
   return re.test(line);
+}
+
+async function persistAlignmentToMarkdown(
+  app: App,
+  sourcePath: string,
+  embed: HTMLElement,
+  alignment: "left" | "center" | "right" | undefined,
+  defaultAlignment: "left" | "center" | "right"
+): Promise<void> {
+  const img = embed.querySelector<HTMLImageElement>("img");
+  if (!img) return;
+  const fileName = getFileNameFromEmbed(embed);
+  if (!fileName) return;
+
+  const file = app.vault.getAbstractFileByPath(sourcePath);
+  if (!(file instanceof TFile)) return;
+
+  const effectiveAlign = alignment ?? defaultAlignment;
+
+  await app.vault.process(file, (content: string) => {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].includes(fileName)) continue;
+      // Strip existing alignment param if present, then prepend the effective one
+      const stripped = lines[i].replace(/\|(left|center|right)\|/, "|");
+      if (stripped.includes("|")) {
+        lines[i] = stripped.replace(/\|/, `|${effectiveAlign}|`);
+      } else {
+        // Bare embed — insert alignment before ]]
+        lines[i] = stripped.replace(/\]\]/, `|${effectiveAlign}]]`);
+      }
+      break; // Only update first match
+    }
+    return lines.join("\n");
+  });
 }

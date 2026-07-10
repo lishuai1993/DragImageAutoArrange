@@ -55,6 +55,55 @@ describe('parseImageLine', () => {
     expect(r!.explicitWidth).toBeNull();
     expect(r!.flexGrow).toBe(1);
   });
+
+  // ── alignment parsing ──
+
+  it('parses multi-image line with alignment prepended', () => {
+    const r = parseImageLine('![[a.png|left|120|50]]', 0, rePng);
+    expect(r).not.toBeNull();
+    expect(r!.alignment).toBe('left');
+    expect(r!.explicitWidth).toBe(120);
+    expect(r!.flexGrow).toBe(1.2);
+    expect(r!.scale).toBe(0.5);
+  });
+
+  it('parses multi-image line with center alignment', () => {
+    const r = parseImageLine('![[a.png|center|150|80]]', 0, rePng);
+    expect(r!.alignment).toBe('center');
+    expect(r!.flexGrow).toBe(1.5);
+    expect(r!.scale).toBe(0.8);
+  });
+
+  it('parses multi-image line with right alignment', () => {
+    const r = parseImageLine('![[a.png|right|200|100]]', 0, rePng);
+    expect(r!.alignment).toBe('right');
+    expect(r!.flexGrow).toBe(2.0);
+    expect(r!.scale).toBe(1.0);
+  });
+
+  it('parses single-image line with alignment prepended', () => {
+    const r = parseImageLine('![[a.png|left|0|350]]', 0, rePng);
+    expect(r).not.toBeNull();
+    expect(r!.alignment).toBe('left');
+    // parseImageLine uses multi convention (firstNum=explicitWidth, last=scale).
+    // normalizeSingleImageParams fixes this later for singles.
+    expect(r!.explicitWidth).toBe(0);
+    expect(r!.scale).toBe(3.5);
+  });
+
+  it('returns undefined alignment when not present', () => {
+    const r = parseImageLine('![[a.png|120|50]]', 0, rePng);
+    expect(r!.alignment).toBeUndefined();
+    expect(r!.explicitWidth).toBe(120);
+    expect(r!.scale).toBe(0.5);
+  });
+
+  it('parses multi-image line with alignment but no scale (single numeric not double-assigned)', () => {
+    const r = parseImageLine('![[a.png|left|120]]', 0, rePng);
+    expect(r!.alignment).toBe('left');
+    expect(r!.explicitWidth).toBe(120);
+    expect(r!.scale).toBeNull(); // only one numeric — not double-assigned, backfill handles it
+  });
 });
 
 // ── detectImageGroups ──

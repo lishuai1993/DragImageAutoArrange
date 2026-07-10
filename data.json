@@ -12,9 +12,9 @@
     "topBarSensitivity": 12,
     "ghostImageWidth": 400,
     "dragOpacity": 30,
-    "alignment": "right",
+    "alignment": "center",
     "singleImageSizeMode": "fixed",
-    "singleImageWidth": 600
+    "singleImageWidth": 400
   },
   "preservedSizes": {}
 }

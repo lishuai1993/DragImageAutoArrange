@@ -175,9 +175,13 @@ function convertOrphanedMultiSinglesToBare(
     const raw = lineObj.text;
     const m = raw.match(/\|([^\]]*)\]\]/);
     if (!m) continue; // already bare
-    const first = parseInt(m[1].split("|")[0], 10);
-    // Clean single `|S|W` (S ∈ {0,1}) → leave untouched.
-    if (m[1].includes("|") && (first === 0 || first === 1)) continue;
+    const parts = m[1].split("|");
+    const ALIGNMENTS = new Set(["left", "center", "right"]);
+    let offset = 0;
+    if (ALIGNMENTS.has(parts[0])) offset = 1;
+    const first = parseInt(parts[offset], 10);
+    // Clean single `|S|W` or `|alignment|S|W` (S ∈ {0,1}) → leave untouched.
+    if (parts.length > offset + 1 && (first === 0 || first === 1)) continue;
     const bare = raw.replace(/\|[^\]]*(?=\]\])/, "");
     if (bare !== raw) {
       changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: bare });
@@ -213,7 +217,7 @@ function parseScaleFromRaw(raw: string): number | null {
   if (!paramsMatch) return null;
   const parts = paramsMatch[1].split("|");
   if (parts.length < 2) return null;
-  const v = parseInt(parts[1], 10);
+  const v = parseInt(parts[parts.length - 1], 10);
   return isFinite(v) && v > 0 ? v / 100 : null;
 }
 
@@ -234,12 +238,14 @@ function applyFlexGrowChanges(
   view: EditorView,
   images: ImageEmbed[],
   grows: number[],
-  scales?: (number | null)[]
+  scales?: (number | null)[],
+  defaultAlignment?: "left" | "center" | "right"
 ): void {
   const changes: Array<{ from: number; to: number; insert: string }> = [];
   for (let i = 0; i < grows.length && i < images.length; i++) {
     const scale = scales ? scales[i] : undefined;
-    const newLine = updateImageLineWidth(images[i].raw, grows[i], scale);
+    const alignment = images[i].alignment ?? defaultAlignment;
+    const newLine = updateImageLineWidth(images[i].raw, grows[i], scale, alignment);
     if (newLine === images[i].raw) continue;
 
     const line = images[i].line + 1; // 1-indexed
@@ -302,6 +308,7 @@ class StaticImageRowWidget extends WidgetType {
     }
     for (let i = 0; i < a.images.length; i++) {
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
+      if (a.images[i].alignment !== b.images[i].alignment) return false;
     }
     return true;
   }
@@ -384,7 +391,7 @@ class StaticImageRowWidget extends WidgetType {
           scales,
           imageCount: images.length,
         });
-        applyFlexGrowChanges(this.editorView!, images, grows, scales);
+        applyFlexGrowChanges(this.editorView!, images, grows, scales, this.options.alignment);
       });
 
       return el;
@@ -586,7 +593,9 @@ class StaticImageRowWidget extends WidgetType {
       // is a 0/1 flag, not a scale.  Drop it so the target multi-row backfills a
       // real scale instead of mis-reading the flag as a tiny ratio.
       const scale = dropScale ? null : parseScaleFromRaw(raw);
-      const newText = updateImageLineWidth(raw, grow, scale);
+      const alignMatch = raw.match(/\|(left|center|right)\|/);
+      const alignment = (alignMatch ? alignMatch[1] : this.options.alignment) as "left" | "center" | "right";
+      const newText = updateImageLineWidth(raw, grow, scale, alignment);
       if (newText !== raw) {
         changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
       }
@@ -738,10 +747,10 @@ class StaticImageRowWidget extends WidgetType {
         // Try synchronous dispatch first; fall back to setTimeout if the
         // view is already in a state where dispatch is illegal.
         try {
-          applyFlexGrowChanges(view, images, grows, scales);
+          applyFlexGrowChanges(view, images, grows, scales, this.options.alignment);
         } catch {
           this.persistTimer = setTimeout(() => {
-            applyFlexGrowChanges(view, images, grows, scales);
+            applyFlexGrowChanges(view, images, grows, scales, this.options.alignment);
           }, 0);
         }
       }
@@ -762,7 +771,7 @@ class StaticImageRowWidget extends WidgetType {
     if (!hasFlexChanges && this.innerWidget._scaleDirtyImages.size === 0) return;
     const scales = images.map(img => img.scale);
     try {
-      applyFlexGrowChanges(this.editorView, images, grows, scales);
+      applyFlexGrowChanges(this.editorView, images, grows, scales, this.options.alignment);
     } catch {
       // View not ready for dispatch; persist will happen in destroy()
     }
@@ -774,7 +783,9 @@ class StaticImageRowWidget extends WidgetType {
     applyFlexGrowChanges(
       this.editorView,
       this.group.images,
-      this.innerWidget.getCurrentFlexGrows()
+      this.innerWidget.getCurrentFlexGrows(),
+      undefined,
+      this.options.alignment
     );
   }
 
@@ -796,22 +807,25 @@ class StaticImageRowWidget extends WidgetType {
     // Anti-resurrection: skip if a structural move relocated this image and the
     // cached line no longer references it.
     if (!lineObj.text.includes(img.fileName)) return;
-    const newText = formatSingleImageLine(lineObj.text, widthPx, sFlag);
+    const newText = formatSingleImageLine(lineObj.text, widthPx, sFlag, img.alignment ?? this.options.alignment);
     if (newText === lineObj.text) return;
     this.editorView.dispatch({
       changes: { from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText },
     });
-    logger.debug("Single-image persist", { line: img.line, widthPx, sFlag });
+    logger.debug("Single-image persist", { line: img.line, widthPx, sFlag, alignment: img.alignment ?? this.options.alignment });
   }
 }
 
 /** Replace or remove the |width and |scale parameters in an image embed line. */
-export function updateImageLineWidth(raw: string, flexGrow: number, scale?: number | null): string {
+export function updateImageLineWidth(raw: string, flexGrow: number, scale?: number | null, alignment?: "left" | "center" | "right"): string {
   const widthValue = Math.round(flexGrow * 100);
   // Strip everything between file extension and ]] (handles |width, |WxH, |width|WxH)
   let out = raw.replace(/\|[^\]]*(?=\]\])/, "");
   // Build the new parameter string
   const params: string[] = [];
+  if (alignment) {
+    params.push(alignment);
+  }
   if (widthValue !== 100) {
     params.push(String(widthValue));
   }
@@ -820,7 +834,7 @@ export function updateImageLineWidth(raw: string, flexGrow: number, scale?: numb
   if (safeScale != null) {
     const scaleValue = Math.round(safeScale * 100);
     if (scaleValue > 0 && scaleValue <= 100) {
-      if (params.length === 0) params.push("100"); // need a placeholder for flexGrow when scale is present
+      if (!params.some(p => /^\d+$/.test(p))) params.push("100"); // need a placeholder for flexGrow when scale is present
       params.push(String(scaleValue));
     }
   }
@@ -851,7 +865,7 @@ export function resetSingleImageManualFlags(
     if (lineNum < 1 || lineNum > doc.lines) continue;
     const lineObj = doc.line(lineNum);
     const W = img.explicitWidth ?? Math.round(img.flexGrow * 100);
-    const newText = formatSingleImageLine(lineObj.text, W, 0);
+    const newText = formatSingleImageLine(lineObj.text, W, 0, img.alignment);
     if (newText !== lineObj.text) {
       changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText });
     }
@@ -860,6 +874,41 @@ export function resetSingleImageManualFlags(
   changes.sort((a, b) => b.from - a.from);
   view.dispatch({ changes });
   logger.info("LivePreview reset single-image manual flags", { count: changes.length });
+}
+
+/**
+ * "Reset all image alignments": strip per-image alignment params from every
+ * image embed line, reverting to the global alignment setting.
+ */
+export function resetImageAlignmentFlags(
+  view: EditorView,
+  maxImagesPerRow: number,
+  extensions: string,
+  defaultAlignment: "left" | "center" | "right"
+): void {
+  const doc = view.state.doc;
+  const groups = detectImageGroups(doc.toString(), maxImagesPerRow, extensions);
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  for (const g of groups) {
+    for (const img of g.images) {
+      const lineNum = img.line + 1;
+      if (lineNum < 1 || lineNum > doc.lines) continue;
+      const lineObj = doc.line(lineNum);
+      const line = lineObj.text;
+      // Replace any per-image alignment with the global default.
+      // Lines already lacking alignment also get the default prepended.
+      if (/\|(left|center|right)\|/.test(line)) {
+        const reverted = line.replace(/\|(left|center|right)\|/, `|${defaultAlignment}|`);
+        if (reverted !== line) {
+          changes.push({ from: lineObj.from, to: lineObj.from + line.length, insert: reverted });
+        }
+      }
+    }
+  }
+  if (changes.length === 0) return;
+  changes.sort((a, b) => b.from - a.from);
+  view.dispatch({ changes });
+  logger.info("LivePreview reset image alignment flags", { count: changes.length });
 }
 
 // ── State field for decorations ─────────────────────────────────

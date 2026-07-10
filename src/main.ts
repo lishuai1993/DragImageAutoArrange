@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags } from "./livePreview";
+import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { logger } from "./logger";
@@ -171,6 +171,24 @@ export default class DragImageAutoArrangePlugin
       }
     });
     logger.info("Command: reset all single images to current setting");
+  }
+
+  resetAllImageAlignments(): void {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const cm = (leaf.view as any)?.editor?.cm;
+      if (cm?.dispatch) {
+        resetImageAlignmentFlags(
+          cm,
+          this.settings.maxImagesPerRow,
+          this.settings.imageExtensions,
+          this.settings.alignment
+        );
+      }
+      if (leaf.view instanceof MarkdownView && leaf.view.previewMode) {
+        leaf.view.previewMode.rerender(true);
+      }
+    });
+    logger.info("Command: reset all image alignments to current setting");
   }
 
   private buildImageRowOptions(): ImageRowOptions {

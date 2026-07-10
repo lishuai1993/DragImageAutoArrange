@@ -12,6 +12,9 @@ export interface ImageEmbed {
   /** image-content-width / item-width ratio, persisted as second |param in markdown.
    *  null means default (image fills item naturally, no resize applied). */
   scale: number | null;
+  /** Per-image alignment.  When absent the row-level global alignment applies.
+   *  Persisted as the first pipe param: ![[file|left|120|50]]. */
+  alignment?: "left" | "center" | "right";
 }
 
 export interface ImageGroup {
@@ -39,13 +42,25 @@ export function parseImageLine(
 
   const fileName = match[1];
   const rawParam = match[2];
-  // Extract first number from param (handles |width, |WxH, |width|WxH)
-  const firstNum = rawParam ? rawParam.match(/^\d+/) : null;
-  const explicitWidth = firstNum ? parseInt(firstNum[0], 10) : null;
-  // Extract scale (second |param): image-content-width / item-width ratio × 100
-  // Format: ![[image.webp|740|48]] → flexGrow=7.40, scale=0.48
-  const scaleMatch = rawParam ? rawParam.match(/\|(\d+)/) : null;
-  const scale = scaleMatch ? parseInt(scaleMatch[1], 10) / 100 : null;
+
+  // Per-image alignment — always the first param when present.
+  // Format: ![[file|left|120|50]] (multi) or ![[file|center|0|350]] (single).
+  const alignMatch = rawParam ? rawParam.match(/^(left|center|right)\|/) : null;
+  const alignment = alignMatch
+    ? (alignMatch[1] as "left" | "center" | "right")
+    : undefined;
+
+  // First numeric param — skip a leading alignment word if present.
+  const firstNum = rawParam ? rawParam.match(/(?:^|\|)(\d+)/) : null;
+  const explicitWidth = firstNum ? parseInt(firstNum[1], 10) : null;
+
+  // Second numeric param (scale) — always the last |digits in the string.
+  // When there's only one numeric in rawParam, firstNum and scaleMatch will
+  // both match the same occurrence.  Don't double-assign — leave scale null
+  // so the layout backfill can fill it from rendered state.
+  const scaleMatch = rawParam ? rawParam.match(/\|(\d+)$/) : null;
+  const sameOccurrence = firstNum && scaleMatch && firstNum.index === scaleMatch.index;
+  const scale = (scaleMatch && !sameOccurrence) ? parseInt(scaleMatch[1], 10) / 100 : null;
 
   return {
     line: lineIndex,
@@ -55,6 +70,7 @@ export function parseImageLine(
     hasExplicitWidth: explicitWidth !== null,
     flexGrow: explicitWidth ? explicitWidth / 100 : 1,
     scale,
+    alignment,
   };
 }
 

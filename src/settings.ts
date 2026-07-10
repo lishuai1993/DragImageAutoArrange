@@ -26,6 +26,8 @@ export interface IDragImagePlugin {
   saveSettings(): Promise<void>;
   /** One-shot: reset every single-image row to the current size setting. */
   resetAllSingleImages(): void;
+  /** One-shot: clear every per-image alignment, reverting to the global setting. */
+  resetAllImageAlignments(): void;
 }
 
 export async function loadSettings(plugin: { loadData(): Promise<any> }): Promise<DragImageSettings> {
@@ -195,11 +197,22 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    // ── Image Alignment (grouped) ──────────────────────────────
+
+    containerEl.createEl("h3", { text: "图片对齐" });
+
+    const alignGroup = containerEl.createDiv();
+    alignGroup.style.paddingLeft = "16px";
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let alignDropdown: any;
+
+    new Setting(alignGroup)
       .setName("Image alignment")
-      .setDesc("Horizontal alignment of images within the row container.")
-      .addDropdown((dropdown) =>
-        dropdown
+      .setDesc("Global horizontal alignment for image rows. Per-image overrides set via right-click take priority.")
+      .addDropdown((dropdown) => {
+        alignDropdown = dropdown;
+        return dropdown
           .addOption("left", "Left")
           .addOption("center", "Center")
           .addOption("right", "Right")
@@ -207,51 +220,117 @@ export class DragImageSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.alignment = value as Alignment;
             await this.plugin.saveSettings();
+          });
+      });
+
+    const alignSep = alignGroup.createDiv();
+    alignSep.style.borderBottom =
+      "1px solid var(--background-modifier-border)";
+    alignSep.style.margin = "12px 0";
+
+    new Setting(alignGroup)
+      .setName("Reset image alignments")
+      .setDesc(
+        "One-shot: clear every image's per-image alignment override and revert to the global setting above."
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Reset all to current setting")
+          .onClick(() => {
+            this.plugin.resetAllImageAlignments();
+            alignDropdown.setValue(
+              this.plugin.settings.alignment
+            );
           })
       );
 
-    new Setting(containerEl)
+    // ── Single Image Display (grouped) ──────────────────────────
+
+    containerEl.createEl("h3", { text: "单图显示" });
+
+    const singleImageGroup = containerEl.createDiv();
+    singleImageGroup.style.paddingLeft = "16px";
+
+    const mode = this.plugin.settings.singleImageSizeMode;
+
+    // Capture component refs so dropdown onChange and reset button onClick can
+    // update the UI in-place (no full this.display() rebuild → no page jitter).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let sizeDropdown: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let widthText: any;
+
+    const setWidthDisabled = (disabled: boolean) => {
+      if (!widthText) return;
+      widthText.setDisabled(disabled);
+      widthText.inputEl.style.color = disabled
+        ? "var(--text-faint)"
+        : "";
+    };
+
+    new Setting(singleImageGroup)
       .setName("Single image size")
-      .setDesc("How a lone image (a single-image row) is sized. Natural size shows the image at its real pixel size, shrunk to fit the editor width; Fixed width renders single images at a set width. Manual corner-resizes stick per image. \"Reset all to current setting\" is a one-shot that clears every single image's manual size and re-applies the current mode.")
-      .addDropdown((dropdown) =>
-        dropdown
+      .setDesc(
+        "How a lone image (a single-image row) is sized. Natural size shows images at their real pixel size, shrunk to fit the editor width; Fixed width renders single images at a set width. Manual corner-resizes stick per image."
+      )
+      .addDropdown((dropdown) => {
+        sizeDropdown = dropdown;
+        return dropdown
           .addOption("natural", "Natural size")
           .addOption("fixed", "Fixed width")
-          .addOption("__reset__", "Reset all to current setting")
-          .setValue(this.plugin.settings.singleImageSizeMode)
+          .setValue(mode)
           .onChange(async (value) => {
-            if (value === "__reset__") {
-              // One-shot action: reset all single images to the current mode,
-              // then revert the dropdown to the persistent mode.
-              this.plugin.resetAllSingleImages();
-              this.display();
-              return;
-            }
-            this.plugin.settings.singleImageSizeMode = value as SingleImageSizeMode;
+            this.plugin.settings.singleImageSizeMode =
+              value as SingleImageSizeMode;
             await this.plugin.saveSettings();
-            // Re-render so the width input shows/hides for the chosen mode.
-            this.display();
+            // Toggle the width input in-place — no full-page rebuild
+            setWidthDisabled(value === "natural");
+          });
+      })
+      .addText((text) => {
+        widthText = text;
+        text.inputEl.type = "number";
+        text.inputEl.min = "100";
+        text
+          .setValue(String(this.plugin.settings.singleImageWidth))
+          .onChange(async (value) => {
+            const parsed = parseInt(value, 10);
+            this.plugin.settings.singleImageWidth = isFinite(parsed)
+              ? Math.max(100, parsed)
+              : DEFAULT_SETTINGS.singleImageWidth;
+            await this.plugin.saveSettings();
+          });
+        if (mode === "natural") setWidthDisabled(true);
+      });
+
+    // Horizontal separator between the two sub-items
+    const sep = singleImageGroup.createDiv();
+    sep.style.borderBottom =
+      "1px solid var(--background-modifier-border)";
+    sep.style.margin = "12px 0";
+
+    new Setting(singleImageGroup)
+      .setName("Reset single image sizes")
+      .setDesc(
+        "One-shot: clear every single image's manual size override and re-apply the current mode."
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Reset all to current setting")
+          .onClick(() => {
+            this.plugin.resetAllSingleImages();
+            // Sync dropdown + width input in-place to reflect the reset
+            sizeDropdown.setValue(
+              this.plugin.settings.singleImageSizeMode
+            );
+            widthText.setValue(
+              String(this.plugin.settings.singleImageWidth)
+            );
+            setWidthDisabled(
+              this.plugin.settings.singleImageSizeMode === "natural"
+            );
           })
       );
-
-    if (this.plugin.settings.singleImageSizeMode === "fixed") {
-      new Setting(containerEl)
-        .setName("Single image width")
-        .setDesc("Fixed width (px) for single images. Minimum 100; larger than the editor width is capped to the editor width.")
-        .addText((text) => {
-          text.inputEl.type = "number";
-          text.inputEl.min = "100";
-          text
-            .setValue(String(this.plugin.settings.singleImageWidth))
-            .onChange(async (value) => {
-              const parsed = parseInt(value, 10);
-              this.plugin.settings.singleImageWidth = isFinite(parsed)
-                ? Math.max(100, parsed)
-                : DEFAULT_SETTINGS.singleImageWidth;
-              await this.plugin.saveSettings();
-            });
-        });
-    }
 
     new Setting(containerEl)
       .setName("Image extensions")

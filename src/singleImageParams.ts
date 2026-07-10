@@ -23,17 +23,20 @@ export function singleImageScaleFor(manual: boolean): number {
 }
 
 /**
- * Rewrite an image embed line to the single-image `![[file|S|W]]` form.
- * Strips any existing params (|width, |WxH, |W|S, |S|W) then appends |S|W.
+ * Rewrite an image embed line to the single-image `![[file|alignment|S|W]]` form.
+ * Strips any existing params (|width, |WxH, |W|S, |S|W) then appends |alignment|S|W.
+ * alignment is omitted when undefined (backward-compatible bare format).
  */
 export function formatSingleImageLine(
   raw: string,
   widthPx: number,
-  sFlag: 0 | 1
+  sFlag: 0 | 1,
+  alignment?: "left" | "center" | "right"
 ): string {
   const w = Math.max(1, Math.round(widthPx));
   const out = raw.replace(/\|[^\]]*(?=\]\])/, "");
-  return out.replace(/\]\]/, `|${sFlag}|${w}]]`);
+  const alignPart = alignment ? `|${alignment}` : "";
+  return out.replace(/\]\]/, `${alignPart}|${sFlag}|${w}]]`);
 }
 
 /**
@@ -46,10 +49,19 @@ export function normalizeSingleImageParams(group: ImageGroup): void {
   const img = group.images[0];
   const m = img.raw.match(/\|([^\]]*)\]\]/);
   const parts = m ? m[1].split("|") : [];
-  const s = parts.length >= 2 ? parseInt(parts[0], 10) : NaN;
-  if (parts.length >= 2 && (s === 0 || s === 1)) {
+
+  // Detect leading alignment word, skip it for S/W reading
+  const ALIGNMENTS = new Set(["left", "center", "right"]);
+  let offset = 0;
+  if (parts.length > 0 && ALIGNMENTS.has(parts[0])) {
+    img.alignment = parts[0] as "left" | "center" | "right";
+    offset = 1;
+  }
+
+  const s = parts.length >= offset + 2 ? parseInt(parts[offset], 10) : NaN;
+  if (parts.length >= offset + 2 && (s === 0 || s === 1)) {
     // Our single-image `|S|W` form (S is a 0/1 flag). W is the real pixel width.
-    const w = parseInt(parts[1], 10);
+    const w = parseInt(parts[offset + 1], 10);
     img.explicitWidth = isFinite(w) ? w : null;
     img.hasExplicitWidth = img.explicitWidth != null;
     img.flexGrow = img.explicitWidth != null && img.explicitWidth > 0 ? img.explicitWidth / 100 : 1;
