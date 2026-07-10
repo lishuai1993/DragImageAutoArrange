@@ -9,7 +9,6 @@ import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { DividerController, DividerHost } from "./dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "./resizeHandleController";
 import { DragReorderController, DragReorderHost } from "./dragReorderController";
-import { showImageAlignmentMenu } from "./alignmentContextMenu";
 
 function mkRowKey(sourcePath: string, _lineStart: number, fileNames: string[]): string {
   const sorted = [...fileNames].sort().join(",");
@@ -719,16 +718,16 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.imageEls.push(img);
     this.itemEls.push(item);
 
-    // Per-image alignment context menu
-    img.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      showImageAlignmentMenu(e, image.alignment, (newAlign) => {
-        image.alignment = newAlign;
-        this.applyAlignmentToAll();
-        this.persistCallback?.();
-      });
-    });
+    // Store alignment callback on the img element so the document-level
+    // contextmenu handler (main.ts) can read it at capture phase, which
+    // runs before any other plugin's handler.
+    (img as any).__diaa_alignment = image.alignment;
+    (img as any).__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+      image.alignment = newAlign;
+      (img as any).__diaa_alignment = newAlign;
+      this.applyAlignmentToAll();
+      this.persistCallback?.();
+    };
 
     // Watch for Obsidian asynchronously modifying the img element.
     // Obsidian adds alignment CSS classes AND may set inline styles
@@ -1203,6 +1202,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           this._scaleDirtyImages.add(i);
           if (this.group.images[i].alignment == null) {
             this.group.images[i].alignment = this.options.alignment;
+            if (this.imageEls[i]) (this.imageEls[i] as any).__diaa_alignment = this.options.alignment;
           }
         }
         // Compute scale ratios after layout settles (RAF so DOM is painted).
@@ -1275,6 +1275,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
       if (img.alignment == null) {
         img.alignment = this.options.alignment;
+        if (this.imageEls[i]) (this.imageEls[i] as any).__diaa_alignment = this.options.alignment;
         changed = true;
       }
 

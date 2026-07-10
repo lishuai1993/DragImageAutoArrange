@@ -5,10 +5,11 @@ import {
   IDragImagePlugin,
   loadSettings,
 } from "./settings";
-import { createReadingModeProcessor } from "./readingMode";
+import { createReadingModeProcessor, schedulePendingFlush } from "./readingMode";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
+import { showImageAlignmentMenu } from "./alignmentContextMenu";
 import { logger } from "./logger";
 
 export default class DragImageAutoArrangePlugin
@@ -41,6 +42,31 @@ export default class DragImageAutoArrangePlugin
     );
     logger.info("Plugin loading", { version: this.manifest.version });
 
+    // ── Per-image alignment context menu ──────────────────────────────
+    // Registered at document level in capture phase so it runs BEFORE any
+    // other plugin's contextmenu handler (including those on CodeMirror
+    // or editor wrappers that would otherwise intercept the event).
+    document.addEventListener("contextmenu", (e) => {
+      const target = e.target as HTMLElement;
+      if (!target?.tagName) return;
+
+      // Find the nearest DIAA-managed <img> — either the target itself
+      // or an ancestor img that has the __diaa_onAlign callback stored.
+      const img = (target.tagName === "IMG" && (target as any).__diaa_onAlign)
+        ? target as HTMLImageElement
+        : target.closest?.("img") as HTMLImageElement | null;
+
+      if (!img || !(img as any).__diaa_onAlign) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      const alignment = (img as any).__diaa_alignment as "left" | "center" | "right" | undefined;
+      const onAlign = (img as any).__diaa_onAlign as (a: "left" | "center" | "right" | undefined) => void;
+      showImageAlignmentMenu(e, alignment, onAlign);
+    }, true);
+
     this.settings = await loadSettings(this);
     // Restore preserved per-image sizes from previous session
     const rawData = await this.loadData();
@@ -72,6 +98,11 @@ export default class DragImageAutoArrangePlugin
       )
     );
     logger.info("Reading Mode processor registered");
+
+    // Flush buffered RM alignment changes when the user switches views
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => schedulePendingFlush(this.app))
+    );
 
     // Live Preview editor extension (CodeMirror ViewPlugin)
     this.registerEditorExtension(

@@ -7,7 +7,6 @@ import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
 import { validateRowFlexGrows } from "./parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
-import { showImageAlignmentMenu } from "./alignmentContextMenu";
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
 function getFileNameFromEmbed(embed: HTMLElement): string {
@@ -20,6 +19,27 @@ function getFileNameFromEmbed(embed: HTMLElement): string {
 }
 
 /** Check if an .internal-embed element is for an image file. */
+// ── Pending alignment store ─────────────────────────────────────────
+// RM alignment changes are buffered here and only flushed to the
+// markdown document when the user switches from RM to LP mode.
+// This avoids the flash that view.dispatch() would cause in RM.
+
+type AlignValue = "left" | "center" | "right";
+
+const _pendingAlignments = new Map<string, AlignValue>();
+
+function pendingKey(sourcePath: string, fileName: string): string {
+  return `${sourcePath}::${fileName}`;
+}
+
+function storePendingAlignment(
+  sourcePath: string,
+  fileName: string,
+  alignment: AlignValue
+): void {
+  _pendingAlignments.set(pendingKey(sourcePath, fileName), alignment);
+}
+
 function isImageEmbed(el: HTMLElement): boolean {
   const src = el.getAttribute("src") || "";
   const alt = el.getAttribute("alt") || "";
@@ -154,8 +174,30 @@ export function createReadingModeProcessor(
     // Apply alignment to standalone single images NOW (after data-diaa-*
     // attributes have been set from markdown), so that per-image alignment
     // takes priority over the global default.
+    // Also register the __diaa_* callbacks so the document-level
+    // contextmenu handler (main.ts) can intercept right-clicks.
     for (const embed of imageEmbeds) {
-      if (!groupedEmbeds.has(embed)) applyStandaloneAlignment(embed, options.alignment);
+      if (!groupedEmbeds.has(embed)) {
+        applyStandaloneAlignment(embed, options.alignment);
+        const img = embed.querySelector<HTMLImageElement>("img");
+        if (img) {
+          (img as any).__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
+          (img as any).__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+            if (newAlign) {
+              embed.setAttribute("data-diaa-alignment", newAlign);
+            } else {
+              embed.removeAttribute("data-diaa-alignment");
+            }
+            (img as any).__diaa_alignment = newAlign;
+            applyStandaloneAlignment(embed, options.alignment);
+            if (app && ctx.sourcePath) {
+              const effectiveAlign = (newAlign ?? options.alignment) as AlignValue;
+              const fn = getFileNameFromEmbed(embed);
+              if (fn) storePendingAlignment(ctx.sourcePath, fn, effectiveAlign);
+            }
+          };
+        }
+      }
     }
 
     // --- Step 1: (consecutive-embed groups already computed above) ---
@@ -432,28 +474,26 @@ function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, app?: Ap
       });
       styleGuard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
 
-      // Per-image alignment context menu
-      img.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const currentAlign = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
-        showImageAlignmentMenu(e, currentAlign, (newAlign) => {
-          if (newAlign) {
-            embed.setAttribute("data-diaa-alignment", newAlign);
-          } else {
-            embed.removeAttribute("data-diaa-alignment");
-          }
-          // Re-apply styles
-          const align = newAlign ?? options.alignment;
-          const { justifyContent: j2, objectPosition: o2 } = alignmentToCSS(align);
-          embed.style.setProperty("justify-content", j2, "important");
-          img.style.setProperty("object-position", o2, "important");
-          // Persist to markdown
-          if (app && sourcePath) {
-            persistAlignmentToMarkdown(app, sourcePath, embed, newAlign, options.alignment);
-          }
-        });
-      });
+      // Store alignment callback on the img element so the document-level
+      // contextmenu handler (main.ts) can read it at capture phase.
+      (img as any).__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
+      (img as any).__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+        if (newAlign) {
+          embed.setAttribute("data-diaa-alignment", newAlign);
+        } else {
+          embed.removeAttribute("data-diaa-alignment");
+        }
+        (img as any).__diaa_alignment = newAlign;
+        const align = newAlign ?? options.alignment;
+        const { justifyContent: j2, objectPosition: o2 } = alignmentToCSS(align);
+        embed.style.setProperty("justify-content", j2, "important");
+        img.style.setProperty("object-position", o2, "important");
+        if (app && sourcePath) {
+          const effectiveAlign = (newAlign ?? options.alignment) as AlignValue;
+          const fn = getFileNameFromEmbed(embed);
+          if (fn) storePendingAlignment(sourcePath, fn, effectiveAlign);
+        }
+      };
     }
     row.appendChild(embed);
   }
@@ -948,37 +988,72 @@ function isImageEmbedLine(line: string): boolean {
   return re.test(line);
 }
 
-async function persistAlignmentToMarkdown(
-  app: App,
-  sourcePath: string,
-  embed: HTMLElement,
-  alignment: "left" | "center" | "right" | undefined,
-  defaultAlignment: "left" | "center" | "right"
-): Promise<void> {
-  const img = embed.querySelector<HTMLImageElement>("img");
-  if (!img) return;
-  const fileName = getFileNameFromEmbed(embed);
-  if (!fileName) return;
-
-  const file = app.vault.getAbstractFileByPath(sourcePath);
-  if (!(file instanceof TFile)) return;
-
-  const effectiveAlign = alignment ?? defaultAlignment;
-
-  await app.vault.process(file, (content: string) => {
-    const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      if (!lines[i].includes(fileName)) continue;
-      // Strip existing alignment param if present, then prepend the effective one
-      const stripped = lines[i].replace(/\|(left|center|right)\|/, "|");
-      if (stripped.includes("|")) {
-        lines[i] = stripped.replace(/\|/, `|${effectiveAlign}|`);
-      } else {
-        // Bare embed — insert alignment before ]]
-        lines[i] = stripped.replace(/\]\]/, `|${effectiveAlign}]]`);
-      }
-      break; // Only update first match
+/** Find the CodeMirror EditorView for a given file path, if one is open. */
+function findEditorViewForFile(app: App, sourcePath: string): { dispatch: (tr: any) => void; state: { doc: { lines: number; line: (n: number) => { from: number; text: string } } } } | null {
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    const view = leaf.view as any;
+    if (view.file?.path === sourcePath) {
+      const cm = view.editor?.cm;
+      if (cm?.dispatch) return cm;
     }
-    return lines.join("\n");
-  });
+  }
+  return null;
+}
+
+function flushPendingAlignments(app: App): void {
+  if (_pendingAlignments.size === 0) return;
+
+  // Group by sourcePath
+  const byFile = new Map<string, Array<{ fileName: string; alignment: AlignValue }>>();
+  for (const [key, alignment] of _pendingAlignments) {
+    const idx = key.lastIndexOf("::");
+    const sourcePath = key.slice(0, idx);
+    const fileName = key.slice(idx + 2);
+    if (!byFile.has(sourcePath)) byFile.set(sourcePath, []);
+    byFile.get(sourcePath)!.push({ fileName, alignment });
+  }
+  _pendingAlignments.clear();
+
+  for (const [sourcePath, entries] of byFile) {
+    const editorView = findEditorViewForFile(app, sourcePath);
+    if (!editorView) continue;
+
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    const doc = editorView.state.doc;
+
+    for (const { fileName, alignment } of entries) {
+      for (let i = 1; i <= doc.lines; i++) {
+        const lineObj = doc.line(i);
+        if (!lineObj.text.includes(fileName)) continue;
+        const stripped = lineObj.text.replace(/\|(left|center|right)\|/, "|");
+        let newLine: string;
+        if (stripped.includes("|")) {
+          newLine = stripped.replace(/\|/, `|${alignment}|`);
+        } else {
+          newLine = stripped.replace(/\]\]/, `|${alignment}]]`);
+        }
+        if (newLine !== lineObj.text) {
+          changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
+        }
+        break;
+      }
+    }
+
+    if (changes.length > 0) {
+      changes.sort((a, b) => b.from - a.from);
+      editorView.dispatch({ changes });
+      app.vault.adapter.write(sourcePath, editorView.state.doc.toString());
+    }
+  }
+}
+
+let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function schedulePendingFlush(app: App): void {
+  if (_pendingAlignments.size === 0) return;
+  if (_flushTimer) clearTimeout(_flushTimer);
+  _flushTimer = setTimeout(() => {
+    _flushTimer = null;
+    flushPendingAlignments(app);
+  }, 0);
 }
