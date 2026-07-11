@@ -19,6 +19,7 @@ export interface DragImageSettings {
   alignment: Alignment;
   singleImageSizeMode: SingleImageSizeMode;
   singleImageWidth: number;
+  enableReadingModeContextMenu: boolean;
 }
 
 export interface IDragImagePlugin {
@@ -241,6 +242,20 @@ export class DragImageSettingTab extends PluginSettingTab {
             alignDropdown.setValue(
               this.plugin.settings.alignment
             );
+          })
+      );
+
+    new Setting(alignGroup)
+      .setName("Enable reading mode context menu")
+      .setDesc(
+        "When enabled, right-clicking an image in Reading Mode shows the alignment menu. When disabled, Reading Mode is read-only — alignment can only be changed in Live Preview or Source mode."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enableReadingModeContextMenu)
+          .onChange(async (value) => {
+            this.plugin.settings.enableReadingModeContextMenu = value;
+            await this.plugin.saveSettings();
           })
       );
 

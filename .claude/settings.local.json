@@ -50,7 +50,8 @@
       "Bash(sed -n '1462,1474p' src/imageRowWidget.ts)",
       "Bash(git --no-pager diff --stat 59972e6 -- src/)",
       "Read(//tmp/**)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(awk *)"
     ]
   }
 }

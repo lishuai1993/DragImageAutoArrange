@@ -14,7 +14,8 @@
     "dragOpacity": 30,
     "alignment": "center",
     "singleImageSizeMode": "fixed",
-    "singleImageWidth": 400
+    "singleImageWidth": 400,
+    "enableReadingModeContextMenu": true
   },
   "preservedSizes": {}
 }

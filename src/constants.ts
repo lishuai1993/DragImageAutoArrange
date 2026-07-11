@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS = {
   alignment: "left" as Alignment,
   singleImageSizeMode: "natural" as SingleImageSizeMode,
   singleImageWidth: 400,
+  enableReadingModeContextMenu: true,
 } as const;
 
 export const SINGLE_IMAGE_MIN_WIDTH = 100;

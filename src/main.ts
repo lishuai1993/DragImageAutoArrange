@@ -32,6 +32,7 @@ export default class DragImageAutoArrangePlugin
     alignment: "left",
     singleImageSizeMode: "natural",
     singleImageWidth: 400,
+    enableReadingModeContextMenu: true,
   };
 
   async onload(): Promise<void> {
@@ -57,6 +58,11 @@ export default class DragImageAutoArrangePlugin
         : target.closest?.("img") as HTMLImageElement | null;
 
       if (!img || !(img as any).__diaa_onAlign) return;
+
+      // When RM context menu is disabled, silently pass through in Reading Mode
+      if (!this.settings.enableReadingModeContextMenu && img.closest(".markdown-preview-view")) {
+        return;
+      }
 
       e.preventDefault();
       e.stopPropagation();
