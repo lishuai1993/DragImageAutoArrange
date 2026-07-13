@@ -57,8 +57,59 @@ export function applyStandaloneAlignment(
   const perImage = embed.getAttribute("data-diaa-alignment") as "left" | "center" | "right" | null;
   const alignment = perImage ?? defaultAlignment;
   const textAlign = alignment === "center" ? "center" : alignment === "right" ? "right" : "left";
-  block.style.setProperty("text-align", textAlign, "important");
+
+  // isImageOnlyBlock ignores text nodes, so a "text\n![[img]]" paragraph (one
+  // block holding text + a single image) passes its check. Setting text-align
+  // on that block would drag the text along with the image. Detect the mixed
+  // case and, when present, extract the image into its own aligned block so the
+  // text keeps its default flow — text stays text, image stays image.
+  const probe = block.cloneNode(true) as HTMLElement;
+  probe.querySelectorAll(".internal-embed").forEach((e) => e.remove());
+  const blockHasText = (probe.textContent ?? "").trim().length > 0;
+
+  if (!blockHasText) {
+    // Pure image block: align the block itself (original behavior).
+    block.style.setProperty("text-align", textAlign, "important");
+    embed.style.setProperty("display", "inline-block", "important");
+    return;
+  }
+
+  // Is there text BEFORE the embed within the block? Used to preserve source
+  // order when placing the extracted image relative to the text block.
+  let textBefore = false;
+  for (let node = embed.previousSibling; node; node = node.previousSibling) {
+    if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim()) { textBefore = true; break; }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      if (!el.classList.contains("internal-embed") && el.tagName !== "BR" && (el.textContent ?? "").trim()) {
+        textBefore = true;
+        break;
+      }
+    }
+  }
+
+  // Drop the <br> siblings flanking the embed so the text block doesn't keep a
+  // dangling blank line once the image is pulled out.
+  const prevBr = embed.previousElementSibling;
+  if (prevBr?.tagName === "BR") prevBr.remove();
+  const nextBr = embed.nextElementSibling;
+  if (nextBr?.tagName === "BR") nextBr.remove();
+
+  const wrapper = document.createElement("div");
+  wrapper.setAttribute("data-diaa-standalone", "true");
+  wrapper.style.setProperty("text-align", textAlign, "important");
   embed.style.setProperty("display", "inline-block", "important");
+  wrapper.appendChild(embed);
+
+  if (textBefore) {
+    block.after(wrapper);   // text above, image below
+  } else {
+    block.before(wrapper);  // image above, text below
+  }
+
+  // Clean up any <br> left dangling at the edges of the text block.
+  while (block.lastElementChild?.tagName === "BR") block.lastElementChild.remove();
+  while (block.firstElementChild?.tagName === "BR") block.firstElementChild.remove();
 }
 
 export function areAdjacentSiblings(a: HTMLElement | null, b: HTMLElement | null): boolean {
@@ -98,6 +149,17 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   try {
   const firstBlock = findBlockParent(embeds[0]);
   if (!firstBlock) return;
+
+  // Detect whether the first embed's block also holds surrounding text — this
+  // happens when a paragraph is "text\n![[img]]\n![[img]]" with no blank line,
+  // so text + embeds render inside one <p>. In that case the text must stay in
+  // place and the flex row goes AFTER the block to preserve source order;
+  // otherwise the block is image-only and the row goes BEFORE it (existing
+  // behavior). `.internal-embed` elements carry no text, so stripping them and
+  // checking the remainder reliably distinguishes the two cases.
+  const textProbe = firstBlock.cloneNode(true) as HTMLElement;
+  textProbe.querySelectorAll(".internal-embed").forEach((e) => e.remove());
+  const blockHasText = (textProbe.textContent ?? "").trim().length > 0;
 
   const imgs: HTMLImageElement[] = [];
   const metas: ImageMeta[] = [];
@@ -262,7 +324,17 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     row.appendChild(embed);
   }
 
-  firstBlock.before(row);
+  if (blockHasText) {
+    // Keep the surrounding text in place; the flex row follows it.
+    firstBlock.after(row);
+    // Drop any <br> left dangling at the end of the text block after the
+    // embeds were pulled out, so the text doesn't gain a trailing blank line.
+    while (firstBlock.lastElementChild?.tagName === "BR") {
+      firstBlock.lastElementChild.remove();
+    }
+  } else {
+    firstBlock.before(row);
+  }
   const blocksToRemove = new Set<HTMLElement>();
   for (const embed of embeds) {
     const block = findBlockParent(embed);

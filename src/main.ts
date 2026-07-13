@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { schedulePendingFlush } from "./scrollAnchor";
+import { schedulePendingFlush, onViewModeChange } from "./scrollAnchor";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
@@ -106,9 +106,13 @@ export default class DragImageAutoArrangePlugin
     );
     logger.info("Reading Mode processor registered");
 
-    // Flush buffered RM alignment changes when the user switches views
+    // Flush buffered RM alignment changes and drive cross-mode scroll
+    // restore when the user switches views (RM ↔ LP).
     this.registerEvent(
-      this.app.workspace.on("layout-change", () => schedulePendingFlush(this.app))
+      this.app.workspace.on("layout-change", () => {
+        schedulePendingFlush(this.app);
+        onViewModeChange(this.app);
+      })
     );
 
     // Live Preview editor extension (CodeMirror ViewPlugin)
