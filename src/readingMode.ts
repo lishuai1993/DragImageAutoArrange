@@ -103,27 +103,46 @@ export function createReadingModeProcessor(
       logger.warn("ReadingMode failed to read file for scale data", { error: String(e) });
     }
 
-    // Match by DOM global position index.
-    const allImageEmbeds = (Array.from(
-      document.querySelectorAll(".internal-embed")
-    ) as HTMLElement[]).filter(isImageEmbed);
+    // Match parsed params to DOM embeds via SECTION-LOCAL source line numbers.
+    // The post-processor only guarantees the local `el`; sections may be
+    // rendered detached from the document, so document.querySelectorAll is
+    // unreliable (returns 0 → every global index is -1 → no attrs applied).
+    // ctx.getSectionInfo(el) gives this section's [lineStart, lineEnd], letting
+    // us scope candidates to the section and zip them to the section's embeds
+    // in source order — independent of whether `el` is attached to the document.
+    const sectionInfo = ctx.getSectionInfo(el);
+    const candidates: ImageEmbed[] = sectionInfo
+      ? parsedImages.filter(
+          (p) => p.line >= sectionInfo.lineStart && p.line <= sectionInfo.lineEnd
+        )
+      : parsedImages;
+
     let matchCount = 0;
     let flexGrowSetCount = 0;
+    let cursor = 0;
     for (const embed of imageEmbeds) {
-      const globalIdx = allImageEmbeds.indexOf(embed);
-      if (globalIdx < 0 || globalIdx >= parsedImages.length) continue;
-      const parsed = parsedImages[globalIdx];
       const embedFn = getFileNameFromEmbed(embed);
-      if (embedFn && embedFn !== parsed.fileName) continue;
+      // Prefer positional match within the section; if the filename is known,
+      // seek forward to sync (skips any already-wrapped embeds from a prior run).
+      let parsed: ImageEmbed | undefined = candidates[cursor];
+      if (embedFn) {
+        let k = cursor;
+        while (k < candidates.length && candidates[k].fileName !== embedFn) k++;
+        if (k < candidates.length) {
+          parsed = candidates[k];
+          cursor = k;
+        }
+      }
+      cursor++;
+      if (!parsed) continue;
       logger.debug("ReadingMode attr-set", {
-        globalIdx,
+        line: parsed.line,
         embedFn,
         parsedFn: parsed.fileName,
         set: {
           alignment: parsed.alignment ?? "(default)",
           flexGrow: parsed.hasExplicitWidth ? parsed.flexGrow : "(none)",
           scale: parsed.scale ?? "(none)",
-          line: parsed.line,
         },
       });
       if (parsed.hasExplicitWidth) {
@@ -141,7 +160,8 @@ export function createReadingModeProcessor(
     }
     logger.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
-      allEmbeds: allImageEmbeds.length,
+      sectionLines: sectionInfo ? `${sectionInfo.lineStart}-${sectionInfo.lineEnd}` : "(null)",
+      candidates: candidates.length,
       parsedImages: parsedImages.length,
       matched: matchCount,
       flexGrowSet: flexGrowSetCount,
