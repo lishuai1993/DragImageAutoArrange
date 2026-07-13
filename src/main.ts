@@ -5,7 +5,8 @@ import {
   IDragImagePlugin,
   loadSettings,
 } from "./settings";
-import { createReadingModeProcessor, schedulePendingFlush } from "./readingMode";
+import { createReadingModeProcessor } from "./readingMode";
+import { schedulePendingFlush } from "./scrollAnchor";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
