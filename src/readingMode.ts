@@ -2,6 +2,7 @@ import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
 import { buildImageLineRe } from "./constants";
 import { ImageRowOptions } from "./types";
 import { ImageEmbed, parseImageLine } from "./imageDetector";
+import { matchEmbedsToParsed } from "./matchEmbeds";
 import { logger } from "./logger";
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
 import {
@@ -117,27 +118,40 @@ export function createReadingModeProcessor(
         )
       : parsedImages;
 
+    // Delegate the matching policy + integrity check to a pure, unit-tested
+    // function (see src/matchEmbeds.ts). Keeps the invariants under CI so a
+    // future refactor that breaks alignment fails a test instead of silently
+    // rendering defaults.
+    const embedFileNames = imageEmbeds.map((e) => getFileNameFromEmbed(e) || null);
+    const { matches, mismatches, usedFallback } = matchEmbedsToParsed(
+      embedFileNames,
+      candidates,
+      parsedImages
+    );
+
+    // Runtime invariant guard: convert silent failure into an observable WARN
+    // in log.txt. usedFallback means section-scoped matching disagreed with the
+    // embeds and we degraded to a filename-only global match.
+    if (usedFallback || mismatches > 0) {
+      logger.warn("RM match integrity FAILED", {
+        sourcePath: ctx.sourcePath,
+        usedFallback,
+        mismatches,
+        sectionLines: sectionInfo ? `${sectionInfo.lineStart}-${sectionInfo.lineEnd}` : "(null)",
+        embedFileNames,
+        candidates: candidates.map((c) => c.fileName),
+      });
+    }
+
     let matchCount = 0;
     let flexGrowSetCount = 0;
-    let cursor = 0;
-    for (const embed of imageEmbeds) {
-      const embedFn = getFileNameFromEmbed(embed);
-      // Prefer positional match within the section; if the filename is known,
-      // seek forward to sync (skips any already-wrapped embeds from a prior run).
-      let parsed: ImageEmbed | undefined = candidates[cursor];
-      if (embedFn) {
-        let k = cursor;
-        while (k < candidates.length && candidates[k].fileName !== embedFn) k++;
-        if (k < candidates.length) {
-          parsed = candidates[k];
-          cursor = k;
-        }
-      }
-      cursor++;
+    for (let i = 0; i < imageEmbeds.length; i++) {
+      const embed = imageEmbeds[i];
+      const parsed = matches[i];
       if (!parsed) continue;
       logger.debug("ReadingMode attr-set", {
         line: parsed.line,
-        embedFn,
+        embedFn: embedFileNames[i],
         parsedFn: parsed.fileName,
         set: {
           alignment: parsed.alignment ?? "(default)",
@@ -156,7 +170,11 @@ export function createReadingModeProcessor(
       if (parsed.alignment) {
         embed.setAttribute("data-diaa-alignment", parsed.alignment);
       }
-      embed.setAttribute("data-diaa-line", String(parsed.line));
+      // 1-based source line, to match ImageRowIndex.startLine/endLine (which
+      // scrollAnchor.ts uses for every data-diaa-line query and range check).
+      // parsed.line is 0-based, so add 1. Keeping these bases in sync is a
+      // load-bearing contract: a mismatch silently breaks RM scroll anchoring.
+      embed.setAttribute("data-diaa-line", String(parsed.line + 1));
     }
     logger.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
@@ -165,6 +183,7 @@ export function createReadingModeProcessor(
       parsedImages: parsedImages.length,
       matched: matchCount,
       flexGrowSet: flexGrowSetCount,
+      usedFallback,
     });
 
     // Apply alignment to standalone single images
@@ -214,18 +233,23 @@ export function createReadingModeProcessor(
     logViewportState(app, "post-processor");
 
     const afterRender = () => {
-      if (getRMDeferredRestoreId() !== null) {
-        cancelRMDeferredRestore();
-      }
+      let restored = false;
       if (getScrollAnchor()) {
-        restoreContentAnchor(app);
+        restored = restoreContentAnchor(app);
       } else if (getFallbackPct() >= 0) {
         restoreScrollPct(app);
+        restored = true;
+      }
+      // Stop the deferred RM retry loop only once the anchor is actually
+      // resolved. If this section's render didn't contain the target row, let
+      // the loop keep retrying (and coarse-scrolling) until the row exists.
+      if (restored && getRMDeferredRestoreId() !== null) {
+        cancelRMDeferredRestore();
       }
       const anchor = captureContentAnchor(app);
-      if (anchor) {
-        setLastAnchor(anchor, ctx.sourcePath);
-      }
+      // Pass through even when null: setLastAnchor(null) clears any stale RM
+      // anchor so a later mode switch won't reuse an unrelated image row.
+      setLastAnchor(anchor, ctx.sourcePath);
       const pct = computeScrollPct(app);
       if (pct >= 0) setLastFallbackPct(pct);
       ensureRMScrollTracking(app);

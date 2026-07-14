@@ -8,6 +8,7 @@ import {
   getFlushTimer,
   flushPendingAlignments,
 } from "./rmAlignStore";
+import { classifyCenter, ImageRowIndex } from "./viewportAnchor";
 
 // ── Scroll sync for cross-mode viewport alignment ─────────────────
 //
@@ -24,16 +25,15 @@ import {
 //      worry about).
 
 // ── Image row indexing ────────────────────────────────
-
-type ImageRowIndex = {
-  index: number;       // global sequential number, 1-based
-  startLine: number;   // first source line of this image row (1-based)
-  endLine: number;     // last source line of this image row (1-based)
-};
+// ImageRowIndex type is defined in viewportAnchor.ts (pure module).
 
 const _imageRowIndexCache = new Map<string, ImageRowIndex[]>();
 
 export function buildImageRowIndex(lines: string[], imgRe: RegExp): ImageRowIndex[] {
+  // CONTRACT: startLine/endLine are 1-based source line numbers. Every reader
+  // (imgIndexToSelector, captureImageRowRM, the data-diaa-line queries) relies
+  // on this, and readingMode.ts must write data-diaa-line in the SAME 1-based
+  // space. Do not switch this to 0-based without updating the writer in lockstep.
   const result: ImageRowIndex[] = [];
   let idx = 0;
   let inRow = false;
@@ -97,7 +97,13 @@ type ViewportAnchor =
       nearestImgBefore: number; // image-row index just above (0 if none)
       nearestImgAfter: number;  // image-row index just below (0 if none)
     }
-  | { kind: "image-row"; imageRowIndex: number; intraRowRatio: number };
+  | { kind: "image-row"; imageRowIndex: number; intraRowRatio: number }
+  | {
+      kind: "image-gap";
+      imgBefore: number; // image-row index above the gap (0 = boundary/text)
+      imgAfter: number;  // image-row index below the gap (0 = boundary/text)
+      gapRatio: number;  // normalized center position within the blank gap
+    };
 
 let _scrollAnchor: ViewportAnchor | null = null;
 // Per-mode last anchors. Kept separate so the scroll noise generated when
@@ -293,13 +299,17 @@ function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
     };
   }
 
-  // Strategy B: viewport is entirely image rows → image-row ratio.
+  // Strategy B: viewport has no visible text → image-row or image-gap anchor.
   if (imgIndex && imgIndex.length > 0) {
     const centerScreen = clientH / 2;
     const centerBlock = cm.lineBlockAtHeight(scrollTop + centerScreen - inset);
     const centerLine = cm.state.doc.lineAt(centerBlock.from).number;
-    const imgRow = imgIndex.find(r => centerLine >= r.startLine && centerLine <= r.endLine);
-    if (imgRow) {
+    const isBlank = (n: number) => cm.state.doc.line(n).text.trim() === "";
+    const isImage = (n: number) => IMG_LINE_RE.test(cm.state.doc.line(n).text);
+    const cls = classifyCenter(totalLines, isBlank, isImage, imgIndex, centerLine);
+
+    if (cls.kind === "image-row") {
+      const imgRow = imgIndex.find(r => r.index === cls.imageRowIndex)!;
       const startLb = lineBlockByNumber(cm, imgRow.startLine);
       const endLb = lineBlockByNumber(cm, imgRow.endLine);
       const rowTop = startLb.top - scrollTop + inset;
@@ -307,6 +317,21 @@ function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
       const rowH = rowBottom - rowTop;
       const ratio = rowH > 0 ? clamp01((centerScreen - rowTop) / rowH) : 0.5;
       return { kind: "image-row", imageRowIndex: imgRow.index, intraRowRatio: ratio };
+    }
+
+    if (cls.kind === "image-gap") {
+      const upRow = cls.imgBefore > 0 ? imgIndex.find(r => r.index === cls.imgBefore) : undefined;
+      const downRow = cls.imgAfter > 0 ? imgIndex.find(r => r.index === cls.imgAfter) : undefined;
+      let gapRatio = 0.5;
+      if (upRow && downRow) {
+        const upLb = lineBlockByNumber(cm, upRow.endLine);
+        const downLb = lineBlockByNumber(cm, downRow.startLine);
+        const upBottomScreen = upLb.top + upLb.height - scrollTop + inset;
+        const downTopScreen = downLb.top - scrollTop + inset;
+        const span = downTopScreen - upBottomScreen;
+        gapRatio = span > 0 ? clamp01((centerScreen - upBottomScreen) / span) : 0.5;
+      }
+      return { kind: "image-gap", imgBefore: cls.imgBefore, imgAfter: cls.imgAfter, gapRatio };
     }
   }
 
@@ -369,6 +394,22 @@ function nearestImgRowsRM(
   return { before, after };
 }
 
+function rmRowBounds(
+  previewEl: HTMLElement, previewRect: DOMRect, row: ImageRowIndex,
+): { top: number; bottom: number } | null {
+  const rowEmbeds = previewEl.querySelectorAll(imgIndexToSelector(row));
+  if (rowEmbeds.length === 0) return null;
+  let top = Infinity, bottom = -Infinity;
+  for (const re of rowEmbeds) {
+    const r = re.getBoundingClientRect();
+    const t = r.top - previewRect.top + previewEl.scrollTop;
+    const b = t + r.height;
+    if (t < top) top = t;
+    if (b > bottom) bottom = b;
+  }
+  return { top, bottom };
+}
+
 function captureImageRowRM(
   previewEl: HTMLElement,
   previewRect: DOMRect,
@@ -395,43 +436,78 @@ function captureImageRowRM(
   if (bestLine <= 0) return null;
 
   const imgRow = imgIndex.find(r => bestLine >= r.startLine && bestLine <= r.endLine);
-  if (!imgRow) return null;
-
-  const rowEmbeds = previewEl.querySelectorAll(imgIndexToSelector(imgRow));
-  if (rowEmbeds.length === 0) return null;
-
-  let rowTop = Infinity, rowBottom = -Infinity;
-  for (const re of rowEmbeds) {
-    const r = re.getBoundingClientRect();
-    const t = r.top - previewRect.top + previewEl.scrollTop;
-    const b = t + r.height;
-    if (t < rowTop) rowTop = t;
-    if (b > rowBottom) rowBottom = b;
+  if (!imgRow) {
+    // A rendered data-diaa-line embed that maps to NO image row means the
+    // attribute base (set in readingMode.ts) drifted out of sync with
+    // ImageRowIndex's 1-based startLine/endLine — the exact off-by-one that
+    // silently froze RM anchoring before. Surface it instead of failing quietly.
+    logger.warn("VIEWPORT RM data-diaa-line unmapped (line-base mismatch?)", {
+      bestLine,
+      imgRows: imgIndex.map(r => `${r.index}:${r.startLine}-${r.endLine}`),
+    });
+    return null;
   }
-  const rowH = rowBottom - rowTop;
-  const ratio = rowH > 0 ? clamp01((viewportCenterY - rowTop) / rowH) : 0.5;
-  return { kind: "image-row", imageRowIndex: imgRow.index, intraRowRatio: ratio };
+
+  const bounds = rmRowBounds(previewEl, previewRect, imgRow);
+  if (!bounds) return null;
+  const { top: rowTop, bottom: rowBottom } = bounds;
+
+  // Center inside the nearest row → image-row anchor.
+  if (viewportCenterY >= rowTop && viewportCenterY <= rowBottom) {
+    const rowH = rowBottom - rowTop;
+    const ratio = rowH > 0 ? clamp01((viewportCenterY - rowTop) / rowH) : 0.5;
+    return { kind: "image-row", imageRowIndex: imgRow.index, intraRowRatio: ratio };
+  }
+
+  // Center outside the row → gap between two image rows (blanks collapse in RM,
+  // leaving only block margins). Bracket by the adjacent image-row index.
+  if (viewportCenterY < rowTop) {
+    const upRow = imgIndex.find(r => r.index === imgRow.index - 1);
+    const upBounds = upRow ? rmRowBounds(previewEl, previewRect, upRow) : null;
+    const span = upBounds ? rowTop - upBounds.bottom : 0;
+    const gapRatio = upBounds && span > 0 ? clamp01((viewportCenterY - upBounds.bottom) / span) : 0.5;
+    return { kind: "image-gap", imgBefore: upRow ? upRow.index : 0, imgAfter: imgRow.index, gapRatio };
+  } else {
+    const downRow = imgIndex.find(r => r.index === imgRow.index + 1);
+    const downBounds = downRow ? rmRowBounds(previewEl, previewRect, downRow) : null;
+    const span = downBounds ? downBounds.top - rowBottom : 0;
+    const gapRatio = downBounds && span > 0 ? clamp01((viewportCenterY - rowBottom) / span) : 0.5;
+    return { kind: "image-gap", imgBefore: imgRow.index, imgAfter: downRow ? downRow.index : 0, gapRatio };
+  }
 }
 
 // ── Anchor restore ─────────────────────────────────────
 
-export function restoreContentAnchor(app: App): void {
-  if (!_scrollAnchor) return;
+export function restoreContentAnchor(app: App): boolean {
+  if (!_scrollAnchor) return false;
   const anchor = _scrollAnchor;
-  _scrollAnchor = null;
 
   const leaf = app.workspace.activeLeaf;
   const view = (leaf?.view as any);
   const mode = view?.getMode?.() ?? "";
   const filePath = view?.file?.path ?? "";
 
+  let ok = false;
   if (anchor.kind === "image-row") {
-    if (mode === "source") restoreImageRowInLP(app, filePath, anchor.imageRowIndex, anchor.intraRowRatio);
-    else if (mode === "preview") restoreImageRowInRM(app, filePath, anchor.imageRowIndex, anchor.intraRowRatio);
+    if (mode === "source") ok = restoreImageRowInLP(app, filePath, anchor.imageRowIndex, anchor.intraRowRatio);
+    else if (mode === "preview") ok = restoreImageRowInRM(app, filePath, anchor.imageRowIndex, anchor.intraRowRatio);
+  } else if (anchor.kind === "image-gap") {
+    if (mode === "source") ok = restoreImageGapInLP(app, filePath, anchor.imgBefore, anchor.imgAfter, anchor.gapRatio);
+    else if (mode === "preview") ok = restoreImageGapInRM(app, filePath, anchor.imgBefore, anchor.imgAfter, anchor.gapRatio);
   } else {
-    if (mode === "source") restoreTextInLP(app, filePath, anchor);
-    else if (mode === "preview") restoreTextInRM(app, filePath, anchor);
+    if (mode === "source") ok = restoreTextInLP(app, filePath, anchor);
+    else if (mode === "preview") ok = restoreTextInRM(app, filePath, anchor);
   }
+
+  // Consume the anchor only on success. A failed RM restore means the target
+  // section isn't rendered yet (RM virtualizes off-screen sections) — keeping
+  // the anchor lets the deferred-restore retry loop and readingMode.afterRender
+  // try again once the section (and its data-diaa-line embeds) exist.
+  if (ok) {
+    _scrollAnchor = null;
+    _fallbackPct = -1;
+  }
+  return ok;
 }
 
 // ── image-row restore (Strategy B) ─────────────────────
@@ -439,15 +515,15 @@ export function restoreContentAnchor(app: App): void {
 function restoreImageRowInLP(
   app: App, filePath: string,
   imageRowIndex: number, intraRowRatio: number,
-): void {
+): boolean {
   const view = (app.workspace.activeLeaf?.view as any);
   const cm = view.editor?.cm;
   const sd = cm?.scrollDOM;
-  if (!sd || sd.clientHeight === 0) return;
+  if (!sd || sd.clientHeight === 0) return false;
 
   const imgIndex = getImageRowIndex(filePath);
   const imgRow = imgIndex?.find(r => r.index === imageRowIndex);
-  if (!imgRow) return;
+  if (!imgRow) return false;
 
   const startLb = lineBlockByNumber(cm, imgRow.startLine);
   const endLb = lineBlockByNumber(cm, imgRow.endLine);
@@ -463,22 +539,23 @@ function restoreImageRowInLP(
     rowTop: Math.round(rowTop), rowH: Math.round(rowBottom - rowTop), inset: Math.round(inset),
     targetY: Math.round(targetY), actualY: Math.round(sd.scrollTop),
   });
+  return true;
 }
 
 function restoreImageRowInRM(
   app: App, filePath: string,
   imageRowIndex: number, intraRowRatio: number,
-): void {
+): boolean {
   const previewEl = document.querySelector(".markdown-preview-view") as HTMLElement;
-  if (!previewEl || previewEl.clientHeight === 0) return;
+  if (!previewEl || previewEl.clientHeight === 0) return false;
 
   const imgIndex = getImageRowIndex(filePath);
   const imgRow = imgIndex?.find(r => r.index === imageRowIndex);
-  if (!imgRow) return;
+  if (!imgRow) return false;
 
   const sel = imgIndexToSelector(imgRow);
   const rowEmbeds = previewEl.querySelectorAll(sel);
-  if (rowEmbeds.length === 0) return;
+  if (rowEmbeds.length === 0) return false;
 
   const previewRect = previewEl.getBoundingClientRect();
   let rowTop = Infinity, rowBottom = -Infinity;
@@ -500,6 +577,84 @@ function restoreImageRowInRM(
     rowTop: Math.round(rowTop), rowH: Math.round(rowH),
     targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
   });
+  return true;
+}
+
+// ── image-gap restore (Strategy B, blank between image rows) ────────
+
+function restoreImageGapInLP(
+  app: App, filePath: string,
+  imgBefore: number, imgAfter: number, gapRatio: number,
+): boolean {
+  const view = (app.workspace.activeLeaf?.view as any);
+  const cm = view.editor?.cm;
+  const sd = cm?.scrollDOM;
+  if (!sd || sd.clientHeight === 0) return false;
+
+  const imgIndex = getImageRowIndex(filePath);
+  if (!imgIndex) return false;
+  const inset = lpInset(cm, sd);
+
+  const upRow = imgBefore > 0 ? imgIndex.find(r => r.index === imgBefore) : undefined;
+  const downRow = imgAfter > 0 ? imgIndex.find(r => r.index === imgAfter) : undefined;
+
+  let upBottom: number | null = null;
+  if (upRow) {
+    const lb = lineBlockByNumber(cm, upRow.endLine);
+    upBottom = lb.top + lb.height;
+  }
+  const downTop = downRow ? lineBlockByNumber(cm, downRow.startLine).top : null;
+
+  let junction: number;
+  if (upBottom != null && downTop != null) junction = upBottom + gapRatio * (downTop - upBottom);
+  else if (upBottom != null) junction = upBottom;   // single-sided: row bottom → center
+  else if (downTop != null) junction = downTop;     // single-sided: row top → center
+  else return false;
+
+  const targetY = Math.max(0, junction + inset - sd.clientHeight / 2);
+  sd.scrollTop = targetY;
+
+  logger.info("VIEWPORT anchor-restored", {
+    mode: "source", kind: "image-gap", imgBefore, imgAfter,
+    ratio: Math.round(gapRatio * 100),
+    junction: Math.round(junction), inset: Math.round(inset),
+    targetY: Math.round(targetY), actualY: Math.round(sd.scrollTop),
+  });
+  return true;
+}
+
+function restoreImageGapInRM(
+  app: App, filePath: string,
+  imgBefore: number, imgAfter: number, gapRatio: number,
+): boolean {
+  const previewEl = document.querySelector(".markdown-preview-view") as HTMLElement;
+  if (!previewEl || previewEl.clientHeight === 0) return false;
+
+  const imgIndex = getImageRowIndex(filePath);
+  if (!imgIndex) return false;
+  const previewRect = previewEl.getBoundingClientRect();
+
+  const upRow = imgBefore > 0 ? imgIndex.find(r => r.index === imgBefore) : undefined;
+  const downRow = imgAfter > 0 ? imgIndex.find(r => r.index === imgAfter) : undefined;
+  const upBounds = upRow ? rmRowBounds(previewEl, previewRect, upRow) : null;
+  const downBounds = downRow ? rmRowBounds(previewEl, previewRect, downRow) : null;
+
+  let junction: number;
+  if (upBounds && downBounds) junction = upBounds.bottom + gapRatio * (downBounds.top - upBounds.bottom);
+  else if (upBounds) junction = upBounds.bottom;   // single-sided: row bottom → center
+  else if (downBounds) junction = downBounds.top;  // single-sided: row top → center
+  else return false;
+
+  const targetY = Math.max(0, junction - previewEl.clientHeight / 2);
+  previewEl.scrollTop = targetY;
+
+  logger.info("VIEWPORT anchor-restored", {
+    mode: "preview", kind: "image-gap", imgBefore, imgAfter,
+    ratio: Math.round(gapRatio * 100),
+    junction: Math.round(junction),
+    targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
+  });
+  return true;
 }
 
 // ── text restore (Strategy A) ──────────────────────────
@@ -546,11 +701,11 @@ function findBestTextLine(
 function restoreTextInLP(
   app: App, filePath: string,
   anchor: Extract<ViewportAnchor, { kind: "text" }>,
-): void {
+): boolean {
   const view = (app.workspace.activeLeaf?.view as any);
   const cm = view.editor?.cm;
   const sd = cm?.scrollDOM;
-  if (!sd || sd.clientHeight === 0) return;
+  if (!sd || sd.clientHeight === 0) return false;
 
   const docText = cm.state.doc.toString();
   const line = findBestTextLine(cm, docText, anchor, filePath);
@@ -576,7 +731,7 @@ function restoreTextInLP(
       actualOffset: Math.round(lb.top - sd.scrollTop + inset),
       coordsOffset,
     });
-    return;
+    return true;
   }
 
   // Degrade: position relative to the nearest image row.
@@ -593,18 +748,19 @@ function restoreTextInLP(
         mode: "source", kind: "text-degraded", refLine,
         targetY: Math.round(targetY), actualY: Math.round(sd.scrollTop),
       });
-      return;
+      return true;
     }
   }
   logger.info("VIEWPORT text unresolvable in LP", { frag: anchor.anchorText.slice(0, 30) });
+  return false;
 }
 
 function restoreTextInRM(
   app: App, filePath: string,
   anchor: Extract<ViewportAnchor, { kind: "text" }>,
-): void {
+): boolean {
   const previewEl = document.querySelector(".markdown-preview-view") as HTMLElement;
-  if (!previewEl || previewEl.clientHeight === 0) return;
+  if (!previewEl || previewEl.clientHeight === 0) return false;
 
   const previewRect = previewEl.getBoundingClientRect();
   const frag = anchor.anchorText;
@@ -658,7 +814,7 @@ function restoreTextInRM(
       offset: Math.round(anchor.anchorOffset),
       targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
     });
-    return;
+    return true;
   }
 
   // Degrade: position relative to the nearest image row embed.
@@ -682,11 +838,12 @@ function restoreTextInRM(
           mode: "preview", kind: "text-degraded", refLine: line,
           targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
         });
-        return;
+        return true;
       }
     }
   }
   logger.info("VIEWPORT text unresolvable in RM", { frag: frag.slice(0, 30) });
+  return false;
 }
 
 // Legacy percentage-based restore kept as final fallback.
@@ -747,6 +904,10 @@ function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: ViewportAn
   } else if (anchor?.kind === "image-row") {
     info.imageRowIndex = anchor.imageRowIndex;
     info.ratio = Math.round(anchor.intraRowRatio * 100);
+  } else if (anchor?.kind === "image-gap") {
+    info.imgBefore = anchor.imgBefore;
+    info.imgAfter = anchor.imgAfter;
+    info.ratio = Math.round(anchor.gapRatio * 100);
   }
   if (side === "RM") {
     const cands = [".markdown-reading-view", ".markdown-preview-view", ".markdown-preview-sizer", ".markdown-preview-section"];
@@ -773,6 +934,11 @@ export function ensureRMScrollTracking(_app: App): void {
     if (anchor) {
       _rmLastAnchor = anchor;
       _rmLastAnchorFile = (_app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+    } else {
+      // No anchor at this position — drop any stale one so a later mode switch
+      // falls back to the fresh scroll percentage instead of jumping to an
+      // unrelated image row captured earlier.
+      _rmLastAnchor = null;
     }
     const pct = computeScrollPct(_app);
     if (pct >= 0) _lastFallbackPct = pct;
@@ -790,34 +956,53 @@ export function ensureRMScrollTracking(_app: App): void {
 
 // ── RM deferred restore ─────────────────────────────────────────────
 
+// RM virtualizes off-screen sections, so a deep target row's embeds may not
+// exist for the first several frames after a mode switch. Retry the precise
+// restore until it lands; coarse-jump once toward the captured scroll percent
+// to force the target region to render (its embeds then appear).
+const RM_RESTORE_MAX_FRAMES = 60; // ~1s at 60fps
+let _rmRestoreFrames = 0;
+
 function scheduleRMDeferredRestore(app: App): void {
   if (_rmDeferredRestoreId !== null) {
     cancelAnimationFrame(_rmDeferredRestoreId);
     _rmDeferredRestoreId = null;
   }
+  _rmRestoreFrames = 0;
 
   const attempt = () => {
     const mode = (app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
-    if (mode !== "preview") return;
+    if (mode !== "preview") { _rmDeferredRestoreId = null; return; }
 
     const previewEl = document.querySelector(".markdown-preview-view") as HTMLElement | null;
     if (!previewEl || previewEl.clientHeight === 0) {
       _rmDeferredRestoreId = requestAnimationFrame(attempt);
       return;
     }
-    _rmDeferredRestoreId = null;
 
     ensureRMScrollTracking(app);
+
     if (_scrollAnchor) {
-      restoreContentAnchor(app);
+      const ok = restoreContentAnchor(app);
+      if (!ok && _rmRestoreFrames++ < RM_RESTORE_MAX_FRAMES) {
+        // Target section not rendered yet. Coarse-jump once (restoreScrollPct
+        // consumes _fallbackPct) to force RM to render that region, then keep
+        // retrying the precise restore on the next frame until it lands.
+        if (_fallbackPct >= 0) restoreScrollPct(app);
+        _rmDeferredRestoreId = requestAnimationFrame(attempt);
+        return;
+      }
     } else if (_fallbackPct >= 0) {
       restoreScrollPct(app);
     }
+    _rmDeferredRestoreId = null;
 
     const anchor = captureContentAnchor(app);
     if (anchor) {
       _rmLastAnchor = anchor;
       _rmLastAnchorFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+    } else {
+      _rmLastAnchor = null;
     }
     const pct = computeScrollPct(app);
     if (pct >= 0) _lastFallbackPct = pct;
@@ -848,6 +1033,8 @@ function ensureLPScrollTracking(app: App): void {
     if (anchor) {
       _lpLastAnchor = anchor;
       _lpLastAnchorFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+    } else {
+      _lpLastAnchor = null;
     }
     const pct = computeScrollPct(app);
     if (pct >= 0) _lastFallbackPct = pct;
@@ -887,7 +1074,10 @@ function scheduleLPDeferredRestore(app: App): void {
 
     ensureLPScrollTracking(app);
     if (_scrollAnchor) {
-      restoreContentAnchor(app);
+      // LP (CodeMirror) is not virtualized — lineBlockAt resolves any line
+      // regardless of scroll, so a failure here is terminal. Clear the anchor
+      // so it can't linger and hijack a later restore.
+      if (!restoreContentAnchor(app)) { _scrollAnchor = null; _fallbackPct = -1; }
     } else if (_fallbackPct >= 0) {
       restoreScrollPct(app);
     }
@@ -896,6 +1086,8 @@ function scheduleLPDeferredRestore(app: App): void {
     if (anchor) {
       _lpLastAnchor = anchor;
       _lpLastAnchorFile = view?.file?.path ?? "";
+    } else {
+      _lpLastAnchor = null;
     }
     const pct = computeScrollPct(app);
     if (pct >= 0) _lastFallbackPct = pct;
@@ -929,6 +1121,20 @@ export function onViewModeChange(app: App): void {
 
 let _lastMode = "";
 let _lastDocH = 0;
+
+/** Flatten an anchor into log fields, handling all three anchor kinds. */
+function anchorLogFields(a: ViewportAnchor): Record<string, any> {
+  if (a.kind === "image-row") {
+    return { kind: a.kind, imageRowIndex: a.imageRowIndex, ratio: Math.round(a.intraRowRatio * 100) };
+  }
+  if (a.kind === "image-gap") {
+    return { kind: a.kind, imgBefore: a.imgBefore, imgAfter: a.imgAfter, ratio: Math.round(a.gapRatio * 100) };
+  }
+  return {
+    kind: a.kind, frag: a.anchorText.slice(0, 30), offset: Math.round(a.anchorOffset),
+    nearestBefore: a.nearestImgBefore, nearestAfter: a.nearestImgAfter,
+  };
+}
 
 function computeDocH(app: App, mode: string): number {
   if (mode === "source") {
@@ -971,18 +1177,13 @@ export function logViewportState(app: App, trigger: string): void {
     const srcFile = _lastMode === "preview" ? _rmLastAnchorFile : _lpLastAnchorFile;
     if (srcFile === file && srcAnchor) {
       _scrollAnchor = srcAnchor;
+      // Also seed the coarse fallback percentage: the RM deferred restore uses
+      // it to force-render a virtualized target region when the precise anchor
+      // can't resolve yet. Cleared on the first successful precise restore.
+      if (_lastFallbackPct >= 0) _fallbackPct = _lastFallbackPct;
       logger.info("VIEWPORT anchor-captured", {
         fromMode: _lastMode,
-        kind: srcAnchor.kind,
-        ...(srcAnchor.kind === "image-row" ? {
-          imageRowIndex: srcAnchor.imageRowIndex,
-          ratio: Math.round(srcAnchor.intraRowRatio * 100),
-        } : {
-          frag: srcAnchor.anchorText.slice(0, 30),
-          offset: Math.round(srcAnchor.anchorOffset),
-          nearestBefore: srcAnchor.nearestImgBefore,
-          nearestAfter: srcAnchor.nearestImgAfter,
-        }),
+        ...anchorLogFields(srcAnchor),
       });
     } else if (srcFile === file && _lastFallbackPct >= 0) {
       _fallbackPct = _lastFallbackPct;
