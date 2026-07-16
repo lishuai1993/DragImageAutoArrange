@@ -1,4 +1,15 @@
 /**
+ * Compile-time exhaustiveness guard for discriminated unions. Put it in the
+ * `default` branch of a `switch` over a union's discriminant: if a new variant
+ * is added and left unhandled, the argument is no longer `never` and the call
+ * fails to type-check. At runtime it throws, converting any missed case into a
+ * loud failure instead of a silent fall-through.
+ */
+export function assertNever(x: never): never {
+  throw new Error(`Unexpected variant: ${JSON.stringify(x)}`);
+}
+
+/**
  * Resolve an Obsidian image wikilink to its actual file resource path.
  *
  * Examples:

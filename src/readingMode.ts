@@ -6,15 +6,16 @@ import { matchEmbedsToParsed } from "./matchEmbeds";
 import { logger } from "./logger";
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
 import {
-  buildImageRowIndex, setImageRowIndex,
+  setImageRowIndex, setImageLineRe,
   getScrollAnchor, getFallbackPct,
   setLastAnchor, setLastFallbackPct,
   setRMRenderedFile, getRMDeferredRestoreId, cancelRMDeferredRestore,
   ensureRMScrollTracking,
   restoreContentAnchor, restoreScrollPct,
   captureContentAnchor, computeScrollPct,
-  logViewportState,
-} from "./scrollAnchor";
+  driveViewportTransition,
+} from "./scrollSync/scrollAnchor";
+import { buildImageRowIndex, toLine1 } from "./scrollSync/viewportAnchor";
 import {
   getFileNameFromEmbed, isImageEmbed,
   applyStandaloneAlignment,
@@ -73,6 +74,10 @@ export function createReadingModeProcessor(
         await new Promise(r => setTimeout(r, 0));
         const content = await app.vault.cachedRead(file);
         const re = buildImageLineRe(options.imageExtensions);
+        // Register the configured image-line regex so scrollAnchor's capture /
+        // classification / diagnostics all honor the user's imageExtensions
+        // identically (single source of truth — see setImageLineRe).
+        setImageLineRe(re);
         const lines = content.split("\n");
         for (let i = 0; i < lines.length; i++) {
           const parsed = parseImageLine(lines[i], i, re);
@@ -172,9 +177,11 @@ export function createReadingModeProcessor(
       }
       // 1-based source line, to match ImageRowIndex.startLine/endLine (which
       // scrollAnchor.ts uses for every data-diaa-line query and range check).
-      // parsed.line is 0-based, so add 1. Keeping these bases in sync is a
-      // load-bearing contract: a mismatch silently breaks RM scroll anchoring.
-      embed.setAttribute("data-diaa-line", String(parsed.line + 1));
+      // toLine1 is the single, greppable 0→1 conversion point: parsed.line is
+      // 0-based, and Line1 makes any accidental 0-based write a type error.
+      // Keeping these bases in sync is a load-bearing contract: a mismatch
+      // silently breaks RM scroll anchoring.
+      embed.setAttribute("data-diaa-line", String(toLine1(parsed.line)));
     }
     logger.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
@@ -230,7 +237,7 @@ export function createReadingModeProcessor(
     // --- Step 3: Make ALL image items draggable for merge/reorder ---
     makeImagesDraggable(app, ctx.sourcePath, imageEmbeds);
 
-    logViewportState(app, "post-processor");
+    driveViewportTransition(app, "post-processor");
 
     const afterRender = () => {
       let restored = false;
@@ -254,7 +261,7 @@ export function createReadingModeProcessor(
       if (pct >= 0) setLastFallbackPct(pct);
       ensureRMScrollTracking(app);
       setRMRenderedFile(ctx.sourcePath);
-      logViewportState(app, "rm-after-restore");
+      driveViewportTransition(app, "rm-after-restore");
     };
     if (wrapPromises.length > 0) {
       Promise.all(wrapPromises).then(afterRender);

@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { schedulePendingFlush, onViewModeChange } from "./scrollAnchor";
+import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore } from "./scrollSync/scrollAnchor";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
@@ -112,6 +112,23 @@ export default class DragImageAutoArrangePlugin
       this.app.workspace.on("layout-change", () => {
         schedulePendingFlush(this.app);
         onViewModeChange(this.app);
+      })
+    );
+
+    // Approach X (Phase 1): restore scroll in the pre-paint frame of the
+    // incoming view (via the setState hook) so mode switches don't flash the
+    // native scroll position. Keeps Step-3.1 logging for verification. Removed
+    // on unload.
+    this.register(installEarlyModeSwitchRestore(this.app));
+
+    // Invalidate the cached image-row index when the LP document changes.
+    // ensureImageRowIndexFromCM only builds the index on a cache miss, so
+    // adding/removing an image line in LP would otherwise leave stale line
+    // ranges and misalign the next cross-mode scroll restore.
+    this.registerEvent(
+      this.app.workspace.on("editor-change", (_editor, info) => {
+        const path = (info as any)?.file?.path;
+        if (path) invalidateImageRowIndex(path);
       })
     );
 
