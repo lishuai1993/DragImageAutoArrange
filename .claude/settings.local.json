@@ -51,7 +51,8 @@
       "Bash(git --no-pager diff --stat 59972e6 -- src/)",
       "Read(//tmp/**)",
       "Bash(git *)",
-      "Bash(awk *)"
+      "Bash(awk *)",
+      "Bash(uniq -f1)"
     ]
   }
 }

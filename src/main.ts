@@ -7,6 +7,7 @@ import {
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
 import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore } from "./scrollSync/scrollAnchor";
+import { scheduleWarmupProbe, cancelWarmupProbe } from "./scrollSync/warmupProbe";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
@@ -120,6 +121,16 @@ export default class DragImageAutoArrangePlugin
     // native scroll position. Keeps Step-3.1 logging for verification. Removed
     // on unload.
     this.register(installEarlyModeSwitchRestore(this.app));
+
+    // Warm-up probe (TEMPORARY, see warmupProbe.ts): background-render the
+    // real previewMode shortly after a tab opens in LP, so the first real
+    // LP→RM switch takes the hot path. Triggered on layout-ready (restored
+    // tabs after restart) and on every file-open.
+    this.app.workspace.onLayoutReady(() => scheduleWarmupProbe(this.app));
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => scheduleWarmupProbe(this.app))
+    );
+    this.register(() => cancelWarmupProbe());
 
     // Invalidate the cached image-row index when the LP document changes.
     // ensureImageRowIndexFromCM only builds the index on a cache miss, so

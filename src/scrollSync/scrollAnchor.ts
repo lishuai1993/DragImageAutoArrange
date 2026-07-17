@@ -77,6 +77,19 @@ function ensureImageRowIndexFromCM(app: App): void {
 // RAF id for pending deferred RM restore.
 let _rmDeferredRestoreId: number | null = null;
 
+// The RM deferred-restore loop's scroll-capture guard, module-scoped (not a
+// closure flag) so that cancelRMDeferredRestore — called externally from
+// readingMode.afterRender — can release it. A closure flag leaks the guard on
+// cancel (and on session replacement), muting scroll capture until the 2s
+// safety timeout fires.
+let _rmLoopGuardActive = false;
+function rmLoopEnterGuard(): void {
+  if (!_rmLoopGuardActive) { enterRestoreGuard(); _rmLoopGuardActive = true; }
+}
+function rmLoopExitGuard(): void {
+  if (_rmLoopGuardActive) { exitRestoreGuard(); _rmLoopGuardActive = false; }
+}
+
 export function getRMDeferredRestoreId(): number | null {
   return _rmDeferredRestoreId;
 }
@@ -86,6 +99,7 @@ export function cancelRMDeferredRestore(): void {
     cancelAnimationFrame(_rmDeferredRestoreId);
     _rmDeferredRestoreId = null;
   }
+  rmLoopExitGuard();
 }
 
 export function getScrollAnchor(): ViewportAnchor | null {
@@ -214,6 +228,11 @@ export function captureContentAnchor(app: App): ViewportAnchor | null {
 
 // ── LP (source) anchor capture ────────────────────────
 
+// Minimum normalized anchor-text length. Shorter frags (e.g. the 2-char table
+// cell "页面") match hundreds of lines across a long document and defeat every
+// disambiguation prior — skip them and anchor on the next richer line instead.
+const MIN_ANCHOR_TEXT_LEN = 4;
+
 function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
   const view = (app.workspace.activeLeaf?.view as any);
   const cm = view.editor?.cm;
@@ -242,8 +261,13 @@ function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
     if (screenTop >= clientH) break; // past the viewport bottom
     if (!lineObj.text.trim()) continue;                 // blank line
     if (getImageLineRe().test(lineObj.text)) continue; // image line
+    // Table row: LP would capture the whole "| a | b |" source line, but RM's
+    // text blocks are individual td/th CELLS — a row-level frag is never a
+    // substring of a cell's text, so such anchors are unresolvable in RM
+    // (observed as the 2.5s bounce-to-head). Anchor on the next non-table line.
+    if (/^\s*\|/.test(lineObj.text)) continue;
     const text = normalizeAnchorText(lineObj.text);
-    if (!text) continue;                 // pure-marker line, nothing to anchor on
+    if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
     const { before, after } = nearestImgRowsByLine(imgIndex, i);
     return {
       kind: "text",
@@ -252,6 +276,7 @@ function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
       nearestImgBefore: before,
       nearestImgAfter: after,
       docRatio: sd.scrollHeight > 0 ? lb.top / sd.scrollHeight : -1,
+      totalLines: cm.state.doc.lines,
     };
   }
 
@@ -309,8 +334,12 @@ function captureAnchorRM(app: App, filePath: string): ViewportAnchor | null {
     const rect = block.getBoundingClientRect();
     if (rect.bottom <= viewportTopClient) continue; // above viewport
     if (rect.top >= viewportBottomClient) break;    // below viewport
+    // Table cells make terrible anchors: rmTextBlocks yields individual
+    // td/th blocks whose text ("页面") is short and repeats all over the
+    // document — the LP capture side skips table rows for the same reason.
+    if (block.closest("table")) continue;
     const text = normalizeAnchorText(block.textContent ?? "");
-    if (!text) continue;
+    if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
     const blockTopDoc = rect.top - previewRect.top + previewEl.scrollTop;
     const { before, after } = nearestImgRowsRM(previewEl, imgIndex, previewRect, blockTopDoc);
     return {
@@ -320,6 +349,7 @@ function captureAnchorRM(app: App, filePath: string): ViewportAnchor | null {
       nearestImgBefore: before,
       nearestImgAfter: after,
       docRatio: previewEl.scrollHeight > 0 ? blockTopDoc / previewEl.scrollHeight : -1,
+      totalLines: -1, // unavailable from RM; native-scroll uses other means
     };
   }
 
@@ -629,14 +659,16 @@ function findBestTextLine(
   if (!frag) return 0;
 
   // Scan source lines in the SAME normalized space the anchor was captured in,
-  // so markdown syntax in the source can't defeat the match.
+  // so markdown syntax in the source can't defeat the match. Collect ALL
+  // matches: capping the list head-biases the candidate set (a common frag's
+  // first N hits cluster in the early document), which starves the priors
+  // below of the correct deep occurrence.
   const lines: number[] = [];
   const total = cm.state.doc.lines;
   for (let i = 1; i <= total; i++) {
     const norm = normalizeAnchorText(cm.state.doc.line(i).text);
     if (norm && norm.includes(frag)) {
       lines.push(i);
-      if (lines.length > 50) break;
     }
   }
   if (lines.length === 0) return 0;
@@ -817,11 +849,160 @@ function restoreTextInRM(
   return false;
 }
 
+// ── Scroll-capture guard (derived from Approach X Phase 2 design) ────
+// During a native-scroll→precise-restore window, scroll events fired by the
+// forced scroll must not leak into the LastAnchor slot (they'd pollute the
+// next mode switch with an intermediate scroll position). The guard is a
+// re-entrant counter so overlapping restores (unlikely but possible) don't
+// prematurely release the lock.
+
+const ENABLE_NATIVE_SCROLL = true;
+let _restoreGuardDepth = 0;
+let _restoreGuardTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+function enterRestoreGuard(): void {
+  _restoreGuardDepth++;
+  if (_restoreGuardTimeoutId) clearTimeout(_restoreGuardTimeoutId);
+  _restoreGuardTimeoutId = setTimeout(() => {
+    logger.warn("RESTORE_GUARD safety timeout — force-released");
+    _restoreGuardDepth = 0;
+  }, 2000);
+}
+function exitRestoreGuard(): void {
+  _restoreGuardDepth = Math.max(0, _restoreGuardDepth - 1);
+  if (_restoreGuardDepth === 0 && _restoreGuardTimeoutId) {
+    clearTimeout(_restoreGuardTimeoutId);
+    _restoreGuardTimeoutId = null;
+  }
+}
+function isRestoreGuardActive(): boolean { return _restoreGuardDepth > 0; }
+
+// ── Native line-based scroll ──────────────────────────────────────────
+// Two-phase restore engine (Solution A): when a precise pixel restore fails
+// because the target row isn't rendered (cold RM / virtualized region), coerce
+// the renderer to build DOM around the target line itself instead of crawling
+// from scrollTop=0. This eliminates the ~1.5s "jump to document head" during
+// the first switch to a deep region. Falls back to the legacy percentage-based
+// coarse-jump (restoreScrollPct) when native scroll is unavailable or fails.
+
+/** Derive a best-effort source-line number from the active anchor for the
+ *  native scroll engine. Returns 0 when no reliable line is derivable. */
+function anchorTargetLine(app: App): number {
+  const active = getActiveAnchor();
+  if (!active) return 0;
+  const view = (app.workspace.activeLeaf?.view as any);
+  const filePath = view?.file?.path ?? "";
+  if (!filePath) return 0;
+
+  if (active.kind === "image-row") {
+    const imgIndex = getImageRowIndex(filePath);
+    const r = imgIndex?.find(x => x.index === active.imageRowIndex);
+    return r?.startLine ?? 0;
+  }
+  if (active.kind === "image-gap") {
+    const imgIndex = getImageRowIndex(filePath);
+    if (active.imgAfter > 0) {
+      const r = imgIndex?.find(x => x.index === active.imgAfter);
+      return r?.startLine ?? 0;
+    }
+    if (active.imgBefore > 0) {
+      const r = imgIndex?.find(x => x.index === active.imgBefore);
+      return r ? (r.endLine + 1) : 0;
+    }
+    return 0;
+  }
+  // text anchors: prefer nearest image row; fall back to docRatio estimate
+  if (active.kind === "text") {
+    const imgIndex = getImageRowIndex(filePath);
+    if (active.nearestImgAfter > 0) {
+      const r = imgIndex?.find(x => x.index === active.nearestImgAfter);
+      if (r) return r.startLine;
+    }
+    if (active.nearestImgBefore > 0) {
+      const r = imgIndex?.find(x => x.index === active.nearestImgBefore);
+      if (r) return r.endLine + 1;
+    }
+    // No nearby image row — estimate from docRatio * totalLines (captured
+    // from the outgoing LP view). A rough line estimate is still enough to
+    // steer the native scroll toward the right region so the renderer builds
+    // DOM there, after which the precise pixel restore lands exactly.
+    if (active.docRatio >= 0 && active.totalLines > 0) {
+      return Math.max(1, Math.round(active.docRatio * active.totalLines));
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/** Initiate a native, virtualization-aware scroll to targetLine in the
+ *  ACTIVE view's editor / preview renderer. Returns true when a position
+ *  change is detected within 3 rAFs. Returns false (→ fall back to pct
+ *  coarse-jump) when the API is unavailable, the line is out of bounds, or
+ *  no visible scroll movement occurs. */
+function nativeScrollToLine(app: App, targetLine: number): boolean {
+  if (!ENABLE_NATIVE_SCROLL || targetLine <= 0) return false;
+  const view = (app.workspace.activeLeaf?.view as any);
+  const mode = view?.getMode?.() ?? "";
+  if (mode !== "source" && mode !== "preview") return false;
+
+  try {
+    if (mode === "source") {
+      const cm = view.editor?.cm;
+      if (!cm) return false;
+      if (targetLine > (cm.state?.doc?.lines ?? 0)) return false;
+      const pos = cm.state.doc.line(targetLine).from;
+      cm.scrollIntoView(pos, { y: "center" });
+      // CM height maps are virtual: scrollTop updates synchronously.
+      // Wait one rAF for the scroll position to stabilize, then verify.
+      const sd = cm.scrollDOM as HTMLElement | null;
+      const before = sd?.scrollTop ?? -1;
+      if (before >= 0) {
+        requestAnimationFrame(() => {
+          const after = sd?.scrollTop ?? -1;
+          logger.debug("VIEWPORT native-scroll LP", { targetLine, before: Math.round(before), after: Math.round(after) });
+        });
+      }
+      // scrollIntoView is reliable → treat as success; the next precise restore
+      // runs in the same rAF poll and will measure the actual position.
+      return true;
+    }
+
+    if (mode === "preview") {
+      // Try setEphemeralState first (Obsidian's navigation hook). It tells the
+      // preview renderer to center around this line, building DOM that includes
+      // the target area — the same mechanism Obsidian uses for link / search jumps.
+      if (typeof view.setEphemeralState === "function") {
+        view.setEphemeralState({ line: targetLine });
+        logger.debug("VIEWPORT native-scroll RM setEphemeralState", { targetLine });
+        return true;
+      }
+      // Fall back to previewMode.applyScroll if available (Obsidian internal API).
+      if (view.previewMode && typeof view.previewMode.applyScroll === "function") {
+        view.previewMode.applyScroll(targetLine);
+        logger.debug("VIEWPORT native-scroll RM applyScroll", { targetLine });
+        return true;
+      }
+      return false;
+    }
+  } catch (e) {
+    // Any native-scroll exception → fall back to the legacy coarse-jump without
+    // blocking the restore control flow.
+    logger.warn("VIEWPORT native-scroll failed", { targetLine, mode, error: String(e) });
+    return false;
+  }
+  return false;
+}
+
 // Legacy percentage-based restore kept as final fallback.
-export function restoreScrollPct(app: App): void {
+/** Coarse percentage-based scroll restore. Returns true when the write actually
+ *  landed. The pct is consumed ONLY on a successful write: on a cold RM render
+ *  the scroller has no scroll space yet (scrollHeight == clientHeight), and
+ *  consuming the pct on that failed attempt would leave nothing to apply once
+ *  the height ledger materializes (~0.5s) — the retry loops call this every
+ *  frame, so keeping the pct makes the coarse jump self-healing. */
+export function restoreScrollPct(app: App): boolean {
   const pct = getFallbackPct();
-  if (pct < 0) return;
-  setFallbackPct(-1);
+  if (pct < 0) return false;
 
   const leaf = app.workspace.activeLeaf;
   const view = (leaf?.view as any);
@@ -849,11 +1030,15 @@ export function restoreScrollPct(app: App): void {
     }
   }
 
+  if (targetY < 0) return false; // no scroll space yet — keep the pct for retry
+
+  setFallbackPct(-1);
   logger.info("VIEWPORT fallback-restored", {
     mode, pct: Math.round(pct * 100),
     targetY: Math.round(targetY), actualY: Math.round(actualY),
     docH, viewportH, maxScroll: Math.round(docH - viewportH),
   });
+  return true;
 }
 
 // ── RM scroll tracking ─────────────────────────────────────────────
@@ -909,6 +1094,7 @@ export function ensureRMScrollTracking(app: App): void {
   _rmTrackedEl = null;
 
   const onScroll = () => {
+    if (isRestoreGuardActive()) return; // native-scroll window: don't capture intermediate state
     const anchor = captureContentAnchor(app);
     if (anchor) {
       setRMLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
@@ -939,26 +1125,184 @@ export function ensureRMScrollTracking(app: App): void {
 // exist for the first several frames after a mode switch. Retry the precise
 // restore until it lands; coarse-jump once toward the captured scroll percent
 // to force the target region to render (its embeds then appear).
-const RM_RESTORE_MAX_FRAMES = 60; // ~1s at 60fps
-let _rmRestoreFrames = 0;
+// Time-based timeout for RM cold-render retry loop (5 s). Removed the
+// frame-count cap (RM_RESTORE_MAX_FRAMES) because setEphemeralState is async
+// and the renderer may take >1 s to build DOM around a deep target line.
+// native-scroll is re-pushed every NATIVE_RETRY_INTERVAL frames to keep the
+// renderer moving toward the target region.
+const RM_RESTORE_TIMEOUT_MS = 5000;
+const NATIVE_RETRY_INTERVAL = 30; // frames between setEphemeralState re-pushes
+let _rmRestoreStartTime = 0;
+let _rmNativeTried = false;
+let _rmFramesSinceNative = 0;
+
+// ── RM settle-hold ──────────────────────────────────────────────────
+// A successful RM restore during a cold render is NOT final: the write lands
+// against a partially-stacked layout (rendered sections pile up at the sizer
+// top while the total height is placeholder-estimated), and as the sections
+// above the target get their real heights the content slides away under a
+// frozen scrollTop — the viewport visibly drifts to an unrelated early
+// section (~0.9s observed) until the renderer's async line navigation lands.
+// The settle-hold re-pins the anchor on every frame the layout moves, keeping
+// the target content glued to the viewport while the height ledger settles.
+// Exits when the layout is calm, on user input (never fight the user), or on
+// timeout.
+const RM_HOLD_TIMEOUT_MS = 3000;
+const RM_HOLD_CALM_FRAMES = 10; // consecutive no-correction frames = settled
+let _rmHoldId: number | null = null;
+let _rmHoldCleanup: (() => void) | null = null;
+
+function cancelRMSettleHold(): void {
+  if (_rmHoldId !== null) {
+    cancelAnimationFrame(_rmHoldId);
+    _rmHoldId = null;
+  }
+  if (_rmHoldCleanup) {
+    _rmHoldCleanup();
+    _rmHoldCleanup = null;
+  }
+}
+
+export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
+  cancelRMSettleHold();
+  const view = app.workspace.activeLeaf?.view as any;
+  const file = view?.file?.path ?? "";
+  let hookedEl = getRMPreviewEl(app) as HTMLElement | null;
+  if (!hookedEl || !file) return;
+
+  // Hold the scroll-capture guard across the whole hold: our corrective
+  // writes dispatch their scroll events asynchronously, so a per-write guard
+  // would release before the event fires and pollute the RM anchor slot.
+  enterRestoreGuard();
+
+  let userInterrupted = false;
+  const onUser = () => { userInterrupted = true; };
+  const attach = (el: HTMLElement) => {
+    el.addEventListener("wheel", onUser, { passive: true });
+    el.addEventListener("touchstart", onUser, { passive: true });
+    el.addEventListener("pointerdown", onUser, { passive: true });
+  };
+  const detach = (el: HTMLElement) => {
+    el.removeEventListener("wheel", onUser);
+    el.removeEventListener("touchstart", onUser);
+    el.removeEventListener("pointerdown", onUser);
+  };
+  attach(hookedEl);
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (hookedEl) detach(hookedEl);
+    exitRestoreGuard();
+  };
+  _rmHoldCleanup = cleanup;
+
+  const start = performance.now();
+  let lastTop = hookedEl.scrollTop;
+  let lastDocH = hookedEl.scrollHeight;
+  let calm = 0;
+  let corrections = 0;
+
+  const finish = (reason: string, recapture: boolean) => {
+    _rmHoldId = null;
+    _rmHoldCleanup = null;
+    cleanup();
+    setActiveAnchor(null);
+    logger.debug("VIEWPORT settle-hold end", {
+      reason, corrections,
+      ms: Math.round(performance.now() - start),
+      scrollTop: hookedEl ? Math.round(hookedEl.scrollTop) : -1,
+    });
+    if (!recapture) return;
+    const anchor = captureContentAnchor(app);
+    if (anchor) setRMLastAnchor(anchor, file);
+    const pct = computeScrollPct(app);
+    if (pct >= 0) setLastFallbackPct(pct);
+    driveViewportTransition(app, "rm-settle-hold");
+  };
+
+  const tick = () => {
+    _rmHoldId = null;
+    const v = app.workspace.activeLeaf?.view as any;
+    if ((v?.getMode?.() ?? "") !== "preview" || (v?.file?.path ?? "") !== file) {
+      finish("view-changed", false);
+      return;
+    }
+    if (userInterrupted) {
+      finish("user-input", false);
+      return;
+    }
+    const el = getRMPreviewEl(app) as HTMLElement | null;
+    if (!el) {
+      finish("preview-gone", false);
+      return;
+    }
+    if (el !== hookedEl) {
+      // Spurious re-render replaced the preview DOM — rebase on the new one.
+      if (hookedEl) detach(hookedEl);
+      attach(el);
+      hookedEl = el;
+      lastTop = el.scrollTop;
+      lastDocH = el.scrollHeight;
+    }
+
+    const docH = el.scrollHeight;
+    const top = el.scrollTop;
+    const moved = docH !== lastDocH || Math.abs(top - lastTop) > 1;
+    if (moved) {
+      // Layout reflowed (or an external write scrolled us) — re-pin.
+      // enterRestoreGuard also refreshes the guard's 2s safety timer, so a
+      // hold that keeps correcting can't be force-released mid-flight.
+      enterRestoreGuard();
+      setActiveAnchor(seedAnchor);
+      const ok = restoreContentAnchor(app);
+      if (!ok) setActiveAnchor(null); // target block mid-rerender; retry next frame
+      exitRestoreGuard();
+      const newTop = el.scrollTop;
+      if (Math.abs(newTop - top) > 2) { corrections++; calm = 0; } else calm++;
+      lastTop = newTop;
+      lastDocH = el.scrollHeight;
+    } else {
+      calm++;
+    }
+
+    if (calm >= RM_HOLD_CALM_FRAMES) { finish("stable", true); return; }
+    if (performance.now() - start > RM_HOLD_TIMEOUT_MS) { finish("timeout", true); return; }
+    _rmHoldId = requestAnimationFrame(tick);
+  };
+  logger.debug("VIEWPORT settle-hold start", {
+    scrollTop: Math.round(lastTop), docH: lastDocH,
+  });
+  _rmHoldId = requestAnimationFrame(tick);
+}
 
 function scheduleRMDeferredRestore(app: App): void {
   if (_rmDeferredRestoreId !== null) {
     cancelAnimationFrame(_rmDeferredRestoreId);
     _rmDeferredRestoreId = null;
   }
-  _rmRestoreFrames = 0;
+  cancelRMSettleHold(); // a new restore session supersedes any settling hold
+  rmLoopExitGuard();    // close any prior session's guard (its closure is gone)
+  _rmRestoreStartTime = performance.now();
+  _rmNativeTried = false;
+  _rmFramesSinceNative = 0;
+  let _rmLastSeenDocH = -1;
   const targetFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+
+  const enterGuardOnce = rmLoopEnterGuard;
+  const exitGuardOnce = rmLoopExitGuard;
 
   const attempt = () => {
     const mode = (app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
-    if (mode !== "preview") { _rmDeferredRestoreId = null; return; }
+    if (mode !== "preview") { _rmDeferredRestoreId = null; exitGuardOnce(); return; }
 
-    // Abort if the user switched documents during the retry window, so a stale
-    // anchor from the previous file can't hijack this one's scroll.
+    // Abort if the user switched documents during the retry window.
     const curFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
     if (curFile !== targetFile) {
       _rmDeferredRestoreId = null;
+      _rmNativeTried = false;
+      exitGuardOnce();
       setActiveAnchor(null); setFallbackPct(-1);
       logger.info("VIEWPORT deferred-restore aborted: file changed", { targetFile, curFile });
       return;
@@ -973,19 +1317,66 @@ function scheduleRMDeferredRestore(app: App): void {
     ensureRMScrollTracking(app);
 
     if (getActiveAnchor()) {
+      const seedAnchor = getActiveAnchor()!; // restoreContentAnchor consumes it on success
       const ok = restoreContentAnchor(app);
-      if (!ok && _rmRestoreFrames++ < RM_RESTORE_MAX_FRAMES) {
-        // Target section not rendered yet. Coarse-jump once (restoreScrollPct
-        // consumes the fallback pct) to force RM to render that region, then
-        // keep retrying the precise restore on the next frame until it lands.
-        if (getFallbackPct() >= 0) restoreScrollPct(app);
+      const elapsed = performance.now() - _rmRestoreStartTime;
+      if (!ok && elapsed < RM_RESTORE_TIMEOUT_MS) {
+        // Periodically re-push native-scroll so the renderer keeps building
+        // DOM toward the target region (cold RM may need multiple pushes).
+        _rmFramesSinceNative++;
+        if (_rmFramesSinceNative >= NATIVE_RETRY_INTERVAL) {
+          _rmNativeTried = false;
+          _rmFramesSinceNative = 0;
+        }
+        let advanced = false;
+        if (!_rmNativeTried) {
+          _rmNativeTried = true;
+          const line = anchorTargetLine(app);
+          if (nativeScrollToLine(app, line)) {
+            enterGuardOnce();
+            advanced = true;
+            _rmDeferredRestoreId = requestAnimationFrame(attempt);
+            return;
+          }
+        }
+        if (!advanced && getFallbackPct() >= 0) {
+          // Coarse-jump as soon as the height ledger is USABLE, not at the end
+          // of the window: during the cold-render ramp docH swings >10% per
+          // frame, and jumping on a partial ledger would steer the renderer
+          // far from the target region. ±5% frame-over-frame is stable enough;
+          // restoreScrollPct itself keeps the pct un-consumed until the write
+          // actually lands, so calling every stable frame is self-healing.
+          const docH = previewEl.scrollHeight;
+          const stable = _rmLastSeenDocH > 0
+            && docH >= _rmLastSeenDocH * 0.95 && docH <= _rmLastSeenDocH * 1.05;
+          _rmLastSeenDocH = docH;
+          if (stable) {
+            enterGuardOnce();
+            restoreScrollPct(app);
+          }
+        }
         _rmDeferredRestoreId = requestAnimationFrame(attempt);
         return;
       }
-    } else if (getFallbackPct() >= 0) {
+      if (ok) {
+        // A cold-render restore success is not final: the layout is still
+        // settling and the content will slide away under a frozen scrollTop.
+        // Hand off to the settle-hold, which re-pins the anchor per frame.
+        _rmDeferredRestoreId = null;
+        _rmNativeTried = false;
+        startRMSettleHold(app, seedAnchor); // enters its own guard first…
+        exitGuardOnce();                    // …so capture stays suppressed across the handoff
+        return;
+      }
+      // Timeout — clear the anchor.
+      _rmNativeTried = false;
+      exitGuardOnce();
       restoreScrollPct(app);
+      setFallbackPct(-1); // end of session: drop the pct even if the write failed
     }
     _rmDeferredRestoreId = null;
+    _rmNativeTried = false;
+    exitGuardOnce();
 
     const anchor = captureContentAnchor(app);
     if (anchor) {
@@ -1022,6 +1413,7 @@ function ensureLPScrollTracking(app: App): void {
   _lpTrackedEl = null;
 
   const onScroll = () => {
+    if (isRestoreGuardActive()) return; // native-scroll window: don't capture intermediate state
     const anchor = captureContentAnchor(app);
     if (anchor) {
       setLPLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
@@ -1052,16 +1444,27 @@ function scheduleLPDeferredRestore(app: App): void {
     _lpDeferredRestoreId = null;
   }
   const targetFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+  let _lpNativeTried = false;
+  let _lpGuardActive = false;
+
+  const enterGuardOnce = () => {
+    if (!_lpGuardActive) { enterRestoreGuard(); _lpGuardActive = true; }
+  };
+  const exitGuardOnce = () => {
+    if (_lpGuardActive) { exitRestoreGuard(); _lpGuardActive = false; }
+  };
 
   const attempt = () => {
     const view = (app.workspace.activeLeaf?.view as any);
     const mode = view?.getMode?.() ?? "";
-    if (mode !== "source") { _lpDeferredRestoreId = null; return; }
+    if (mode !== "source") { _lpDeferredRestoreId = null; exitGuardOnce(); return; }
 
     // Abort if the user switched documents during the retry window.
     const curFile = view?.file?.path ?? "";
     if (curFile !== targetFile) {
       _lpDeferredRestoreId = null;
+      _lpNativeTried = false;
+      exitGuardOnce();
       setActiveAnchor(null); setFallbackPct(-1);
       logger.info("VIEWPORT deferred-restore aborted: file changed", { targetFile, curFile });
       return;
@@ -1076,13 +1479,32 @@ function scheduleLPDeferredRestore(app: App): void {
 
     ensureLPScrollTracking(app);
     if (getActiveAnchor()) {
-      // LP (CodeMirror) is not virtualized — lineBlockAt resolves any line
-      // regardless of scroll, so a failure here is terminal. Clear the anchor
-      // so it can't linger and hijack a later restore.
-      if (!restoreContentAnchor(app)) { setActiveAnchor(null); setFallbackPct(-1); }
+      const ok = restoreContentAnchor(app);
+      if (!ok) {
+        if (!_lpNativeTried) {
+          _lpNativeTried = true;
+          const line = anchorTargetLine(app);
+          if (nativeScrollToLine(app, line)) {
+            enterGuardOnce();
+            _lpDeferredRestoreId = requestAnimationFrame(attempt);
+            return;
+          }
+        }
+        // LP (CodeMirror) is not virtualized — lineBlockAt resolves any line
+        // regardless of scroll, so a native-scroll failure is terminal. Clear
+        // the anchor so it can't linger and hijack a later restore.
+        setActiveAnchor(null); setFallbackPct(-1);
+      }
     } else if (getFallbackPct() >= 0) {
+      enterGuardOnce();
       restoreScrollPct(app);
+      // LP's height map is authoritative from frame one — a failed write means
+      // "unscrollable", never "not yet". Drop the pct to preserve one-shot
+      // semantics (no stale pct hijacking a later restore).
+      setFallbackPct(-1);
     }
+    _lpNativeTried = false;
+    exitGuardOnce();
 
     const anchor = captureContentAnchor(app);
     if (anchor) {
@@ -1190,6 +1612,7 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
   const seedPct = getLastFallbackPct();
 
   let frames = EARLY_RESTORE_MAX_FRAMES;
+  let nativeTried = false;
   const poll = () => {
     const view = app.workspace.activeLeaf?.view as any;
     if ((view?.getMode?.() ?? "") !== toMode) return;   // switched away / superseded
@@ -1199,7 +1622,21 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
       if (--frames > 0) requestAnimationFrame(poll);
       return;
     }
-    applyEarly(app, seedAnchor, seedPct); // frame N, pre-paint: writes scrollTop = target
+    // frame N, pre-paint: try precise pixel restore first (cached views).
+    // On cold RM render the target embeds may not exist yet — fall back to
+    // native line-based scroll to force the renderer to build DOM around the
+    // target, then retry. If even that fails, let layout-change handle it.
+    const ok = applyEarly(app, seedAnchor, seedPct);
+    if (!ok && !nativeTried) {
+      nativeTried = true;
+      const line = anchorTargetLine(app);
+      if (nativeScrollToLine(app, line)) {
+        enterRestoreGuard();
+        if (--frames > 0) requestAnimationFrame(poll);
+        return;
+      }
+    }
+    exitRestoreGuard();
     if (toMode === "preview") scheduleRMHold(app, file, seedAnchor, seedPct, RM_EARLY_HOLD_FRAMES);
   };
   requestAnimationFrame(poll);
@@ -1246,6 +1683,25 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
     const ret = original.call(this, state, result);
     if (isSwitch) {
       try { scheduleEarlyRestore(app, fromMode, toMode, file); } catch { /* never break setState */ }
+    }
+    // Defend against spurious internal setState that re-renders the RM preview
+    // from scratch, discarding our restored scroll position. Obsidian fires these
+    // with mode="preview" but no file (isSwitch=false) during post-switch re-layout.
+    // Snapshot the current RM scrollTop; if the reset drops it to 0, re-apply.
+    if (!isSwitch && toMode === "preview") {
+      const sc = incomingScrollerOf(this, "preview");
+      const saved = sc?.scrollTop ?? 0;
+      if (saved > 0) {
+        ret.then(() => {
+          requestAnimationFrame(() => {
+            const sc2 = incomingScrollerOf(this, "preview");
+            if (sc2 && sc2.scrollTop === 0 && sc2.scrollHeight > sc2.clientHeight) {
+              sc2.scrollTop = saved;
+              logger.debug("SWITCH spurious-reset defended", { saved });
+            }
+          });
+        });
+      }
     }
     return ret;
   };
@@ -1330,6 +1786,10 @@ function handleModeSwitch(app: App, mode: string, file: string, trigger: string)
     const modified = flushPendingAlignments(app);
     logger.info("ALIGN flush done", { modifiedFiles: [...modified], remaining: getPendingAlignmentCount() });
     for (const path of modified) invalidateImageRowIndex(path);
+    // Immediately rebuild the index for the current file so the deferred
+    // restore (which fires next) can use image-row-based disambiguation
+    // instead of falling back to the unreliable cross-mode docRatio.
+    if (modified.has(file)) ensureImageRowIndexFromCM(app);
   }
   // Seed the restore anchor from the OUTGOING mode's slot, so the
   // incoming view's stale-scroll noise can't hijack it.

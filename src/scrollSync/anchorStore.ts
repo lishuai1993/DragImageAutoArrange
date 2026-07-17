@@ -20,6 +20,7 @@ export type ViewportAnchor =
       docRatio: number;      // block top ÷ scroll height (0..1); -1 if unmeasurable.
                              // Mode-independent position prior for disambiguating
                              // multiple matches when no nearest image row is known.
+      totalLines: number;    // total source lines in capture-mode doc (-1 if RM).
     }
   | { kind: "image-row"; imageRowIndex: number; intraRowRatio: number }
   | {

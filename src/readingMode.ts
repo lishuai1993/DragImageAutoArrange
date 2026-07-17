@@ -13,6 +13,7 @@ import {
   ensureRMScrollTracking,
   restoreContentAnchor, restoreScrollPct,
   captureContentAnchor, computeScrollPct,
+  startRMSettleHold,
   driveViewportTransition,
 } from "./scrollSync/scrollAnchor";
 import { buildImageRowIndex, toLine1 } from "./scrollSync/viewportAnchor";
@@ -241,11 +242,18 @@ export function createReadingModeProcessor(
 
     const afterRender = () => {
       let restored = false;
-      if (getScrollAnchor()) {
+      const seedAnchor = getScrollAnchor(); // consumed on success — snapshot for the settle-hold
+      if (seedAnchor) {
         restored = restoreContentAnchor(app);
+        // A cold-render restore is not final: the layout keeps settling and
+        // slides the content away under a frozen scrollTop. The settle-hold
+        // re-pins the anchor per frame until the height ledger is calm.
+        if (restored) startRMSettleHold(app, seedAnchor);
       } else if (getFallbackPct() >= 0) {
-        restoreScrollPct(app);
-        restored = true;
+        // restoreScrollPct now reports whether the write landed (a cold RM
+        // scroller has no scroll space yet) — only a real write may cancel
+        // the deferred retry loop below.
+        restored = restoreScrollPct(app);
       }
       // Stop the deferred RM retry loop only once the anchor is actually
       // resolved. If this section's render didn't contain the target row, let
