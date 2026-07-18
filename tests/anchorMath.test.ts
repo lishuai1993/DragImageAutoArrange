@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   clamp01, intraRowRatio, gapRatioFromGeom,
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy,
+  nearestIndexBy, ledgerYForLine, ledgerTotalHeight,
+  sectionIndexEstimateY, LedgerSection,
 } from '../src/scrollSync/anchorMath';
 
 describe('clamp01', () => {
@@ -114,5 +115,117 @@ describe('nearestIndexBy', () => {
   });
   it('works with negative targets and keys', () => {
     expect(nearestIndexBy([-5, -1, 3], -2)).toBe(1);
+  });
+});
+
+describe('ledgerYForLine', () => {
+  // Sections mirror Obsidian's renderer.sections shape: 0-based contiguous
+  // blocks, blank separator lines fall between lineEnd and the next lineStart.
+  const sections: LedgerSection[] = [
+    { lineStart: 0, lineEnd: 2, height: 100 },
+    { lineStart: 4, lineEnd: 4, height: 50 },
+    { lineStart: 6, lineEnd: 10, height: 300 },
+  ];
+
+  it('returns 0 for a line in the first section', () => {
+    expect(ledgerYForLine(sections, 0)).toBe(0);
+    expect(ledgerYForLine(sections, 2)).toBe(0);
+  });
+  it('sums preceding section heights for later sections', () => {
+    expect(ledgerYForLine(sections, 4)).toBe(100);
+    expect(ledgerYForLine(sections, 6)).toBe(150);
+    expect(ledgerYForLine(sections, 10)).toBe(150);
+  });
+  it('parks a blank-gap line at the next section top', () => {
+    expect(ledgerYForLine(sections, 3)).toBe(100);
+    expect(ledgerYForLine(sections, 5)).toBe(150);
+  });
+  it('returns -1 past the last section or for negative lines', () => {
+    expect(ledgerYForLine(sections, 11)).toBe(-1);
+    expect(ledgerYForLine(sections, -1)).toBe(-1);
+  });
+  it('returns -1 on unusable shapes', () => {
+    expect(ledgerYForLine([], 0)).toBe(-1);
+    expect(ledgerYForLine([{ lineStart: 0 } as any], 0)).toBe(-1);
+    expect(ledgerYForLine([{ lineStart: 0, lineEnd: 2, height: 'x' } as any], 5)).toBe(-1);
+  });
+  it('skips non-positive heights in the cumulative sum', () => {
+    const secs: LedgerSection[] = [
+      { lineStart: 0, lineEnd: 0, height: -10 },
+      { lineStart: 2, lineEnd: 2, height: 40 },
+      { lineStart: 4, lineEnd: 4, height: 60 },
+    ];
+    expect(ledgerYForLine(secs, 2)).toBe(0);
+    expect(ledgerYForLine(secs, 4)).toBe(40);
+  });
+});
+
+describe('ledgerTotalHeight', () => {
+  it('sums positive heights', () => {
+    expect(ledgerTotalHeight([
+      { lineStart: 0, lineEnd: 1, height: 100 },
+      { lineStart: 2, lineEnd: 3, height: 50 },
+    ])).toBe(150);
+  });
+  it('ignores non-positive heights, rejects unusable shapes', () => {
+    expect(ledgerTotalHeight([
+      { lineStart: 0, lineEnd: 1, height: -5 },
+      { lineStart: 2, lineEnd: 3, height: 50 },
+    ])).toBe(50);
+    expect(ledgerTotalHeight([{ lineStart: 0, lineEnd: 1 } as any])).toBe(-1);
+    expect(ledgerTotalHeight([])).toBe(0);
+  });
+});
+
+describe('sectionIndexEstimateY', () => {
+  // Simulated warmup section heights from a 2805-line document. The heights
+  // are non-uniform: section 500-502 simulate a tall image row (~600px),
+  // the rest are text-height sections (~30px each).
+  const heights = Array.from({ length: 897 }, (_, i) => {
+    if (i >= 500 && i <= 502) return 200; // image row
+    return 30;
+  });
+  const totalLines = 2805;
+  // Total: 894 * 30 + 3 * 200 = 26820 + 600 = 27420
+
+  it('returns the cumulative height sum up to the estimated section index', () => {
+    // Line 1000: idx ≈ floor(999/2805 * 897) = floor(0.356 * 897) = 319
+    // sum = 319 * 30 = 9570
+    const y = sectionIndexEstimateY(heights, totalLines, 1000);
+    expect(y).toBeGreaterThan(9500);
+    expect(y).toBeLessThan(9700);
+  });
+
+  it('returns 0 for line 1', () => {
+    expect(sectionIndexEstimateY(heights, totalLines, 1)).toBe(0);
+  });
+
+  it('tall image sections push later lines to higher Y correctly', () => {
+    // Line 1570 (= line0=1569): idx = floor(1569/2805*897) = 501 (inside image row)
+    // sum up to idx 501 → 501 * 30 = 15030
+    const yImage = sectionIndexEstimateY(heights, totalLines, 1570);
+    // Line 1585 (= line0=1584): idx = floor(1584/2805*897) = 506 (after image row)
+    // sum up to idx 506 → 506 * 30 + 3*200 = ... wait, 500,501,502 are image rows
+    // 0-499: 500*30=15000, 500-502: 3*200=600, 503-506: 4*30=120, total=15720
+    const yAfter = sectionIndexEstimateY(heights, totalLines, 1585);
+    // After image row should be noticeably higher than within it
+    expect(yAfter - yImage).toBeGreaterThan(100);
+  });
+
+  it('returns -1 for empty input', () => {
+    expect(sectionIndexEstimateY([], totalLines, 100)).toBe(-1);
+    expect(sectionIndexEstimateY(heights, 0, 100)).toBe(-1);
+    expect(sectionIndexEstimateY(heights, totalLines, 0)).toBe(-1);
+  });
+
+  it('estimates the last line near total height', () => {
+    const y = sectionIndexEstimateY(heights, totalLines, 2805);
+    expect(y).toBe(27390);
+  });
+
+  it('works with a single section', () => {
+    // Single section: all lines belong to section 0, start Y is always 0.
+    expect(sectionIndexEstimateY([500], 100, 50)).toBe(0);
+    expect(sectionIndexEstimateY([500], 100, 100)).toBe(0);
   });
 });

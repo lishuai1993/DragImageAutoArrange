@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore } from "./scrollSync/scrollAnchor";
+import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore, clearSectionSnapshot } from "./scrollSync/scrollAnchor";
 import { scheduleWarmupProbe, cancelWarmupProbe } from "./scrollSync/warmupProbe";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
@@ -139,7 +139,7 @@ export default class DragImageAutoArrangePlugin
     this.registerEvent(
       this.app.workspace.on("editor-change", (_editor, info) => {
         const path = (info as any)?.file?.path;
-        if (path) invalidateImageRowIndex(path);
+        if (path) { invalidateImageRowIndex(path); clearSectionSnapshot(path); }
       })
     );
 

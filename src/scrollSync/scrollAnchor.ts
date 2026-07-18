@@ -13,7 +13,7 @@ import {
 import {
   clamp01, intraRowRatio, gapRatioFromGeom,
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy,
+  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, sectionIndexEstimateY, LedgerSection,
 } from "./anchorMath";
 import { assertNever } from "../utils";
 import { normalizeAnchorText } from "./textAnchor";
@@ -107,8 +107,16 @@ export function getScrollAnchor(): ViewportAnchor | null {
 }
 
 // Called from readingMode.ts afterRender (RM context) → RM slot.
+// When the afterRender fires while the active view is still in source mode
+// (e.g. during warmup), the captured anchor actually describes the LP view.
+// Seed the LP slot too so scheduleEarlyRestore can use it for the first real
+// LP→RM switch. The guard (LP slot empty) prevents overwriting a real LP
+// anchor set by a prior RM→LP switch.
 export function setLastAnchor(anchor: ViewportAnchor | null, file: string): void {
   setRMLastAnchor(anchor, file);
+  if (anchor && file && !getLPLastAnchor().anchor) {
+    setLPLastAnchor(anchor, file);
+  }
 }
 
 // ── Small helpers ──────────────────────────────────────
@@ -273,6 +281,7 @@ function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
       kind: "text",
       anchorText: text.slice(0, 100),
       anchorOffset: screenTop,
+      anchorLine: i,
       nearestImgBefore: before,
       nearestImgAfter: after,
       docRatio: sd.scrollHeight > 0 ? lb.top / sd.scrollHeight : -1,
@@ -759,6 +768,105 @@ function restoreTextInLP(
   return false;
 }
 
+// ── RM section-height snapshot ──────────────────────────
+// After warmup, the renderer's section heights may be zeroed when the
+// reading view returns to display:none. Save a snapshot while the warmup
+// override keeps layout alive, so the first real LP→RM switch can park
+// at the correct Y before the renderer re-measures.
+const _sectionSnapshot = new Map<string, LedgerSection[]>();
+
+export function setSectionSnapshot(file: string, secs: LedgerSection[]): void {
+  _sectionSnapshot.set(file, secs);
+}
+
+export function clearSectionSnapshot(file?: string): void {
+  if (file) _sectionSnapshot.delete(file);
+  else _sectionSnapshot.clear();
+}
+
+// ── RM height-ledger lookup ─────────────────────────────
+// Obsidian's preview renderer keeps a JS height ledger (renderer.sections)
+// that survives display:none — it's why docH is full-scale on the very first
+// frame of a mode switch. During that first-show window the DOM sits in a
+// transient compact layout (leading spacers not yet re-established), so DOM
+// rects lie about positions while the ledger already knows the settled truth.
+// Read the ledger directly; anything unexpected → -1 and the caller falls
+// back to DOM measurement / the docRatio prior.
+const LEDGER_DOCH_TOLERANCE = 0.2;  // ledger sum vs live scrollHeight sanity band
+const LEDGER_PARK_TOL_MIN = 1500;   // px — legitimate estimate drift stays far below
+const LEDGER_PARK_TOL_FRAC = 0.05;  // of docH — transient discrepancy is ~65% of docH
+const RATIO_GATE_TOL = 0.15;        // LP vs RM docRatio naturally differs by a few pts
+
+function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: number): number {
+  const view = app.workspace.activeLeaf?.view as any;
+  const secs = view?.previewMode?.renderer?.sections;
+  if (!Array.isArray(secs) || secs.length === 0) {
+    logger.debug("VIEWPORT ledger unavailable", {
+      hasRenderer: !!view?.previewMode?.renderer,
+      sectionsType: typeof secs,
+    });
+    // Fall through to snapshot below.
+  } else {
+    const total = ledgerTotalHeight(secs);
+    if (total <= 0) {
+      logger.debug("VIEWPORT ledger all-zero", {
+        len: secs.length,
+        sampleHeight: typeof secs[0]?.height,
+      });
+      // Fall through to snapshot below — heights zeroed after warmup override removed.
+    } else {
+      const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+      if (docH > 0 && Math.abs(total - docH) / docH > LEDGER_DOCH_TOLERANCE) {
+        logger.debug("VIEWPORT ledger distrusted", { total: Math.round(total), docH });
+      } else {
+        const y = ledgerYForLine(secs, line1 - 1);
+        if (y >= 0) return y;
+        // Live sections are structurally ok (non-empty, non-zero, docH matches)
+        // but don't cover this line yet — the renderer is still building after
+        // a display:none→block transition. Fall through to the snapshot.
+        logger.debug("VIEWPORT ledger line-out-of-range", {
+          line: line1, secLen: secs.length,
+          lastLineEnd: secs[secs.length - 1]?.lineEnd,
+        });
+      }
+    }
+  }
+
+  // Live ledger is empty / missing / distrusted — try the warm-up snapshot.
+  const key = file ?? (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+  const snap = _sectionSnapshot.get(key);
+  if (snap && snap.length > 0) {
+    const total = ledgerTotalHeight(snap);
+    if (total > 0) {
+      const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+      // Snapshot was taken under the warm-up override (viewport ~725px, not the
+      // real 687px), so heights can drift a few percent. Allow a wider band.
+      if (docH > 0 && Math.abs(total - docH) / docH > LEDGER_DOCH_TOLERANCE) {
+        logger.debug("VIEWPORT snapshot distrusted", { total: Math.round(total), docH });
+        return -1;
+      }
+      const y = ledgerYForLine(snap, line1 - 1);
+      if (y >= 0) return y;
+      // Snapshot entries also lack lineStart/lineEnd (Obsidian sections only
+      // carry height). Fall back to proportion-based section-index estimation
+      // using real measured heights, which naturally tracks large image gaps.
+      if (totalLines && totalLines > 0) {
+        const heights = snap.map((s: any) => typeof s.height === "number" ? s.height : 0);
+        const estY = sectionIndexEstimateY(heights, totalLines, line1);
+        if (estY >= 0) {
+          logger.debug("VIEWPORT ledger section-index-estimate", {
+            line: line1, totalLines, secLen: snap.length,
+            ledgerY: Math.round(estY), totalH: Math.round(total),
+          });
+          return estY;
+        }
+      }
+      return -1;
+    }
+  }
+  return -1;
+}
+
 function restoreTextInRM(
   app: App, filePath: string,
   anchor: Extract<ViewportAnchor, { kind: "text" }>,
@@ -806,15 +914,68 @@ function restoreTextInRM(
     //    than guessing matches[0] (which would jump to the document top).
   }
 
+  const ledgerY = anchor.anchorLine && anchor.anchorLine > 0
+    ? rmLedgerYForLine(app, anchor.anchorLine, filePath, anchor.totalLines)
+    : -1;
+
   if (chosen) {
     const rect = chosen.getBoundingClientRect();
     const blockTop = rect.top - previewRect.top + previewEl.scrollTop;
+
+    // Plausibility gate: a DOM rect that disagrees wildly with the ledger is
+    // a first-show transient (block measured in the compact stack) — park at
+    // the ledger position and let the settle-hold fine-pin once layout lands.
+    const tol = Math.max(LEDGER_PARK_TOL_MIN, previewEl.scrollHeight * LEDGER_PARK_TOL_FRAC);
+    if (ledgerY >= 0 && Math.abs(blockTop - ledgerY) > tol) {
+      const targetY = textTargetY(ledgerY, 0, anchor.anchorOffset);
+      previewEl.scrollTop = targetY;
+      logger.info("VIEWPORT anchor-restored", {
+        mode: "preview", kind: "text-ledger-park",
+        frag: frag.slice(0, 30), line: anchor.anchorLine,
+        measuredTop: Math.round(blockTop), ledgerY: Math.round(ledgerY),
+        targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
+      });
+      return true;
+    }
+
+    // No ledger available → docRatio plausibility gate (weaker prior, wider
+    // band): refuse a measurement that contradicts the captured position.
+    if (ledgerY < 0 && anchor.docRatio >= 0 && previewEl.scrollHeight > 0) {
+      const measuredRatio = blockTop / previewEl.scrollHeight;
+      if (Math.abs(measuredRatio - anchor.docRatio) > RATIO_GATE_TOL) {
+        const parkY = anchor.docRatio * previewEl.scrollHeight;
+        const targetY = textTargetY(parkY, 0, anchor.anchorOffset);
+        previewEl.scrollTop = targetY;
+        logger.info("VIEWPORT anchor-restored", {
+          mode: "preview", kind: "text-ratio-park",
+          frag: frag.slice(0, 30),
+          measuredPct: Math.round(measuredRatio * 100),
+          docPct: Math.round(anchor.docRatio * 100),
+          targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
+        });
+        return true;
+      }
+    }
+
     const targetY = textTargetY(blockTop, 0, anchor.anchorOffset);
     previewEl.scrollTop = targetY;
     logger.info("VIEWPORT anchor-restored", {
       mode: "preview", kind: "text",
       frag: frag.slice(0, 30),
       offset: Math.round(anchor.anchorOffset),
+      targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
+    });
+    return true;
+  }
+
+  // No DOM match yet (target section not rendered): the ledger still knows the
+  // line's settled Y — park there instead of degrading to an image embed.
+  if (ledgerY >= 0) {
+    const targetY = textTargetY(ledgerY, 0, anchor.anchorOffset);
+    previewEl.scrollTop = targetY;
+    logger.info("VIEWPORT anchor-restored", {
+      mode: "preview", kind: "text-ledger-park-nomatch",
+      line: anchor.anchorLine, ledgerY: Math.round(ledgerY),
       targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
     });
     return true;

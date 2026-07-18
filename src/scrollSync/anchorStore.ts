@@ -15,6 +15,10 @@ export type ViewportAnchor =
       kind: "text";
       anchorText: string;    // trimmed source/rendered text of the anchor line
       anchorOffset: number;  // pixel distance from viewport top to the line top
+      anchorLine?: number;   // 1-based source line at capture (LP capture only).
+                             // Lets the RM restore park at the renderer height
+                             // ledger's Y for this line while the first-show
+                             // layout is still transient (DOM rects lie there).
       nearestImgBefore: number; // image-row index just above (0 if none)
       nearestImgAfter: number;  // image-row index just below (0 if none)
       docRatio: number;      // block top ÷ scroll height (0..1); -1 if unmeasurable.

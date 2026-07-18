@@ -72,3 +72,58 @@ export function nearestIndexBy(keys: number[], target: number): number {
   }
   return bestIdx;
 }
+
+/** Minimal shape of an Obsidian preview-renderer height-ledger entry
+ *  (renderer.sections). Line numbers are 0-based, matching getSectionInfo. */
+export interface LedgerSection {
+  lineStart: number;
+  lineEnd: number;
+  height: number;
+}
+
+/** Cumulative ledger Y (document-space top offset) for a 0-based source line:
+ *  the sum of section heights above the section containing the line. A line in
+ *  a blank gap between sections parks at the next section's top. Returns -1
+ *  when the line is past the last section or the ledger shape is unusable. */
+export function ledgerYForLine(sections: LedgerSection[], line0: number): number {
+  if (line0 < 0) return -1;
+  let y = 0;
+  for (const s of sections) {
+    if (typeof s?.lineEnd !== "number" || typeof s?.height !== "number") return -1;
+    if (line0 <= s.lineEnd) return y;
+    y += s.height > 0 ? s.height : 0;
+  }
+  return -1;
+}
+
+/** Estimate a 1-based line's document Y from bare section heights (no lineStart /
+ *  lineEnd on individual entries) by guessing which section index the line falls
+ *  in and summing the heights of preceding sections. Uses real measured heights
+ *  from a fully-rendered warmup snapshot, so it naturally tracks large image
+ *  sections — better than the flat line-ratio * totalHeight approximation. */
+export function sectionIndexEstimateY(
+  heights: number[], totalLines: number, line1: number,
+): number {
+  if (heights.length === 0 || totalLines <= 0 || line1 <= 0) return -1;
+  const line0 = line1 - 1;
+  const idx = Math.min(
+    Math.max(0, Math.floor((line0 / totalLines) * heights.length)),
+    heights.length - 1,
+  );
+  let y = 0;
+  for (let i = 0; i < idx; i++) {
+    y += heights[i] > 0 ? heights[i] : 0;
+  }
+  return y;
+}
+
+/** Total ledger height (sum of section heights). -1 on unusable shape. Used to
+ *  sanity-check the ledger against the live scrollHeight before trusting it. */
+export function ledgerTotalHeight(sections: LedgerSection[]): number {
+  let y = 0;
+  for (const s of sections) {
+    if (typeof s?.height !== "number") return -1;
+    y += s.height > 0 ? s.height : 0;
+  }
+  return y;
+}

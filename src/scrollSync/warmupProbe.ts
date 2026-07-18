@@ -1,5 +1,6 @@
 import { App } from "obsidian";
 import { logger } from "../logger";
+import { setSectionSnapshot } from "./scrollAnchor";
 
 // ── RM warm-up probe (TEMPORARY — delete after the experiment) ───────
 // Verifies the "pre-render the real previewMode in the background" plan:
@@ -122,6 +123,26 @@ function runWarmup(app: App): void {
   let setFallbackTried = false;
 
   const finish = (result: string) => {
+    // Snapshot the renderer's section heights while the override keeps layout
+    // alive (visibility:hidden still has computed geometry). This snapshot
+    // survives the display:none gap so the first real LP→RM switch can park
+    // at the correct Y before the renderer's re-measure cycle completes.
+    try {
+      const secs = pm?.renderer?.sections;
+      if (Array.isArray(secs) && secs.length > 0) {
+        const snap = secs.map((s: any) => ({
+          lineStart: s.lineStart, lineEnd: s.lineEnd, height: s.height,
+        }));
+        setSectionSnapshot(file, snap);
+        logger.debug("WARMUP snapshot captured", { sections: snap.length });
+      } else {
+        logger.debug("WARMUP snapshot skipped", {
+          hasSecs: Array.isArray(secs), len: Array.isArray(secs) ? secs.length : -1,
+        });
+      }
+    } catch (e) {
+      logger.debug("WARMUP snapshot failed", { error: String(e) });
+    }
     const ms = Math.round(performance.now() - t0);
     removeOverride();
     _active = false;
