@@ -1,5 +1,6 @@
 import { buildImageLineRe } from "./constants";
 import { logger } from "./logger";
+const log = logger.channel("imageDetector");
 
 export interface ImageEmbed {
   line: number;
@@ -88,7 +89,7 @@ export function detectImageGroups(
   const groups: ImageGroup[] = [];
   let currentGroup: ImageEmbed[] = [];
 
-  logger.debug("detectImageGroups start", {
+  log.debug("detectImageGroups start", {
     lineCount: lines.length,
     maxImagesPerRow,
     extensions,
@@ -118,7 +119,7 @@ export function detectImageGroups(
   }
   flushGroup();
 
-  logger.debug("detectImageGroups result", {
+  log.debug("detectImageGroups result", {
     groupCount: groups.length,
     groups: groups.map((g) => ({
       lineStart: g.lineStart,

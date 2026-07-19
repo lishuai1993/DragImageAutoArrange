@@ -5,6 +5,7 @@ import { ImageMeta } from "./imageDetector";
 import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights } from "./layoutEngine";
 import { alignmentToCSS } from "./utils";
 import { logger } from "./logger";
+const log = logger.channel("rmFlexRow");
 import { validateRowFlexGrows } from "./parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
@@ -189,7 +190,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   }
   const hasScale = scales.some((s) => s != null);
 
-  logger.debug("RM wrapAsFlexRow entry", {
+  log.debug("RM wrapAsFlexRow entry", {
     n: embeds.length,
     defaultAlignment: options.alignment,
     readAlignments: alignments.map(a => a ?? "(default)"),
@@ -255,7 +256,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     embed.style.setProperty("justify-content", ji, "important");
     embed.style.setProperty("align-items", "flex-start", "important");
 
-    logger.debug("RM wrapAsFlexRow item-style", {
+    log.debug("RM wrapAsFlexRow item-style", {
       i,
       fileName: getFileNameFromEmbed(embed),
       perImageAlign,
@@ -390,7 +391,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     const validatedGrows = validateRowFlexGrows(finalGrows, currentMetas, containerWidth, options.gap);
     for (let _i = 0; _i < finalGrows.length; _i++) finalGrows[_i] = validatedGrows[_i];
 
-    logger.debug("RM applySizes flexGrows", {
+    log.debug("RM applySizes flexGrows", {
       containerWidth,
       currentParsedGrows,
       curHasExplicit,
@@ -419,7 +420,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         }
       }
       row.style.height = `${maxH}px`;
-      logger.debug("RM applySizes scale-based heights", {
+      log.debug("RM applySizes scale-based heights", {
         maxH,
         heights,
       });
@@ -474,7 +475,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           }
           cur = cur.parentElement;
         }
-        logger.info("RM ROW render diagnostic", {
+        log.info("RM ROW render diagnostic", {
           n: embeds.length,
           rowSetH: row.style.height,
           rowRectH: Math.round(rowRect.height),
@@ -483,7 +484,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           clippers,
         });
       } catch (e) {
-        logger.warn("RM ROW render diagnostic error", { error: String(e) });
+        log.warn("RM ROW render diagnostic error", { error: String(e) });
       }
     };
     requestAnimationFrame(() => {
@@ -500,7 +501,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         const imgRect = img.getBoundingClientRect();
         const cs = getComputedStyle(img);
         const itemCS = getComputedStyle(embeds[0]);
-        logger.info("RM ROW1_IMG0 render snapshot", {
+        log.info("RM ROW1_IMG0 render snapshot", {
           containerW: Math.round(containerRect.width),
           containerH: Math.round(containerRect.height),
           itemW: Math.round(itemRect.width),
@@ -526,7 +527,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     }
 
     } catch (e) {
-      logger.error("RM applySizes error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      log.error("RM applySizes error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
     }
   };
 
@@ -576,7 +577,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     }
   }
   } catch (e) {
-    logger.error("RM wrapAsFlexRow error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+    log.error("RM wrapAsFlexRow error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
   }
 }
 
@@ -640,7 +641,7 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
   for (const embed of embeds) {
     const block = findBlockParent(embed);
     if (!block) {
-      logger.debug("ReadingMode makeDraggable skip: no block parent", {
+      log.debug("ReadingMode makeDraggable skip: no block parent", {
         embedTag: embed.tagName,
       });
       continue;
@@ -654,7 +655,7 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
     draggableCount++;
 
     block.addEventListener("dragstart", (e) => {
-      logger.debug("ReadingMode dragstart", { sourcePath });
+      log.debug("ReadingMode dragstart", { sourcePath });
       dragSrcEl = block;
       block.classList.add(CLASSES.dragging);
       e.dataTransfer!.effectAllowed = "move";
@@ -708,7 +709,7 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
       );
     });
   }
-  logger.debug("ReadingMode makeDraggable done", {
+  log.debug("ReadingMode makeDraggable done", {
     draggableCount,
     totalEmbeds: embeds.length,
   });
@@ -764,7 +765,7 @@ async function handleImageDrop(
 
     if (srcLine === dstLine) return content;
 
-    logger.info("ReadingMode drag-drop reorder", {
+    log.info("ReadingMode drag-drop reorder", {
       srcDomIdx,
       dstDomIdx,
       srcLine,

@@ -4,6 +4,7 @@
 // scrollAnchor.ts. See tests/viewportAnchor.test.ts.
 
 import { logger } from "../logger";
+const log = logger.channel("viewportAnchor");
 
 // ── Branded 1-based line number ─────────────────────────────────────
 // A plain `number` line can be 0-based (array index) or 1-based (source
@@ -82,7 +83,7 @@ function assertImageRowIndexInvariants(rows: ImageRowIndex[], lineCount: number)
       r.startLine <= prevEnd ||
       r.endLine > lineCount;
     if (bad) {
-      logger.warn("buildImageRowIndex invariant violated", {
+      log.warn("buildImageRowIndex invariant violated", {
         at: i,
         row: `${r.index}:${r.startLine}-${r.endLine}`,
         prevEnd,

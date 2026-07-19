@@ -3,6 +3,7 @@ import { ImageGroup, ImageEmbed, ImageMeta } from "./imageDetector";
 import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth } from "./layoutEngine";
 import { resolveImageSrc, alignmentToCSS } from "./utils";
 import { logger } from "./logger";
+const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "./parameterValidator";
 import { isSingleImageManual, singleImageScaleFor, formatSingleImageLine } from "./singleImageParams";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
@@ -347,7 +348,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    *                      the image content is narrower than the img element).
    */
   private applyAlignmentToAll(): void {
-    logger.debug("applyAlignmentToAll", {
+    log.debug("applyAlignmentToAll", {
       settingsAlignment: this.options.alignment,
       imageCount: this.imageEls.length,
     });
@@ -389,7 +390,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const imgClassBefore = img.className;
       stripObsidianClasses(img);
       const imgClassAfter = img.className;
-      logger.debug("applyAlignmentToAll per-image", {
+      log.debug("applyAlignmentToAll per-image", {
         index: i,
         perImageAlign,
         settingsAlignment: this.options.alignment,
@@ -415,7 +416,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           const rect = img.getBoundingClientRect();
           const itemRect = this.itemEls[i]?.getBoundingClientRect();
           const meta = this.loadedMetas.get(i);
-          logger.debug("applyAlignmentToAll COMPUTED check", {
+          log.debug("applyAlignmentToAll COMPUTED check", {
             index: i,
             settingsAlignment: this.options.alignment,
             inlineOP: img.style.objectPosition,
@@ -439,7 +440,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    * Create and return the root DOM element.
    */
   build(currentEditorWidth?: number): HTMLElement {
-    logger.debug("ImageRowWidget build", {
+    log.debug("ImageRowWidget build", {
       imageCount: this.group.images.length,
       files: this.group.images.map((i) => i.fileName),
       options: {
@@ -487,7 +488,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.container.addEventListener("dblclick", (e) => {
       const rect = this.container!.getBoundingClientRect();
       const offsetY = e.clientY - rect.top;
-      logger.debug("BALANCE topBar dblclick received", {
+      log.debug("BALANCE topBar dblclick received", {
         clientY: e.clientY,
         containerTop: rect.top,
         offsetY,
@@ -593,7 +594,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           this.itemEls[i].style.height = scaleH(cached.itemHs[i]);
         }
         this.container.style.height = scaleH(cached.containerH);
-        logger.debug("ImageRowWidget restored cached rendered sizes", {
+        log.debug("ImageRowWidget restored cached rendered sizes", {
           containerH: cached.containerH,
           itemHs: cached.itemHs,
           cachedAtWidth: cached.atWidth,
@@ -675,7 +676,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.style.height = "100%";
     img.style.objectFit = "contain";
     img.style.setProperty("object-position", this.getObjectPosition(index), "important");
-    logger.debug("buildImageItem object-position", {
+    log.debug("buildImageItem object-position", {
       index,
       file: image.fileName,
       settingsAlignment: this.options.alignment,
@@ -688,7 +689,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const handleLoad = () => {
       const nw = img.naturalWidth;
       const nh = img.naturalHeight;
-      logger.debug("ImageRowWidget img onload", { index, file: image.fileName, naturalWidth: nw, naturalHeight: nh, complete: img.complete });
+      log.debug("ImageRowWidget img onload", { index, file: image.fileName, naturalWidth: nw, naturalHeight: nh, complete: img.complete });
       this.loadedMetas.set(index, { naturalWidth: nw, naturalHeight: nh });
       this.applyLayout();
       requestAnimationFrame(() => this.updateHandlePositions(index));
@@ -697,7 +698,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.onload = handleLoad;
 
     img.onerror = () => {
-      logger.warn("Image load failed in widget", { fileName: image.fileName, index, src: img.src.substring(0, 80) });
+      log.warn("Image load failed in widget", { fileName: image.fileName, index, src: img.src.substring(0, 80) });
       this.loadedMetas.set(index, { naturalWidth: 400, naturalHeight: 300 });
       img.style.backgroundColor = "#f0f0f0";
       img.alt = `[Not found: ${image.fileName}]`;
@@ -710,7 +711,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // onload despite being set before src (Electron/Chromium edge case),
     // handle it here.
     if (img.complete && img.naturalWidth > 0) {
-      logger.debug("ImageRowWidget img already complete", { index, file: image.fileName, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+      log.debug("ImageRowWidget img already complete", { index, file: image.fileName, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
       handleLoad();
     }
 
@@ -754,7 +755,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           const before = t.className;
           stripObsidianClasses(t);
           if (before !== t.className) {
-            logger.debug("MutationObserver stripped Obsidian classes", {
+            log.debug("MutationObserver stripped Obsidian classes", {
               index,
               before,
               after: t.className,
@@ -767,7 +768,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           const imgEl = t as HTMLImageElement;
           const itemH = item.style.height;
           if (itemH && imgEl.style.height !== itemH) {
-            logger.debug("MutationObserver restoring img height from item", {
+            log.debug("MutationObserver restoring img height from item", {
               index,
               obsidianSet: imgEl.style.height,
               restored: itemH,
@@ -786,7 +787,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Diagnostic: log img class right after DOM insertion to detect if
     // Obsidian's MutationObserver has already wrapped/re-classed it.
-    logger.debug("buildImageItem post-append", {
+    log.debug("buildImageItem post-append", {
       index,
       file: image.fileName,
       imgClass: img.className,
@@ -845,7 +846,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Also log computed styles on the img and item directly
     const imgCS = getComputedStyle(img);
     const itemCS = getComputedStyle(item);
-    logger.debug("getImageContentRect ANCESTOR CHAIN", {
+    log.debug("getImageContentRect ANCESTOR CHAIN", {
       index,
       imgComputedDisplay: imgCS.display,
       imgComputedJustify: imgCS.justifyContent,
@@ -890,7 +891,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       width: contentRect.width,
       height: contentRect.height,
     };
-    logger.debug("getImageContentRect", {
+    log.debug("getImageContentRect", {
       index,
       itemW: item.clientWidth,
       itemH: item.clientHeight,
@@ -944,7 +945,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const firstHandle = defs[0]?.el;
     const hCS = firstHandle ? getComputedStyle(firstHandle) : null;
     const hRect = firstHandle?.getBoundingClientRect();
-    logger.debug("updateHandlePositions", {
+    log.debug("updateHandlePositions", {
       index,
       // Our computed content rect (target)
       rectLeft: rect.left,
@@ -1077,7 +1078,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
 
     const allLoaded = metas.every((m) => m.naturalWidth > 0);
-    logger.debug("ImageRowWidget applyLayout", { allLoaded, hasExplicitWidth: this.group.images.some((img) => img.hasExplicitWidth), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
+    log.debug("ImageRowWidget applyLayout", { allLoaded, hasExplicitWidth: this.group.images.some((img) => img.hasExplicitWidth), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
 
     if (allLoaded) {
       // ── Restore preserved multi-image dimensions first (before any
@@ -1120,7 +1121,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           // Don't delete the entry — it acts as a lock preventing subsequent
           // applyLayout/recalculateRowHeight calls from overwriting with uniform heights.
           // It will be overwritten by the next destroy() when the widget is torn down.
-          logger.debug("ImageRowWidget layout restored from preserved", {
+          log.debug("ImageRowWidget layout restored from preserved", {
             preservedSizes: preserved.images.map((pi) => `${pi.styleW}x${pi.styleH}`),
           });
           this.applyAlignmentToAll();
@@ -1161,7 +1162,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // ── Single-image row ──
       if (this.group.images.length === 1 && this.imageEls[0] && this.itemEls[0]) {
         const imageH = this.layoutSingleImage(containerWidth);
-        logger.debug("ImageRowWidget layout applied (single)", {
+        log.debug("ImageRowWidget layout applied (single)", {
           containerWidth, imageH,
           alignment: this.options.alignment,
           manual: isSingleImageManual(this.group.images[0].scale),
@@ -1226,7 +1227,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         this.imageEls[i].style.width = "auto";
       }
 
-      logger.debug("ImageRowWidget layout applied", {
+      log.debug("ImageRowWidget layout applied", {
         containerWidth,
         rowHeight: result.rowHeight,
         flexGrows: grows,
@@ -1249,7 +1250,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       this.container.style.height = cachedH || `${this.options.defaultRowHeight}px`;
     }
     } catch (e) {
-      logger.error("ImageRowWidget applyLayout error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      log.error("ImageRowWidget applyLayout error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
       this.applyUniformFallback();
     }
   }
@@ -1370,7 +1371,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const _beforeImgH = this.imageEls.map(el => el.style.height);
     const _beforeFlexG = this.itemEls.map(el => el.style.flexGrow);
     const _beforeContainerH = this.container.style.height;
-    logger.debug("BALANCE recalculateRowHeight entry", {
+    log.debug("BALANCE recalculateRowHeight entry", {
       hasContainer: !!this.container,
       itemCount: this.itemEls.length,
       containerWidth,
@@ -1403,7 +1404,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         const el = this.container?.closest(sel) as HTMLElement | null;
         return el ? Math.round(el.getBoundingClientRect().width) : -1;
       };
-      logger.info("FLICKER_DIAG transient@recalc", {
+      log.info("FLICKER_DIAG transient@recalc", {
         lineStart: this.group.lineStart,
         imageCount: this.imageEls.length,
         containerRectW: Math.round(cRect.width),
@@ -1444,7 +1445,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     );
     this.rowHeight = clamped;
 
-    logger.debug("ImageRowWidget recalculateRowHeight", { containerWidth, rawInlineFlexGrow: this.itemEls.map(el => el.style.flexGrow), parsedGrows: grows, imageCount: n, clampedRowHeight: clamped });
+    log.debug("ImageRowWidget recalculateRowHeight", { containerWidth, rawInlineFlexGrow: this.itemEls.map(el => el.style.flexGrow), parsedGrows: grows, imageCount: n, clampedRowHeight: clamped });
 
     // ── Auto-fill missing flexGrow for images without |width in markdown ──
     // When some images have explicit |width and others don't (e.g. after
@@ -1478,7 +1479,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
               this.group.images[i].flexGrow = grows[i];
             }
           }
-          logger.debug("ImageRowWidget autoFillMissingFlexGrow", {
+          log.debug("ImageRowWidget autoFillMissingFlexGrow", {
             originalGrows: this.itemEls.map(el => el.style.flexGrow).slice(0, n),
             adjustedGrows: grows,
             explicitSum,
@@ -1536,7 +1537,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         this.itemEls[i].style.height = hPx;
       }
       this.container.style.height = `${maxH}px`;
-      logger.debug("ImageRowWidget scale-based heights restored", {
+      log.debug("ImageRowWidget scale-based heights restored", {
         scales: this.group.images.map((img) => Math.round((img.scale ?? 0) * 100)),
         heights: this.imageEls.map((el) => el.style.height),
         containerH: `${maxH}px`,
@@ -1574,7 +1575,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
     const layoutChanged = _diffs.length > 0 || _beforeContainerH !== _afterContainerH;
     if (layoutChanged) {
-      logger.debug("BALANCE recalculateRowHeight DIMENSION CHANGES", {
+      log.debug("BALANCE recalculateRowHeight DIMENSION CHANGES", {
         diffs: _diffs,
         containerH: `${_beforeContainerH} → ${_afterContainerH}`,
       });
@@ -1604,7 +1605,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
     requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } catch (e) {
-      logger.error("ImageRowWidget recalculateRowHeight error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      log.error("ImageRowWidget recalculateRowHeight error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
       // Leave current DOM unchanged on error.
     }
   }
@@ -1631,7 +1632,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         scale: this.group.images[i]?.scale ?? null,
       };
     });
-    logger.info("RENDER_COMPARE " + mode, {
+    log.info("RENDER_COMPARE " + mode, {
       containerRect: { x: Math.round(containerRect.x), y: Math.round(containerRect.y), w: Math.round(containerRect.width), h: Math.round(containerRect.height) },
       containerStyle: { height: containerStyle.height, justifyContent: containerStyle.justifyContent },
       alignment: this.options.alignment,
@@ -1643,7 +1644,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    * Double-click on divider: snap the two adjacent images to equal heights.
    */
   snapDividerToEquilibrium(leftIndex: number): void {
-    logger.debug("BALANCE snapDividerToEquilibrium entry", {
+    log.debug("BALANCE snapDividerToEquilibrium entry", {
       leftIndex,
       loadedMetasSize: this.loadedMetas.size,
       itemElsLength: this.itemEls.length,
@@ -1652,7 +1653,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const lm = this.loadedMetas.get(leftIndex);
     const rm = this.loadedMetas.get(leftIndex + 1);
     if (!lm || !rm || lm.naturalWidth === 0 || rm.naturalWidth === 0) {
-      logger.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: metas not ready", {
+      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: metas not ready", {
         hasLm: !!lm,
         hasRm: !!rm,
         lmNaturalW: lm?.naturalWidth,
@@ -1664,7 +1665,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const leftItem = this.itemEls[leftIndex];
     const rightItem = this.itemEls[leftIndex + 1];
     if (!leftItem || !rightItem) {
-      logger.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: items missing");
+      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: items missing");
       return;
     }
 
@@ -1719,12 +1720,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore per-image heights for unaffected images.
-    logger.debug("BALANCE snapDividerToEquilibrium calling persistCallback", {
+    log.debug("BALANCE snapDividerToEquilibrium calling persistCallback", {
       hasPersist: !!this.persistCallback,
     });
     this.persistCallback?.();
 
-    logger.info("Divider dblclick snap to equilibrium", {
+    log.info("Divider dblclick snap to equilibrium", {
       leftIndex,
       total,
       snapLeft: left,
@@ -1739,12 +1740,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    */
   private snapAllToEquilibrium(): void {
     const n = this.itemEls.length;
-    logger.debug("BALANCE snapAllToEquilibrium entry", {
+    log.debug("BALANCE snapAllToEquilibrium entry", {
       imageCount: n,
       loadedMetasSize: this.loadedMetas.size,
     });
     if (n < 2) {
-      logger.debug("BALANCE snapAllToEquilibrium GUARD FAIL: n < 2");
+      log.debug("BALANCE snapAllToEquilibrium GUARD FAIL: n < 2");
       return;
     }
 
@@ -1753,7 +1754,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     for (let i = 0; i < n; i++) {
       const meta = this.loadedMetas.get(i);
       if (!meta || meta.naturalWidth === 0) {
-        logger.debug("BALANCE snapAllToEquilibrium GUARD FAIL: meta not ready", {
+        log.debug("BALANCE snapAllToEquilibrium GUARD FAIL: meta not ready", {
           index: i,
           hasMeta: !!meta,
           naturalW: meta?.naturalWidth,
@@ -1800,12 +1801,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore the uniform heights correctly.
-    logger.debug("BALANCE snapAllToEquilibrium calling persistCallback", {
+    log.debug("BALANCE snapAllToEquilibrium calling persistCallback", {
       hasPersist: !!this.persistCallback,
     });
     this.persistCallback?.();
 
-    logger.info("Top bar dblclick global snap", { totalGrow, grows });
+    log.info("Top bar dblclick global snap", { totalGrow, grows });
   }
 
   /**
@@ -1815,13 +1816,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Skip if unchanged to avoid unnecessary reflow + onLayoutChange feedback loop.
     if (this.flexGrows.length === grows.length &&
         this.flexGrows.every((g, i) => g === grows[i])) {
-      logger.debug("BALANCE updateFlexGrows SKIPPED (unchanged)", {
+      log.debug("BALANCE updateFlexGrows SKIPPED (unchanged)", {
         flexGrows: this.flexGrows,
         incoming: grows,
       });
       return;
     }
-    logger.debug("BALANCE updateFlexGrows applying", {
+    log.debug("BALANCE updateFlexGrows applying", {
       oldFlexGrows: this.flexGrows,
       newFlexGrows: grows,
       currentDOM: this.itemEls.map(el => el.style.flexGrow),

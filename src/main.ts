@@ -7,12 +7,18 @@ import {
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
 import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore, clearSectionSnapshot } from "./scrollSync/scrollAnchor";
-import { scheduleWarmupProbe, cancelWarmupProbe } from "./scrollSync/warmupProbe";
+import { runWarmup, cancelWarmupProbe } from "./scrollSync/warmupProbe";
+import {
+  registerWarmupRunner, installUserActivityListener,
+  requestP0Warmup, requestGlobalWarmup, cancelAllWarmups,
+  recordRMSwitch, scheduleIdleWarmup,
+} from "./scrollSync/warmupScheduler";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { showImageAlignmentMenu } from "./alignmentContextMenu";
 import { logger } from "./logger";
+const log = logger.channel("main");
 
 export default class DragImageAutoArrangePlugin
   extends Plugin
@@ -43,7 +49,17 @@ export default class DragImageAutoArrangePlugin
       this.app.vault.adapter,
       ".obsidian/plugins/obsidian-DragImageAutoArrange/log.txt"
     );
-    logger.info("Plugin loading", { version: this.manifest.version });
+    log.info("Plugin loading", { version: this.manifest.version });
+
+    // ── Log filter: only these channels write to log.txt ─────────────
+    // Comment out to write all channels, or adjust the list to focus on
+    // the module you're currently debugging.
+    logger.setFileOutputFilter([
+      "main",
+      "scrollAnchor",
+      "warmupProbe",
+      "warmupScheduler",
+    ]);
 
     // ── Per-image alignment context menu ──────────────────────────────
     // Registered at document level in capture phase so it runs BEFORE any
@@ -80,9 +96,9 @@ export default class DragImageAutoArrangePlugin
     const rawData = await this.loadData();
     if (rawData?.preservedSizes) {
       importPreservedSizes(rawData.preservedSizes);
-      logger.info("Preserved multi-image sizes restored from previous session");
+      log.info("Preserved multi-image sizes restored from previous session");
     }
-    logger.info("Settings loaded", {
+    log.info("Settings loaded", {
       enabled: this.settings.enabled,
       maxImagesPerRow: this.settings.maxImagesPerRow,
       defaultRowHeight: this.settings.defaultRowHeight,
@@ -105,7 +121,7 @@ export default class DragImageAutoArrangePlugin
         () => this.settings.enabled
       )
     );
-    logger.info("Reading Mode processor registered");
+    log.info("Reading Mode processor registered");
 
     // Flush buffered RM alignment changes and drive cross-mode scroll
     // restore when the user switches views (RM ↔ LP).
@@ -122,15 +138,46 @@ export default class DragImageAutoArrangePlugin
     // on unload.
     this.register(installEarlyModeSwitchRestore(this.app));
 
-    // Warm-up probe (TEMPORARY, see warmupProbe.ts): background-render the
-    // real previewMode shortly after a tab opens in LP, so the first real
-    // LP→RM switch takes the hot path. Triggered on layout-ready (restored
-    // tabs after restart) and on every file-open.
-    this.app.workspace.onLayoutReady(() => scheduleWarmupProbe(this.app));
+    // ── Global warmup scheduler ──────────────────────────────────────
+    registerWarmupRunner(runWarmup);
+    this.register(installUserActivityListener());
+
+    // P0: warm active tab after layout settles (restored tabs after restart).
+    this.app.workspace.onLayoutReady(() => {
+      const file = this.app.workspace.getActiveFile()?.path ?? "";
+      requestP0Warmup(this.app, file);
+      // P1/P2: queue the remaining tabs after a short delay (let P0 settle first).
+      setTimeout(() => requestGlobalWarmup(this.app), 3000);
+    });
+
+    // P0: warm every newly-opened file immediately.
     this.registerEvent(
-      this.app.workspace.on("file-open", () => scheduleWarmupProbe(this.app))
+      this.app.workspace.on("file-open", (file) => {
+        if (file) requestP0Warmup(this.app, file.path);
+      })
     );
-    this.register(() => cancelWarmupProbe());
+
+    // Track RM switch frequency for P1 prioritisation.
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => {
+        const mode = (this.app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
+        const file = this.app.workspace.getActiveFile()?.path ?? "";
+        if (mode === "preview" && file) recordRMSwitch(file);
+      })
+    );
+
+    // Idle warmup: re-warm after 10s of inactivity following an edit.
+    this.registerEvent(
+      this.app.workspace.on("editor-change", (_editor, info) => {
+        const path = (info as any)?.file?.path;
+        if (path) scheduleIdleWarmup(this.app, path);
+      })
+    );
+
+    this.register(() => {
+      cancelWarmupProbe();
+      cancelAllWarmups();
+    });
 
     // Invalidate the cached image-row index when the LP document changes.
     // ensureImageRowIndexFromCM only builds the index on a cache miss, so
@@ -151,7 +198,7 @@ export default class DragImageAutoArrangePlugin
         () => this.settings.enabled
       )
     );
-    logger.info("Live Preview extension registered");
+    log.info("Live Preview extension registered");
 
     // Standalone line drop handler (flex row → standalone)
     this.registerEditorExtension(
@@ -160,14 +207,14 @@ export default class DragImageAutoArrangePlugin
         () => this.settings.enabled
       )
     );
-    logger.info("Standalone drop plugin registered");
+    log.info("Standalone drop plugin registered");
 
     // Command: rescan image groups
     this.addCommand({
       id: "rescan-image-groups",
       name: "Rescan image groups in current note",
       editorCallback: (_editor, view) => {
-        logger.info("Command: rescan-image-groups");
+        log.info("Command: rescan-image-groups");
         if (view instanceof MarkdownView && view.previewMode) {
           view.previewMode.rerender(true);
         } else {
@@ -182,7 +229,7 @@ export default class DragImageAutoArrangePlugin
       name: "Toggle image auto-arrange (on/off)",
       callback: async () => {
         this.settings.enabled = !this.settings.enabled;
-        logger.info("Command: toggle-image-arrange", {
+        log.info("Command: toggle-image-arrange", {
           newValue: this.settings.enabled,
         });
         await this.saveSettings();
@@ -194,11 +241,11 @@ export default class DragImageAutoArrangePlugin
       },
     });
 
-    logger.info("Plugin loaded successfully");
+    log.info("Plugin loaded successfully");
   }
 
   async onunload(): Promise<void> {
-    logger.info("Plugin unloading");
+    log.info("Plugin unloading");
     await logger.dispose();
   }
 
@@ -240,7 +287,7 @@ export default class DragImageAutoArrangePlugin
         leaf.view.previewMode.rerender(true);
       }
     });
-    logger.info("Command: reset all single images to current setting");
+    log.info("Command: reset all single images to current setting");
   }
 
   resetAllImageAlignments(): void {
@@ -258,7 +305,7 @@ export default class DragImageAutoArrangePlugin
         leaf.view.previewMode.rerender(true);
       }
     });
-    logger.info("Command: reset all image alignments to current setting");
+    log.info("Command: reset all image alignments to current setting");
   }
 
   private buildImageRowOptions(): ImageRowOptions {
@@ -281,7 +328,7 @@ export default class DragImageAutoArrangePlugin
       getResourcePath: (fileName: string) => {
         const url = this.resolveImagePath(fileName, sourcePath);
         if (!url) {
-          logger.debug("Image not found in vault", { fileName, sourcePath });
+          log.debug("Image not found in vault", { fileName, sourcePath });
         }
         return url;
       },

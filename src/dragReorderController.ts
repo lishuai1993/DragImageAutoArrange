@@ -1,6 +1,7 @@
 import { CLASSES } from "./constants";
 import { computeDividerXPositions, findClosestDividerIndex } from "./layoutEngine";
 import { logger } from "./logger";
+const log = logger.channel("dragReorder");
 import { createDragGhost } from "./rowRenderer";
 
 /**
@@ -62,7 +63,7 @@ export class DragReorderController {
         const cleanupGhost = createDragGhost(this.host.getImageEls()[i], e, this.host.getGhostImageWidth());
         item.addEventListener("dragend", cleanupGhost, { once: true });
 
-        logger.info("ImageRowWidget dragstart", {
+        log.info("ImageRowWidget dragstart", {
           index: i,
           groupLineStart: this.host.getGroupLineStart(),
           payload,
@@ -96,7 +97,7 @@ export class DragReorderController {
         this.hideDividerHint();
 
         const data = e.dataTransfer!.getData("text/plain");
-        logger.debug("ImageRowWidget item ondrop", { i, data: data?.substring(0, 60) });
+        log.debug("ImageRowWidget item ondrop", { i, data: data?.substring(0, 60) });
 
         if (!data) return;
 
@@ -118,14 +119,14 @@ export class DragReorderController {
           }
 
           // Inter-row: move from another flex row into this one
-          logger.info("ImageRowWidget inter-row merge", { i, insertAt, srcLineStart, srcIndex });
+          log.info("ImageRowWidget inter-row merge", { i, insertAt, srcLineStart, srcIndex });
           this.host.emitMergeExternal(insertAt, data);
           return;
         }
 
         // Standalone source: diaa-standalone:<line> (intercepted) or obsidian://open URI
         if (data.startsWith("diaa-standalone:") || data.startsWith("obsidian://open")) {
-          logger.info("ImageRowWidget cross-row merge from standalone", { i, insertAt, data: data.substring(0, 60) });
+          log.info("ImageRowWidget cross-row merge from standalone", { i, insertAt, data: data.substring(0, 60) });
           this.host.emitMergeExternal(insertAt, data);
         }
       };
@@ -153,7 +154,7 @@ export class DragReorderController {
       e.preventDefault();
       this.hideDividerHint();
       const data = e.dataTransfer!.getData("text/plain");
-      logger.debug("ImageRowWidget container ondrop", { data: data?.substring(0, 60) });
+      log.debug("ImageRowWidget container ondrop", { data: data?.substring(0, 60) });
       if (!data) return;
 
       const rowMatch = data.match(/^diaa-row:(\d+):(\d+)$/);
@@ -169,7 +170,7 @@ export class DragReorderController {
           if (srcIndex !== toIndex) this.host.emitReorder(srcIndex, toIndex);
           return;
         }
-        logger.info("ImageRowWidget cross-row merge (container)", { insertAt });
+        log.info("ImageRowWidget cross-row merge (container)", { insertAt });
         this.host.emitMergeExternal(insertAt, data);
         return;
       }
@@ -177,7 +178,7 @@ export class DragReorderController {
       const isStandalone = data.startsWith("diaa-standalone:") || data.startsWith("obsidian://open");
       if (isStandalone) {
         const insertAt = this.getInsertAt(e.clientX);
-        logger.info("ImageRowWidget cross-row merge (container)", { insertAt });
+        log.info("ImageRowWidget cross-row merge (container)", { insertAt });
         this.host.emitMergeExternal(insertAt, data);
       }
     });

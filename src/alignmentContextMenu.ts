@@ -5,6 +5,7 @@
  */
 
 import { logger } from "./logger";
+const log = logger.channel("alignmentCtx");
 
 // ── Global singleton state for cleanup ──
 let activeEls: HTMLElement[] = [];
@@ -22,7 +23,7 @@ export function showImageAlignmentMenu(
   currentAlignment: "left" | "center" | "right" | undefined,
   onAlign: (alignment: "left" | "center" | "right" | undefined) => void
 ): void {
-  logger.info("CTXMENU showImageAlignmentMenu called", { currentAlignment, x: event.clientX, y: event.clientY });
+  log.info("CTXMENU showImageAlignmentMenu called", { currentAlignment, x: event.clientX, y: event.clientY });
   closeAll();
 
   // ── Styles matching Obsidian's native menu ──
@@ -140,7 +141,7 @@ export function showImageAlignmentMenu(
   });
 
   document.body.appendChild(main);
-  logger.info("CTXMENU menu appended", { connected: main.isConnected });
+  log.info("CTXMENU menu appended", { connected: main.isConnected });
 
   // ── Global cleanup listeners ──
   const onClickOutside = (e: MouseEvent) => {

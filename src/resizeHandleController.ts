@@ -1,6 +1,7 @@
 import { CLASSES, RESIZE_HANDLE_SIZE } from "./constants";
 import { ImageMeta } from "./imageDetector";
 import { logger } from "./logger";
+const log = logger.channel("resize");
 
 export interface HandleDef {
   el: HTMLElement;
@@ -97,7 +98,7 @@ export class ResizeHandleController {
         try {
         dragging = true;
         item.classList.add(CLASSES.resizing);
-        logger.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
+        log.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
         e.preventDefault();
         e.stopPropagation();
 
@@ -127,7 +128,7 @@ export class ResizeHandleController {
         for (let j = 0; j < nItems; j++) {
           const itemH = this.host.getItemEls()[j].style.height;
           if (itemH && itemH !== this.host.getImageEls()[j].style.height) {
-            logger.debug("resize-mousedown syncing img height to item", {
+            log.debug("resize-mousedown syncing img height to item", {
               index: j,
               itemH,
               imgHBefore: this.host.getImageEls()[j].style.height,
@@ -143,7 +144,7 @@ export class ResizeHandleController {
           const h = parseFloat(this.host.getItemEls()[j].style.height || "0");
           startItemHeights[j] = h > 0 ? h : startHeight;
         }
-        logger.debug("resize-mousedown snapshot", {
+        log.debug("resize-mousedown snapshot", {
           index,
           startItemHeights: [...startItemHeights],
           itemStyleH: this.host.getItemEls().map(el => el.style.height),
@@ -221,7 +222,7 @@ export class ResizeHandleController {
             // recalculated before CodeMirror's dispatch reads it.
             void this.host.getContainer()!.offsetHeight;
             this.host.updateHandlePositions(0);
-            logger.debug("resize-mousemove (single)", {
+            log.debug("resize-mousemove (single)", {
               newHeight, fillWidthH, zoom: newHeight > fillWidthH,
               containerH: this.host.getContainer()!.getBoundingClientRect().height,
             });
@@ -272,7 +273,7 @@ export class ResizeHandleController {
             }
           }
           if (mismatches.length > 0) {
-            logger.warn("resize-mousemove image/item mismatch (clipping risk)", {
+            log.warn("resize-mousemove image/item mismatch (clipping risk)", {
               activeIndex: index,
               targetImageH,
               containerH,
@@ -282,7 +283,7 @@ export class ResizeHandleController {
           }
           this.host.notifyLayoutChange();
           } catch (err) {
-            logger.error("ImageRowWidget resize mousemove error", { error: String(err) });
+            log.error("ImageRowWidget resize mousemove error", { error: String(err) });
             // Silently terminate the drag and clean up listeners.
             dragging = false;
             item.classList.remove(CLASSES.resizing);
@@ -310,7 +311,7 @@ export class ResizeHandleController {
             if (itemRect.width > 0 && contentRect && contentRect.width > 0) {
               const scale = contentRect.width / itemRect.width;
               this.host.setImageScale(index, scale);
-              logger.debug("resize-mouseup scale saved", {
+              log.debug("resize-mouseup scale saved", {
                 index,
                 scale: Math.round(scale * 100),
                 contentW: Math.round(contentRect.width),
@@ -326,21 +327,21 @@ export class ResizeHandleController {
             const contentRect = this.host.getImageContentRect(0);
             if (!isZoom && contentRect && contentRect.width > 0) {
               this.host.setSingleImageWidth(Math.round(contentRect.width));
-              logger.debug("resize-mouseup single width saved", {
+              log.debug("resize-mouseup single width saved", {
                 widthPx: Math.round(contentRect.width),
               });
             }
           }
 
           const finalFlex = parseFloat(item.style.flexGrow || "1");
-          logger.debug("resize-mouseup", { index, finalFlex, nItems, timestamp: Date.now() });
+          log.debug("resize-mouseup", { index, finalFlex, nItems, timestamp: Date.now() });
           this.host.emitResizeEnd(index, finalFlex);
           document.removeEventListener("mousemove", currentOnMove!);
           document.removeEventListener("mouseup", currentOnUp!);
           currentOnMove = null;
           currentOnUp = null;
           } catch (err) {
-            logger.error("ImageRowWidget resize mouseup error", { error: String(err) });
+            log.error("ImageRowWidget resize mouseup error", { error: String(err) });
             if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
             if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
             currentOnMove = null;
@@ -351,7 +352,7 @@ export class ResizeHandleController {
         document.addEventListener("mousemove", currentOnMove);
         document.addEventListener("mouseup", currentOnUp, { once: true });
         } catch (err) {
-          logger.error("ImageRowWidget resize mousedown error", { error: String(err) });
+          log.error("ImageRowWidget resize mousedown error", { error: String(err) });
           dragging = false;
           item.classList.remove(CLASSES.resizing);
         }

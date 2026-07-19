@@ -1,5 +1,6 @@
 import { App } from "obsidian";
 import { logger } from "./logger";
+const log = logger.channel("rmAlignStore");
 
 // ── Pending alignment store ─────────────────────────────────────────
 // RM alignment changes are buffered here and only flushed to the
@@ -21,7 +22,7 @@ export function storePendingAlignment(
 ): void {
   const key = pendingKey(sourcePath, fileName);
   _pendingAlignments.set(key, alignment);
-  logger.debug("ALIGN store-pending", { key, alignment, size: _pendingAlignments.size });
+  log.debug("ALIGN store-pending", { key, alignment, size: _pendingAlignments.size });
 }
 
 export function getPendingAlignmentCount(): number {
@@ -87,10 +88,10 @@ export function flushPendingAlignments(app: App): Set<string> {
   for (const [sourcePath, entries] of byFile) {
     const editorView = findEditorViewForFile(app, sourcePath);
     if (!editorView) {
-      logger.warn("ALIGN flush skip: no editorView", { sourcePath, entries: entries.length });
+      log.warn("ALIGN flush skip: no editorView", { sourcePath, entries: entries.length });
       continue;
     }
-    logger.debug("ALIGN flush file", { sourcePath, entries: entries.length });
+    log.debug("ALIGN flush file", { sourcePath, entries: entries.length });
 
     const changes: Array<{ from: number; to: number; insert: string }> = [];
     const doc = editorView.state.doc;

@@ -21,6 +21,7 @@ import { DragImageSettings } from "./settings";
 import { CLASSES } from "./constants";
 import { computeFlexGrowsFromWidths } from "./layoutEngine";
 import { logger } from "./logger";
+const log = logger.channel("livePreview");
 import { clampFlexGrow, clampScale } from "./parameterValidator";
 import { isSingleImageManual, formatSingleImageLine, normalizeSingleImageParams } from "./singleImageParams";
 import { createDragGhost } from "./rowRenderer";
@@ -49,7 +50,7 @@ function findStandaloneImageLine(
     const fileName = filePath.split("/").pop();
     if (!fileName) return null;
 
-    logger.debug("findStandaloneImageLine parsing URI", {
+    log.debug("findStandaloneImageLine parsing URI", {
       encodedPath,
       fileName,
     });
@@ -66,13 +67,13 @@ function findStandaloneImageLine(
       const lineText = doc.line(i).text;
       // Check if this line references the same file
       if (lineText.includes(fileName) && /^[\s]*!\[\[/.test(lineText)) {
-        logger.debug("findStandaloneImageLine found", { line: i - 1, lineText: lineText.substring(0, 60) });
+        log.debug("findStandaloneImageLine found", { line: i - 1, lineText: lineText.substring(0, 60) });
         return i - 1; // 0-indexed
       }
     }
     return null;
   } catch (e) {
-    logger.error("findStandaloneImageLine error", { error: String(e) });
+    log.error("findStandaloneImageLine error", { error: String(e) });
     return null;
   }
 }
@@ -140,7 +141,7 @@ function moveLine(view: EditorView, srcLine: number, targetLine: number): void {
 
   const insert = originalLines.join("\n") + (hadTrailingNewline ? "\n" : "");
 
-  logger.info("LivePreview moveLine", {
+  log.info("LivePreview moveLine", {
     srcLine, targetLine, minLine, maxLine,
     fromPos, toPos,
     lineCount: originalLines.length + 1,
@@ -277,7 +278,7 @@ class StaticImageRowWidget extends WidgetType {
     super();
     this.group = group;
     this.options = options;
-    logger.debug("StaticImageRowWidget constructed", {
+    log.debug("StaticImageRowWidget constructed", {
       imageCount: group.images.length,
       lineStart: group.lineStart,
       lineEnd: group.lineEnd,
@@ -315,14 +316,14 @@ class StaticImageRowWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     try {
-      logger.info("SCROLL_DIAG widget build (toDOM)", {
+      log.info("SCROLL_DIAG widget build (toDOM)", {
         lineStart: this.group.lineStart,
         lineEnd: this.group.lineEnd,
         imageCount: this.group.images.length,
         raws: this.group.images.map((i) => i.raw.slice(0, 40)),
         sidebars: getSidebarWidths(),
       });
-      logger.debug("StaticImageRowWidget toDOM", {
+      log.debug("StaticImageRowWidget toDOM", {
         imageCount: this.group.images.length,
         files: this.group.images.map((i) => i.fileName),
       });
@@ -346,7 +347,7 @@ class StaticImageRowWidget extends WidgetType {
       this.innerWidget.onLayoutChange = () => {
         const view = this.editorView;
         if (!view) return;
-        logger.debug("StaticImageRowWidget onLayoutChange → forceLayoutRefresh", {
+        log.debug("StaticImageRowWidget onLayoutChange → forceLayoutRefresh", {
           hasView: !!view,
           version: version + 1,
         });
@@ -375,7 +376,7 @@ class StaticImageRowWidget extends WidgetType {
       this.innerWidget.onPersist(() => {
         if (!this.editorView) return;
         const images = this.group.images;
-        logger.info("SCROLL_DIAG persist fired", {
+        log.info("SCROLL_DIAG persist fired", {
           lineStart: this.group.lineStart,
           imageCount: images.length,
         });
@@ -386,7 +387,7 @@ class StaticImageRowWidget extends WidgetType {
         }
         const grows = this.innerWidget!.getCurrentFlexGrows().map((g) => clampFlexGrow(g));
         const scales = images.map((img) => img.scale != null ? clampScale(img.scale) : null);
-        logger.debug("BALANCE StaticImageRowWidget onPersist", {
+        log.debug("BALANCE StaticImageRowWidget onPersist", {
           grows,
           scales,
           imageCount: images.length,
@@ -396,7 +397,7 @@ class StaticImageRowWidget extends WidgetType {
 
       return el;
     } catch (e) {
-      logger.error("StaticImageRowWidget toDOM error", {
+      log.error("StaticImageRowWidget toDOM error", {
         error: String(e),
         stack: (e as Error)?.stack ?? "no stack",
         options: {
@@ -455,7 +456,7 @@ class StaticImageRowWidget extends WidgetType {
 
     const insert = originalLines.join("\n");
 
-    logger.info("LivePreview drag reorder", {
+    log.info("LivePreview drag reorder", {
       fromIndex, toIndex, fromLine, toLine,
       minLine, maxLine, fromPos, toPos, docLength: doc.length,
       docLines: doc.lines,
@@ -470,7 +471,7 @@ class StaticImageRowWidget extends WidgetType {
     });
 
     const newDoc = view.state.doc.toString();
-    logger.debug("LivePreview post-reorder doc", {
+    log.debug("LivePreview post-reorder doc", {
       docLines: view.state.doc.lines,
       docLength: view.state.doc.length,
       docPreview: newDoc.substring(0, 500),
@@ -499,19 +500,19 @@ class StaticImageRowWidget extends WidgetType {
             parentClass: el.parentElement?.className?.substring(0, 60) || "",
           });
         }
-        logger.debug("LivePreview post-reorder DOM check", {
+        log.debug("LivePreview post-reorder DOM check", {
           embedCount: allEmbeds.length,
           cmLineCount: capturedView.dom.querySelectorAll(".cm-line").length,
           embeds: embedInfo,
         });
       } catch (err) {
-        logger.debug("LivePreview post-reorder DOM check error", {
+        log.debug("LivePreview post-reorder DOM check error", {
           error: String(err),
         });
       }
     });
     } catch (e) {
-      logger.error("LivePreview handleReorder error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      log.error("LivePreview handleReorder error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
     }
   }
 
@@ -527,14 +528,14 @@ class StaticImageRowWidget extends WidgetType {
     // Resolve source line from dataTransfer
     const srcLine = resolveSourceLine(view, dataTransfer, this.group);
     if (srcLine === null) {
-      logger.debug("LivePreview mergeExternal: could not resolve source");
+      log.debug("LivePreview mergeExternal: could not resolve source");
       return;
     }
 
     const targetLine = this.group.lineStart + insertAtIndex;
     if (srcLine === targetLine) return;
 
-    logger.info("LivePreview cross-row merge", {
+    log.info("LivePreview cross-row merge", {
       srcLine, targetLine, insertAtIndex,
       dataTransfer: dataTransfer.substring(0, 40),
     });
@@ -556,7 +557,7 @@ class StaticImageRowWidget extends WidgetType {
 
     moveLine(view, srcLine, targetLine);
     } catch (e) {
-      logger.error("LivePreview handleMergeExternal error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      log.error("LivePreview handleMergeExternal error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
     }
   }
 
@@ -657,7 +658,7 @@ class StaticImageRowWidget extends WidgetType {
     // Apply bottom-to-top so earlier line positions stay valid.
     changes.sort((a, b) => b.from - a.from);
     view.dispatch({ changes });
-    logger.info("LivePreview merge flex-grow recompute", {
+    log.info("LivePreview merge flex-grow recompute", {
       srcRowLineStart, srcIndex, insertAtIndex,
       tgtCount: tgtWidths.length, movedWidth: Math.round(movedWidth),
     });
@@ -702,7 +703,7 @@ class StaticImageRowWidget extends WidgetType {
     }
     if (grows.length === this.group.images.length) {
       const safeGrows = grows.map((g) => clampFlexGrow(g));
-      logger.debug("BALANCE updateDOM syncing flex-grows from markdown", {
+      log.debug("BALANCE updateDOM syncing flex-grows from markdown", {
         growsFromMarkdown: grows,
         safeGrows,
         currentDOMFlexGrows: this.innerWidget.getCurrentFlexGrows(),
@@ -711,7 +712,7 @@ class StaticImageRowWidget extends WidgetType {
     }
     return true;
     } catch (e) {
-      logger.error("LivePreview updateDOM error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
+      log.error("LivePreview updateDOM error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
       // Return false so CodeMirror safely destroys + recreates the widget.
       return false;
     }
@@ -727,7 +728,7 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   destroy(): void {
-    logger.info("SCROLL_DIAG widget destroy", {
+    log.info("SCROLL_DIAG widget destroy", {
       lineStart: this.group.lineStart,
       imageCount: this.group.images.length,
     });
@@ -812,7 +813,7 @@ class StaticImageRowWidget extends WidgetType {
     this.editorView.dispatch({
       changes: { from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText },
     });
-    logger.debug("Single-image persist", { line: img.line, widthPx, sFlag, alignment: img.alignment ?? this.options.alignment });
+    log.debug("Single-image persist", { line: img.line, widthPx, sFlag, alignment: img.alignment ?? this.options.alignment });
   }
 }
 
@@ -873,7 +874,7 @@ export function resetSingleImageManualFlags(
   if (changes.length === 0) return;
   changes.sort((a, b) => b.from - a.from);
   view.dispatch({ changes });
-  logger.info("LivePreview reset single-image manual flags", { count: changes.length });
+  log.info("LivePreview reset single-image manual flags", { count: changes.length });
 }
 
 /**
@@ -908,7 +909,7 @@ export function resetImageAlignmentFlags(
   if (changes.length === 0) return;
   changes.sort((a, b) => b.from - a.from);
   view.dispatch({ changes });
-  logger.info("LivePreview reset image alignment flags", { count: changes.length });
+  log.info("LivePreview reset image alignment flags", { count: changes.length });
 }
 
 // ── State field for decorations ─────────────────────────────────
@@ -923,16 +924,16 @@ function buildDecorations(
     // Capture stack to identify the call chain triggering a rebuild.
     // Filter to the first few frames after buildDecorations itself.
     const stack = new Error().stack?.split("\n").slice(2, 8).join("\n") || "";
-    logger.debug("buildDecorations invoked", { timestamp: Date.now(), stack });
+    log.debug("buildDecorations invoked", { timestamp: Date.now(), stack });
 
     if (!isEnabled()) {
-      logger.debug("LivePreview decorations skipped (disabled)");
+      log.debug("LivePreview decorations skipped (disabled)");
       return Decoration.none;
     }
 
     // Skip in source mode: editorLivePreviewField is only present/true in Live Preview
     if (!state.field(editorLivePreviewField, false)) {
-      logger.debug("LivePreview decorations skipped (source mode)");
+      log.debug("LivePreview decorations skipped (source mode)");
       return Decoration.none;
     }
 
@@ -952,7 +953,7 @@ function buildDecorations(
     // Re-map single-image `|S|W` params to the internal flexGrow/scale convention.
     for (const g of groups) normalizeSingleImageParams(g);
 
-    logger.debug("LivePreview buildDecorations", {
+    log.debug("LivePreview buildDecorations", {
       groupCount: groups.length,
       enabled: isEnabled(),
       docLength: doc.length,
@@ -978,7 +979,7 @@ function buildDecorations(
         const lineEnd1 = group.lineEnd; // 0-indexed exclusive == last line in 1-indexed
 
         if (lineStart1 > lineCount || lineEnd1 > lineCount) {
-          logger.debug("LivePreview skipping group (out of range)", {
+          log.debug("LivePreview skipping group (out of range)", {
             lineStart1, lineEnd1, lineCount,
           });
           continue;
@@ -989,7 +990,7 @@ function buildDecorations(
           ? state.doc.line(lineEnd1 + 1).from
           : state.doc.length;
 
-        logger.debug("LivePreview decoration range", {
+        log.debug("LivePreview decoration range", {
           groupLineStart: group.lineStart,
           groupLineEnd: group.lineEnd,
           lineStart1,
@@ -1002,7 +1003,7 @@ function buildDecorations(
         });
 
         if (to <= from) {
-          logger.debug("LivePreview skipping group (to <= from)", { from, to });
+          log.debug("LivePreview skipping group (to <= from)", { from, to });
           continue;
         }
 
@@ -1017,7 +1018,7 @@ function buildDecorations(
         );
         decorationAdded = true;
       } catch (e) {
-        logger.error("LivePreview widget creation error", {
+        log.error("LivePreview widget creation error", {
           groupLineStart: group.lineStart,
           error: String(e),
         });
@@ -1025,13 +1026,13 @@ function buildDecorations(
     }
 
     const result = builder.finish();
-    logger.debug("LivePreview decorations built", {
+    log.debug("LivePreview decorations built", {
       decorationAdded,
       setSize: result.size,
     });
     return result;
   } catch (e) {
-    logger.error("LivePreview buildDecorations error", { error: String(e) });
+    log.error("LivePreview buildDecorations error", { error: String(e) });
     return Decoration.none;
   }
 }
@@ -1069,7 +1070,7 @@ export function createLivePreviewPlugin(
   const field = StateField.define<DecorationSet>({
     create(state) {
       wasLivePreview = !!state.field(editorLivePreviewField, false);
-      logger.debug("LivePreview StateField create", { wasLivePreview });
+      log.debug("LivePreview StateField create", { wasLivePreview });
       return buildDecorations(state, getOptions, getSettings, isEnabled);
     },
     update(_oldDecos, tr) {
@@ -1078,7 +1079,7 @@ export function createLivePreviewPlugin(
       const settingsAnnot = tr.annotation(settingsChanged);
       const lpChanged = wasLivePreview !== isLivePreview;
       if (docChanged || settingsAnnot || lpChanged) {
-        logger.debug("StateField.update → buildDecorations", {
+        log.debug("StateField.update → buildDecorations", {
           docChanged,
           settingsAnnotation: !!settingsAnnot,
           livePreviewChanged: lpChanged,
@@ -1248,7 +1249,7 @@ export function createStandaloneDropPlugin(
           if (!embed) {
             // Check if this is a flex row item drag (should not be intercepted here)
             const flexItem = target?.closest?.(".drag-img-item") as HTMLElement | null;
-            logger.info("SD dragstart: not an obsidian embed", {
+            log.info("SD dragstart: not an obsidian embed", {
               targetTag: target?.tagName,
               targetClass: target?.className?.substring?.(0, 60) || "",
               isFlexItem: !!flexItem,
@@ -1261,7 +1262,7 @@ export function createStandaloneDropPlugin(
 
           const pos = this.view.posAtDOM(domNode as Node);
           if (pos < 0) {
-            logger.info("SD dragstart: posAtDOM failed", {
+            log.info("SD dragstart: posAtDOM failed", {
               tag: domNode.tagName,
               shadowRoot: root instanceof ShadowRoot,
             });
@@ -1281,7 +1282,7 @@ export function createStandaloneDropPlugin(
           const cleanupGhost = createDragGhost(img, e, getSettings().ghostImageWidth);
           embed.addEventListener("dragend", cleanupGhost, { once: true });
 
-          logger.info("SD dragstart stored source line", { line, tag: domNode.tagName });
+          log.info("SD dragstart stored source line", { line, tag: domNode.tagName });
         };
 
         // ── dragover: capture on WINDOW, show drop target indicator ──
@@ -1302,7 +1303,7 @@ export function createStandaloneDropPlugin(
 
           if (!this.dragoverLogged) {
             this.dragoverLogged = true;
-            logger.info("SD dragover first", { hasDiaaSource, hasDiaaRow });
+            log.info("SD dragover first", { hasDiaaSource, hasDiaaRow });
           }
 
           // Use elementFromPoint for reliable detection of image embeds and flex rows
@@ -1323,7 +1324,7 @@ export function createStandaloneDropPlugin(
 
           const textPlain = e.dataTransfer?.getData("text/plain") || "";
 
-          logger.info("SD drop enter", {
+          log.info("SD drop enter", {
             hasDiaaSource: e.dataTransfer?.types.includes("application/diaa-source"),
             textPlain: textPlain.substring(0, 60),
           });
@@ -1358,7 +1359,7 @@ export function createStandaloneDropPlugin(
 
             if (srcLine === targetLine) return;
 
-            logger.info("SD flex-row → standalone: moveLine", {
+            log.info("SD flex-row → standalone: moveLine", {
               srcLine, targetLine, dropLine: dropTarget.line, isImageLine: dropTarget.isImageLine,
             });
 
@@ -1380,7 +1381,7 @@ export function createStandaloneDropPlugin(
 
           const srcLine = parseInt(e.dataTransfer!.getData("application/diaa-source"), 10);
           if (isNaN(srcLine)) {
-            logger.info("SD drop: could not parse source line from diaa-source");
+            log.info("SD drop: could not parse source line from diaa-source");
             return;
           }
 
@@ -1413,7 +1414,7 @@ export function createStandaloneDropPlugin(
 
           if (srcLine === targetLine) return;
 
-          logger.info("SD standalone → standalone: moveLine", {
+          log.info("SD standalone → standalone: moveLine", {
             srcLine, targetLine, baseTargetLine, side,
           });
 
@@ -1442,7 +1443,7 @@ export function createStandaloneDropPlugin(
         window.addEventListener("dragleave", this.onDragLeave, true);
         window.addEventListener("dragend", this.onDragEnd, true);
         window.addEventListener("drop", this.onDrop, true);
-        logger.info("SD setup complete: handlers on window capture", {
+        log.info("SD setup complete: handlers on window capture", {
           domTag: this.view.dom?.tagName,
         });
       }

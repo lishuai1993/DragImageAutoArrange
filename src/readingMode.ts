@@ -4,6 +4,7 @@ import { ImageRowOptions } from "./types";
 import { ImageEmbed, parseImageLine } from "./imageDetector";
 import { matchEmbedsToParsed } from "./matchEmbeds";
 import { logger } from "./logger";
+const log = logger.channel("readingMode");
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
 import {
   setImageRowIndex, setImageLineRe,
@@ -50,7 +51,7 @@ export function createReadingModeProcessor(
     // Filter to image embeds by file extension
     const imageEmbeds = freshEmbeds.filter(isImageEmbed);
 
-    logger.debug("ReadingMode processor invoked", {
+    log.debug("ReadingMode processor invoked", {
       sourcePath: ctx.sourcePath,
       totalInternalEmbeds: allInternalEmbeds.length,
       freshEmbeds: freshEmbeds.length,
@@ -85,7 +86,7 @@ export function createReadingModeProcessor(
           if (parsed) parsedImages.push(parsed);
         }
         setImageRowIndex(ctx.sourcePath, buildImageRowIndex(lines, re));
-        logger.debug("ReadingMode parsed markdown", {
+        log.debug("ReadingMode parsed markdown", {
           filePath: file.path,
           totalLines: lines.length,
           parsedCount: parsedImages.length,
@@ -101,13 +102,13 @@ export function createReadingModeProcessor(
           })),
         });
       } else {
-        logger.debug("ReadingMode file not found or not TFile", {
+        log.debug("ReadingMode file not found or not TFile", {
           sourcePath: ctx.sourcePath,
           abstractFile: String(file),
         });
       }
     } catch (e) {
-      logger.warn("ReadingMode failed to read file for scale data", { error: String(e) });
+      log.warn("ReadingMode failed to read file for scale data", { error: String(e) });
     }
 
     // Match parsed params to DOM embeds via SECTION-LOCAL source line numbers.
@@ -139,7 +140,7 @@ export function createReadingModeProcessor(
     // in log.txt. usedFallback means section-scoped matching disagreed with the
     // embeds and we degraded to a filename-only global match.
     if (usedFallback || mismatches > 0) {
-      logger.warn("RM match integrity FAILED", {
+      log.warn("RM match integrity FAILED", {
         sourcePath: ctx.sourcePath,
         usedFallback,
         mismatches,
@@ -155,7 +156,7 @@ export function createReadingModeProcessor(
       const embed = imageEmbeds[i];
       const parsed = matches[i];
       if (!parsed) continue;
-      logger.debug("ReadingMode attr-set", {
+      log.debug("ReadingMode attr-set", {
         line: parsed.line,
         embedFn: embedFileNames[i],
         parsedFn: parsed.fileName,
@@ -184,7 +185,7 @@ export function createReadingModeProcessor(
       // silently breaks RM scroll anchoring.
       embed.setAttribute("data-diaa-line", String(toLine1(parsed.line)));
     }
-    logger.debug("ReadingMode scale matching", {
+    log.debug("ReadingMode scale matching", {
       domEmbeds: imageEmbeds.length,
       sectionLines: sectionInfo ? `${sectionInfo.lineStart}-${sectionInfo.lineEnd}` : "(null)",
       candidates: candidates.length,
@@ -219,7 +220,7 @@ export function createReadingModeProcessor(
       }
     }
 
-    logger.debug("ReadingMode processor", {
+    log.debug("ReadingMode processor", {
       embedCount: imageEmbeds.length,
       groupCount: groups.length,
       sourcePath: ctx.sourcePath,

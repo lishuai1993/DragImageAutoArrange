@@ -1,42 +1,45 @@
-import { App } from "obsidian";
+import { App, WorkspaceLeaf } from "obsidian";
 import { logger } from "../logger";
+const log = logger.channel("warmupProbe");
 import { setSectionSnapshot } from "./scrollAnchor";
 
-// ── RM warm-up probe (TEMPORARY — delete after the experiment) ───────
-// Verifies the "pre-render the real previewMode in the background" plan:
-// a WARM preview (DOM + height ledger already built) makes every LP→RM
-// switch instant — all cold-start pathologies (maxScroll=0, compact-stack
-// phase, transient coordinate space) exist only in the FIRST render.
+// ── RM warm-up probe ───────────────────────────────────────────────────
+// Pre-renders the real previewMode in the background (visibility:hidden) so
+// the first LP→RM switch takes the hot path — the height ledger is already
+// built and the DOM is already laid out.
 //
-// Probe questions:
-//   W1  does previewMode.rerender(true) render while the reading view is
-//       hidden-but-laid-out? (post-processor fires, sizer children grow)
-//   W2  does the height ledger materialize (docH → full scale, stable)?
-//   W3  after removing the style override, does the next real LP→RM switch
-//       take the hot path (first-frame anchor-restored, no bounce)?
-//
-// The override is a CSS class (not inline styles) so Obsidian's own
-// display toggling on a real mode switch can't be clobbered by our cleanup.
+// Supports:
+//  - Per-leaf warmup (active or background)
+//  - Abort signal for preemption (P0 cancels running P2)
+//  - Container-level overrides for non-active leaf warmup
+// ── Feature flag ────────────────────────────────────────────────────────
 
 export const ENABLE_WARMUP_PROBE = true;
 
-const WARMUP_DELAY_MS = 2000;
+// ── Timing ─────────────────────────────────────────────────────────────
+
 const WARMUP_TIMEOUT_MS = 10000;
-const STABLE_FRAMES = 30;      // consecutive equal-docH frames = ledger settled
-const SET_FALLBACK_AT_MS = 3000; // no progress by then → try previewMode.set()
+const STABLE_FRAMES = 30;
+const SET_FALLBACK_AT_MS = 3000;
+
+// ── CSS override machinery ─────────────────────────────────────────────
 
 const OVERRIDE_CLASS = "diaa-warmup-probe";
+const CONTAINER_OVERRIDE_CLASS = "diaa-warmup-container";
 const STYLE_ID = "diaa-warmup-probe-style";
-
-let _timer: number | null = null;
-let _active = false;
-let _overriddenEl: HTMLElement | null = null;
 
 function ensureStyleEl(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
+.${CONTAINER_OVERRIDE_CLASS} {
+  display: block !important;
+  visibility: hidden !important;
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+}
 .${OVERRIDE_CLASS} {
   display: block !important;
   visibility: hidden !important;
@@ -47,10 +50,50 @@ function ensureStyleEl(): void {
   document.head.appendChild(style);
 }
 
+/** Apply overrides to the container chain so a non-active leaf's DOM
+ *  is layout-capable. Returns cleanup. */
+function applyContainerOverrides(leaf: WorkspaceLeaf): () => void {
+  const overridden: HTMLElement[] = [];
+  const contentEl = (leaf.view as any)?.contentEl as HTMLElement | undefined;
+  const containerEl = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+
+  // Walk up from contentEl to the workspace-leaf, overriding each
+  // ancestor that might have display:none.
+  let el: HTMLElement | null = contentEl?.parentElement ?? null;
+  while (el && !el.classList.contains("workspace-leaf")) {
+    const computed = getComputedStyle(el);
+    if (computed.display === "none") {
+      el.classList.add(CONTAINER_OVERRIDE_CLASS);
+      overridden.push(el);
+    }
+    el = el.parentElement;
+  }
+  // Also check containerEl itself
+  if (containerEl && getComputedStyle(containerEl).display === "none") {
+    containerEl.classList.add(CONTAINER_OVERRIDE_CLASS);
+    overridden.push(containerEl);
+  }
+
+  return () => {
+    for (const el of overridden) el.classList.remove(CONTAINER_OVERRIDE_CLASS);
+  };
+}
+
+// ── Legacy scheduling (deprecated by warmupScheduler, kept for compat) ─
+
+let _timer: number | null = null;
+let _active = false;
+let _overriddenEl: HTMLElement | null = null;
+let _removeContainerOverride: (() => void) | null = null;
+
 function removeOverride(): void {
   if (_overriddenEl) {
     _overriddenEl.classList.remove(OVERRIDE_CLASS);
     _overriddenEl = null;
+  }
+  if (_removeContainerOverride) {
+    _removeContainerOverride();
+    _removeContainerOverride = null;
   }
 }
 
@@ -65,26 +108,44 @@ export function cancelWarmupProbe(): void {
   document.getElementById(STYLE_ID)?.remove();
 }
 
-/** Debounced entry point — call on file-open / layout-ready. */
+/** Debounced entry point for the active leaf only (legacy). */
 export function scheduleWarmupProbe(app: App): void {
   if (!ENABLE_WARMUP_PROBE) return;
   if (_timer !== null) clearTimeout(_timer);
   _timer = window.setTimeout(() => {
     _timer = null;
     try { runWarmup(app); } catch (e) {
-      logger.warn("WARMUP probe threw", { error: String(e) });
+      log.warn("WARMUP probe threw", { error: String(e) });
       removeOverride();
       _active = false;
     }
-  }, WARMUP_DELAY_MS);
+  }, 2000);
 }
 
-function runWarmup(app: App): void {
+// ── Core warmup runner ─────────────────────────────────────────────────
+
+/**
+ * Run warmup for a specific leaf (or the active leaf if omitted).
+ * @param app        Obsidian App instance
+ * @param targetLeaf The leaf to warm up (pass undefined for active leaf)
+ * @param signal     Abort signal — checked each rAF tick; set `aborted=true`
+ *                   to cancel. The runner cleans up DOM overrides before
+ *                   returning when aborted.
+ */
+export async function runWarmup(
+  app: App,
+  targetLeaf?: WorkspaceLeaf,
+  signal?: { aborted: boolean },
+): Promise<void> {
   if (_active) return;
-  const view = app.workspace.activeLeaf?.view as any;
+
+  const leaf = targetLeaf ?? app.workspace.activeLeaf;
+  if (!leaf) return;
+  const view = leaf.view as any;
   const file = view?.file?.path ?? "";
   const mode = view?.getMode?.() ?? "";
-  if (!file || mode !== "source") return; // only warm a hidden preview under LP
+
+  if (!file || mode !== "source") return;
 
   const pm = view.previewMode;
   const contentEl = (view.contentEl ?? view.containerEl) as HTMLElement | undefined;
@@ -92,11 +153,14 @@ function runWarmup(app: App): void {
   const previewEl = readingEl?.querySelector(".markdown-preview-view") as HTMLElement | null;
   const sizer = previewEl?.querySelector(".markdown-preview-sizer") as HTMLElement | null;
   if (!pm || !readingEl || !previewEl) {
-    logger.info("WARMUP aborted: preview objects missing", {
+    log.info("WARMUP aborted: preview objects missing", {
       file, hasPm: !!pm, hasReadingEl: !!readingEl, hasPreviewEl: !!previewEl,
     });
     return;
   }
+
+  // Make the leaf's container chain layout-capable (needed for non-active leaves)
+  _removeContainerOverride = applyContainerOverrides(leaf);
 
   const preChildren = sizer?.childElementCount ?? -1;
   _active = true;
@@ -104,17 +168,18 @@ function runWarmup(app: App): void {
   readingEl.classList.add(OVERRIDE_CLASS);
   _overriddenEl = readingEl;
 
-  logger.info("WARMUP start", {
+  log.info("WARMUP start", {
     file,
+    isActive: leaf === app.workspace.activeLeaf,
     preChildren,
-    clientH: previewEl.clientHeight, // must be ~viewport height for the renderer to work
+    clientH: previewEl.clientHeight,
     docH: previewEl.scrollHeight,
   });
 
   let rerenderOk = true;
   try { pm.rerender(true); } catch (e) {
     rerenderOk = false;
-    logger.warn("WARMUP rerender(true) threw", { error: String(e) });
+    log.warn("WARMUP rerender(true) threw", { error: String(e) });
   }
 
   const t0 = performance.now();
@@ -123,10 +188,6 @@ function runWarmup(app: App): void {
   let setFallbackTried = false;
 
   const finish = (result: string) => {
-    // Snapshot the renderer's section heights while the override keeps layout
-    // alive (visibility:hidden still has computed geometry). This snapshot
-    // survives the display:none gap so the first real LP→RM switch can park
-    // at the correct Y before the renderer's re-measure cycle completes.
     try {
       const secs = pm?.renderer?.sections;
       if (Array.isArray(secs) && secs.length > 0) {
@@ -134,23 +195,20 @@ function runWarmup(app: App): void {
           lineStart: s.lineStart, lineEnd: s.lineEnd, height: s.height,
         }));
         setSectionSnapshot(file, snap);
-        logger.debug("WARMUP snapshot captured", { sections: snap.length });
+        log.debug("WARMUP snapshot captured", { sections: snap.length });
       } else {
-        logger.debug("WARMUP snapshot skipped", {
+        log.debug("WARMUP snapshot skipped", {
           hasSecs: Array.isArray(secs), len: Array.isArray(secs) ? secs.length : -1,
         });
       }
     } catch (e) {
-      logger.debug("WARMUP snapshot failed", { error: String(e) });
+      log.debug("WARMUP snapshot failed", { error: String(e) });
     }
     const ms = Math.round(performance.now() - t0);
     removeOverride();
     _active = false;
-    // Re-measure one frame later: display:none again → scrollHeight reads 0.
-    // That is EXPECTED and says nothing about ledger retention — W3 (the real
-    // switch) is the retention test.
     requestAnimationFrame(() => {
-      logger.info("WARMUP end", {
+      log.info("WARMUP end", {
         file, result, ms,
         children: sizer?.childElementCount ?? -1,
         lastVisibleDocH: lastDocH,
@@ -160,15 +218,22 @@ function runWarmup(app: App): void {
   };
 
   const tick = () => {
+    // ── Abort check ──
+    if (signal?.aborted) {
+      finish("aborted: signal");
+      return;
+    }
+
     const elapsed = performance.now() - t0;
 
-    // User switched modes / files mid-warmup: Obsidian owns the view now —
-    // drop our override immediately and get out of the way.
-    const curMode = (app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
-    const curFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
-    if (curMode !== "source" || curFile !== file) {
-      finish("aborted: view changed (user took over)");
-      return;
+    // User switched modes/files mid-warmup on the active leaf
+    if (leaf === app.workspace.activeLeaf) {
+      const curMode = (view?.getMode?.() ?? "");
+      const curFile = (view?.file?.path ?? "");
+      if (curMode !== "source" || curFile !== file) {
+        finish("aborted: view changed (user took over)");
+        return;
+      }
     }
     if (!readingEl.isConnected) {
       finish("aborted: reading view detached");
@@ -182,12 +247,11 @@ function runWarmup(app: App): void {
     } else {
       stableFrames = 0;
       lastDocH = docH;
-      logger.debug("WARMUP progress", {
+      log.debug("WARMUP progress", {
         t: Math.round(elapsed), docH, children, clientH: previewEl.clientHeight,
       });
     }
 
-    // W1 fallback: rerender didn't produce anything — try feeding the data in.
     if (!setFallbackTried && elapsed >= SET_FALLBACK_AT_MS
         && (children <= preChildren || !rerenderOk)) {
       setFallbackTried = true;
@@ -195,12 +259,12 @@ function runWarmup(app: App): void {
       if (typeof pm.set === "function" && data) {
         try {
           pm.set(data, true);
-          logger.info("WARMUP fallback previewMode.set() fired", { bytes: data.length });
+          log.info("WARMUP fallback previewMode.set() fired", { bytes: data.length });
         } catch (e) {
-          logger.warn("WARMUP previewMode.set() threw", { error: String(e) });
+          log.warn("WARMUP previewMode.set() threw", { error: String(e) });
         }
       } else {
-        logger.info("WARMUP fallback unavailable", { hasSet: typeof pm.set === "function" });
+        log.info("WARMUP fallback unavailable", { hasSet: typeof pm.set === "function" });
       }
     }
 

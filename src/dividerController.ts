@@ -1,6 +1,7 @@
 import { CLASSES, DIVIDER_WIDTH } from "./constants";
 import { ImageMeta } from "./imageDetector";
 import { logger } from "./logger";
+const log = logger.channel("divider");
 import { clampFlexGrow } from "./parameterValidator";
 
 /**
@@ -48,7 +49,7 @@ export class DividerController {
     divider.ondblclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      logger.debug("BALANCE divider dblclick received", {
+      log.debug("BALANCE divider dblclick received", {
         leftIndex,
         totalImages: this.host.getImageCount(),
       });
@@ -136,7 +137,7 @@ export class DividerController {
         const ratio = newLeft / (newLeft + newRight);
         this.host.emitDividerDrag(leftIndex, ratio);
         } catch (e) {
-          logger.error("ImageRowWidget divider mousemove error", { error: String(e) });
+          log.error("ImageRowWidget divider mousemove error", { error: String(e) });
           // Silently terminate the drag and clean up listeners.
           dragging = false;
           divider.classList.remove(CLASSES.dividerActive);
@@ -158,14 +159,14 @@ export class DividerController {
         currentOnMove = null;
         currentOnUp = null;
         } catch (e) {
-          logger.error("ImageRowWidget divider mouseup error", { error: String(e) });
+          log.error("ImageRowWidget divider mouseup error", { error: String(e) });
         }
       };
 
       document.addEventListener("mousemove", currentOnMove);
       document.addEventListener("mouseup", currentOnUp, { once: true });
       } catch (e) {
-        logger.error("ImageRowWidget divider mousedown error", { error: String(e) });
+        log.error("ImageRowWidget divider mousedown error", { error: String(e) });
         dragging = false;
         divider.classList.remove(CLASSES.dividerActive);
       }

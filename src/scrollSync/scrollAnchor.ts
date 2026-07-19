@@ -1,5 +1,6 @@
 import { App, MarkdownView } from "obsidian";
 import { logger } from "../logger";
+const log = logger.channel("scrollAnchor");
 import {
   getPendingAlignmentCount,
   clearFlushTimer,
@@ -126,7 +127,7 @@ export function setLastAnchor(anchor: ViewportAnchor | null, file: string): void
 function clampRatioWarn(raw: number, where: string): number {
   const c = clamp01(raw);
   if (raw !== c) {
-    logger.warn("VIEWPORT ratio out of range", { where, raw: Math.round(raw * 1000) / 1000 });
+    log.warn("VIEWPORT ratio out of range", { where, raw: Math.round(raw * 1000) / 1000 });
   }
   return c;
 }
@@ -435,7 +436,7 @@ function captureImageRowRM(
     // attribute base (set in readingMode.ts) drifted out of sync with
     // ImageRowIndex's 1-based startLine/endLine — the exact off-by-one that
     // silently froze RM anchoring before. Surface it instead of failing quietly.
-    logger.warn("VIEWPORT RM data-diaa-line unmapped (line-base mismatch?)", {
+    log.warn("VIEWPORT RM data-diaa-line unmapped (line-base mismatch?)", {
       bestLine,
       imgRows: imgIndex.map(r => `${r.index}:${r.startLine}-${r.endLine}`),
     });
@@ -535,7 +536,7 @@ function restoreImageRowInLP(
   const targetY = imageRowTargetY(rowTop, rowBottom - rowTop, intraRowRatio, inset, sd.clientHeight);
   sd.scrollTop = targetY;
 
-  logger.info("VIEWPORT anchor-restored", {
+  log.info("VIEWPORT anchor-restored", {
     mode: "source", kind: "image-row", imageRowIndex,
     ratio: Math.round(intraRowRatio * 100),
     rowTop: Math.round(rowTop), rowH: Math.round(rowBottom - rowTop), inset: Math.round(inset),
@@ -573,7 +574,7 @@ function restoreImageRowInRM(
   const targetY = imageRowTargetY(rowTop, rowH, intraRowRatio, 0, previewEl.clientHeight);
   previewEl.scrollTop = targetY;
 
-  logger.info("VIEWPORT anchor-restored", {
+  log.info("VIEWPORT anchor-restored", {
     mode: "preview", kind: "image-row", imageRowIndex,
     ratio: Math.round(intraRowRatio * 100),
     rowTop: Math.round(rowTop), rowH: Math.round(rowH),
@@ -613,7 +614,7 @@ function restoreImageGapInLP(
   const targetY = gapTargetY(junction, inset, sd.clientHeight);
   sd.scrollTop = targetY;
 
-  logger.info("VIEWPORT anchor-restored", {
+  log.info("VIEWPORT anchor-restored", {
     mode: "source", kind: "image-gap", imgBefore, imgAfter,
     ratio: Math.round(gapRatio * 100),
     junction: Math.round(junction), inset: Math.round(inset),
@@ -648,7 +649,7 @@ function restoreImageGapInRM(
   const targetY = gapTargetY(junction, 0, previewEl.clientHeight);
   previewEl.scrollTop = targetY;
 
-  logger.info("VIEWPORT anchor-restored", {
+  log.info("VIEWPORT anchor-restored", {
     mode: "preview", kind: "image-gap", imgBefore, imgAfter,
     ratio: Math.round(gapRatio * 100),
     junction: Math.round(junction),
@@ -733,7 +734,7 @@ function restoreTextInLP(
       const c = cm.coordsAtPos(cm.state.doc.line(line).from);
       if (c) coordsOffset = Math.round(c.top - sd.getBoundingClientRect().top);
     } catch { /* pos may be off-screen */ }
-    logger.info("VIEWPORT anchor-restored", {
+    log.info("VIEWPORT anchor-restored", {
       mode: "source", kind: "text", line,
       frag: anchor.anchorText.slice(0, 30),
       capturedOffset: Math.round(anchor.anchorOffset),
@@ -757,14 +758,14 @@ function restoreTextInLP(
       const lb = lineBlockByNumber(cm, asLine1(refLine));
       const targetY = textTargetY(lb.top, lpInset(cm, sd), anchor.anchorOffset);
       sd.scrollTop = targetY;
-      logger.info("VIEWPORT anchor-restored", {
+      log.info("VIEWPORT anchor-restored", {
         mode: "source", kind: "text-degraded", refLine,
         targetY: Math.round(targetY), actualY: Math.round(sd.scrollTop),
       });
       return true;
     }
   }
-  logger.info("VIEWPORT text unresolvable in LP", { frag: anchor.anchorText.slice(0, 30) });
+  log.info("VIEWPORT text unresolvable in LP", { frag: anchor.anchorText.slice(0, 30) });
   return false;
 }
 
@@ -801,7 +802,7 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
   const view = app.workspace.activeLeaf?.view as any;
   const secs = view?.previewMode?.renderer?.sections;
   if (!Array.isArray(secs) || secs.length === 0) {
-    logger.debug("VIEWPORT ledger unavailable", {
+    log.debug("VIEWPORT ledger unavailable", {
       hasRenderer: !!view?.previewMode?.renderer,
       sectionsType: typeof secs,
     });
@@ -809,7 +810,7 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
   } else {
     const total = ledgerTotalHeight(secs);
     if (total <= 0) {
-      logger.debug("VIEWPORT ledger all-zero", {
+      log.debug("VIEWPORT ledger all-zero", {
         len: secs.length,
         sampleHeight: typeof secs[0]?.height,
       });
@@ -817,14 +818,14 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
     } else {
       const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
       if (docH > 0 && Math.abs(total - docH) / docH > LEDGER_DOCH_TOLERANCE) {
-        logger.debug("VIEWPORT ledger distrusted", { total: Math.round(total), docH });
+        log.debug("VIEWPORT ledger distrusted", { total: Math.round(total), docH });
       } else {
         const y = ledgerYForLine(secs, line1 - 1);
         if (y >= 0) return y;
         // Live sections are structurally ok (non-empty, non-zero, docH matches)
         // but don't cover this line yet — the renderer is still building after
         // a display:none→block transition. Fall through to the snapshot.
-        logger.debug("VIEWPORT ledger line-out-of-range", {
+        log.debug("VIEWPORT ledger line-out-of-range", {
           line: line1, secLen: secs.length,
           lastLineEnd: secs[secs.length - 1]?.lineEnd,
         });
@@ -842,7 +843,7 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
       // Snapshot was taken under the warm-up override (viewport ~725px, not the
       // real 687px), so heights can drift a few percent. Allow a wider band.
       if (docH > 0 && Math.abs(total - docH) / docH > LEDGER_DOCH_TOLERANCE) {
-        logger.debug("VIEWPORT snapshot distrusted", { total: Math.round(total), docH });
+        log.debug("VIEWPORT snapshot distrusted", { total: Math.round(total), docH });
         return -1;
       }
       const y = ledgerYForLine(snap, line1 - 1);
@@ -854,7 +855,7 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
         const heights = snap.map((s: any) => typeof s.height === "number" ? s.height : 0);
         const estY = sectionIndexEstimateY(heights, totalLines, line1);
         if (estY >= 0) {
-          logger.debug("VIEWPORT ledger section-index-estimate", {
+          log.debug("VIEWPORT ledger section-index-estimate", {
             line: line1, totalLines, secLen: snap.length,
             ledgerY: Math.round(estY), totalH: Math.round(total),
           });
@@ -929,7 +930,7 @@ function restoreTextInRM(
     if (ledgerY >= 0 && Math.abs(blockTop - ledgerY) > tol) {
       const targetY = textTargetY(ledgerY, 0, anchor.anchorOffset);
       previewEl.scrollTop = targetY;
-      logger.info("VIEWPORT anchor-restored", {
+      log.info("VIEWPORT anchor-restored", {
         mode: "preview", kind: "text-ledger-park",
         frag: frag.slice(0, 30), line: anchor.anchorLine,
         measuredTop: Math.round(blockTop), ledgerY: Math.round(ledgerY),
@@ -946,7 +947,7 @@ function restoreTextInRM(
         const parkY = anchor.docRatio * previewEl.scrollHeight;
         const targetY = textTargetY(parkY, 0, anchor.anchorOffset);
         previewEl.scrollTop = targetY;
-        logger.info("VIEWPORT anchor-restored", {
+        log.info("VIEWPORT anchor-restored", {
           mode: "preview", kind: "text-ratio-park",
           frag: frag.slice(0, 30),
           measuredPct: Math.round(measuredRatio * 100),
@@ -959,7 +960,7 @@ function restoreTextInRM(
 
     const targetY = textTargetY(blockTop, 0, anchor.anchorOffset);
     previewEl.scrollTop = targetY;
-    logger.info("VIEWPORT anchor-restored", {
+    log.info("VIEWPORT anchor-restored", {
       mode: "preview", kind: "text",
       frag: frag.slice(0, 30),
       offset: Math.round(anchor.anchorOffset),
@@ -973,7 +974,7 @@ function restoreTextInRM(
   if (ledgerY >= 0) {
     const targetY = textTargetY(ledgerY, 0, anchor.anchorOffset);
     previewEl.scrollTop = targetY;
-    logger.info("VIEWPORT anchor-restored", {
+    log.info("VIEWPORT anchor-restored", {
       mode: "preview", kind: "text-ledger-park-nomatch",
       line: anchor.anchorLine, ledgerY: Math.round(ledgerY),
       targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
@@ -998,7 +999,7 @@ function restoreTextInRM(
           ? Math.max(0, eTop + eRect.height - anchor.anchorOffset)
           : Math.max(0, eTop - previewEl.clientHeight + anchor.anchorOffset);
         previewEl.scrollTop = targetY;
-        logger.info("VIEWPORT anchor-restored", {
+        log.info("VIEWPORT anchor-restored", {
           mode: "preview", kind: "text-degraded", refLine: line,
           targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
         });
@@ -1006,7 +1007,7 @@ function restoreTextInRM(
       }
     }
   }
-  logger.info("VIEWPORT text unresolvable in RM", { frag: frag.slice(0, 30) });
+  log.info("VIEWPORT text unresolvable in RM", { frag: frag.slice(0, 30) });
   return false;
 }
 
@@ -1025,7 +1026,7 @@ function enterRestoreGuard(): void {
   _restoreGuardDepth++;
   if (_restoreGuardTimeoutId) clearTimeout(_restoreGuardTimeoutId);
   _restoreGuardTimeoutId = setTimeout(() => {
-    logger.warn("RESTORE_GUARD safety timeout — force-released");
+    log.warn("RESTORE_GUARD safety timeout — force-released");
     _restoreGuardDepth = 0;
   }, 2000);
 }
@@ -1120,7 +1121,7 @@ function nativeScrollToLine(app: App, targetLine: number): boolean {
       if (before >= 0) {
         requestAnimationFrame(() => {
           const after = sd?.scrollTop ?? -1;
-          logger.debug("VIEWPORT native-scroll LP", { targetLine, before: Math.round(before), after: Math.round(after) });
+          log.debug("VIEWPORT native-scroll LP", { targetLine, before: Math.round(before), after: Math.round(after) });
         });
       }
       // scrollIntoView is reliable → treat as success; the next precise restore
@@ -1134,13 +1135,13 @@ function nativeScrollToLine(app: App, targetLine: number): boolean {
       // the target area — the same mechanism Obsidian uses for link / search jumps.
       if (typeof view.setEphemeralState === "function") {
         view.setEphemeralState({ line: targetLine });
-        logger.debug("VIEWPORT native-scroll RM setEphemeralState", { targetLine });
+        log.debug("VIEWPORT native-scroll RM setEphemeralState", { targetLine });
         return true;
       }
       // Fall back to previewMode.applyScroll if available (Obsidian internal API).
       if (view.previewMode && typeof view.previewMode.applyScroll === "function") {
         view.previewMode.applyScroll(targetLine);
-        logger.debug("VIEWPORT native-scroll RM applyScroll", { targetLine });
+        log.debug("VIEWPORT native-scroll RM applyScroll", { targetLine });
         return true;
       }
       return false;
@@ -1148,7 +1149,7 @@ function nativeScrollToLine(app: App, targetLine: number): boolean {
   } catch (e) {
     // Any native-scroll exception → fall back to the legacy coarse-jump without
     // blocking the restore control flow.
-    logger.warn("VIEWPORT native-scroll failed", { targetLine, mode, error: String(e) });
+    log.warn("VIEWPORT native-scroll failed", { targetLine, mode, error: String(e) });
     return false;
   }
   return false;
@@ -1194,7 +1195,7 @@ export function restoreScrollPct(app: App): boolean {
   if (targetY < 0) return false; // no scroll space yet — keep the pct for retry
 
   setFallbackPct(-1);
-  logger.info("VIEWPORT fallback-restored", {
+  log.info("VIEWPORT fallback-restored", {
     mode, pct: Math.round(pct * 100),
     targetY: Math.round(targetY), actualY: Math.round(actualY),
     docH, viewportH, maxScroll: Math.round(docH - viewportH),
@@ -1240,7 +1241,7 @@ function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: ViewportAn
       .map(s => { const e = document.querySelector(s) as HTMLElement | null; return e ? `${s}=${Math.round(e.scrollTop)}` : `${s}=n/a`; })
       .join(" ");
   }
-  logger.debug(`SCROLL ${side}`, info);
+  log.debug(`SCROLL ${side}`, info);
 }
 
 export function ensureRMScrollTracking(app: App): void {
@@ -1312,8 +1313,19 @@ const RM_HOLD_TIMEOUT_MS = 3000;
 const RM_HOLD_CALM_FRAMES = 10; // consecutive no-correction frames = settled
 let _rmHoldId: number | null = null;
 let _rmHoldCleanup: (() => void) | null = null;
+let _rmHoldChainId: number | null = null;
+let _earlyRestoreId: number | null = null;
+let _lpEarlyRestoreDone = false;
+let _rmEarlyRestoreDone = false;
 
-function cancelRMSettleHold(): void {
+function cancelRMHoldChain(): void {
+  if (_rmHoldChainId !== null) {
+    cancelAnimationFrame(_rmHoldChainId);
+    _rmHoldChainId = null;
+  }
+}
+
+function cancelAllRestoreChains(): void {
   if (_rmHoldId !== null) {
     cancelAnimationFrame(_rmHoldId);
     _rmHoldId = null;
@@ -1322,10 +1334,23 @@ function cancelRMSettleHold(): void {
     _rmHoldCleanup();
     _rmHoldCleanup = null;
   }
+  if (_rmDeferredRestoreId !== null) {
+    cancelAnimationFrame(_rmDeferredRestoreId);
+    _rmDeferredRestoreId = null;
+  }
+  if (_lpDeferredRestoreId !== null) {
+    cancelAnimationFrame(_lpDeferredRestoreId);
+    _lpDeferredRestoreId = null;
+  }
+  if (_earlyRestoreId !== null) {
+    cancelAnimationFrame(_earlyRestoreId);
+    _earlyRestoreId = null;
+  }
+  cancelRMHoldChain();
 }
 
 export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
-  cancelRMSettleHold();
+  cancelAllRestoreChains();
   const view = app.workspace.activeLeaf?.view as any;
   const file = view?.file?.path ?? "";
   let hookedEl = getRMPreviewEl(app) as HTMLElement | null;
@@ -1364,18 +1389,23 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
   let lastDocH = hookedEl.scrollHeight;
   let calm = 0;
   let corrections = 0;
+  let firstTick = true;
 
   const finish = (reason: string, recapture: boolean) => {
     _rmHoldId = null;
     _rmHoldCleanup = null;
     cleanup();
     setActiveAnchor(null);
-    logger.debug("VIEWPORT settle-hold end", {
+    log.debug("VIEWPORT settle-hold end", {
       reason, corrections,
       ms: Math.round(performance.now() - start),
       scrollTop: hookedEl ? Math.round(hookedEl.scrollTop) : -1,
     });
     if (!recapture) return;
+    // Guard: if settle-hold landed at document head abnormally, the
+    // captured anchor would be garbage — skip to avoid polluting the
+    // RM slot and fallback percentage.
+    if (hookedEl && hookedEl.scrollTop <= 0 && reason !== "stable") return;
     const anchor = captureContentAnchor(app);
     if (anchor) setRMLastAnchor(anchor, file);
     const pct = computeScrollPct(app);
@@ -1400,12 +1430,31 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
       return;
     }
     if (el !== hookedEl) {
-      // Spurious re-render replaced the preview DOM — rebase on the new one.
+      // Spurious re-render replaced the preview DOM — force re-restore
+		// instead of accepting the new (possibly empty) DOM's values.
       if (hookedEl) detach(hookedEl);
       attach(el);
       hookedEl = el;
+      enterRestoreGuard();
+      setActiveAnchor(seedAnchor);
+      restoreContentAnchor(app);
+      exitRestoreGuard();
       lastTop = el.scrollTop;
       lastDocH = el.scrollHeight;
+      calm = 0;
+    }
+
+    if (firstTick) {
+      firstTick = false;
+      if (el.scrollTop > 0) {
+        // Early restore already positioned us; use current values as baseline
+        // instead of re-restoring against a layout that may still be settling.
+        lastTop = el.scrollTop;
+        lastDocH = el.scrollHeight;
+        calm++;
+        _rmHoldId = requestAnimationFrame(tick);
+        return;
+      }
     }
 
     const docH = el.scrollHeight;
@@ -1432,7 +1481,7 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
     if (performance.now() - start > RM_HOLD_TIMEOUT_MS) { finish("timeout", true); return; }
     _rmHoldId = requestAnimationFrame(tick);
   };
-  logger.debug("VIEWPORT settle-hold start", {
+  log.debug("VIEWPORT settle-hold start", {
     scrollTop: Math.round(lastTop), docH: lastDocH,
   });
   _rmHoldId = requestAnimationFrame(tick);
@@ -1443,7 +1492,7 @@ function scheduleRMDeferredRestore(app: App): void {
     cancelAnimationFrame(_rmDeferredRestoreId);
     _rmDeferredRestoreId = null;
   }
-  cancelRMSettleHold(); // a new restore session supersedes any settling hold
+  cancelAllRestoreChains(); // a new restore session supersedes any settling hold
   rmLoopExitGuard();    // close any prior session's guard (its closure is gone)
   _rmRestoreStartTime = performance.now();
   _rmNativeTried = false;
@@ -1465,7 +1514,7 @@ function scheduleRMDeferredRestore(app: App): void {
       _rmNativeTried = false;
       exitGuardOnce();
       setActiveAnchor(null); setFallbackPct(-1);
-      logger.info("VIEWPORT deferred-restore aborted: file changed", { targetFile, curFile });
+      log.info("VIEWPORT deferred-restore aborted: file changed", { targetFile, curFile });
       return;
     }
 
@@ -1627,7 +1676,7 @@ function scheduleLPDeferredRestore(app: App): void {
       _lpNativeTried = false;
       exitGuardOnce();
       setActiveAnchor(null); setFallbackPct(-1);
-      logger.info("VIEWPORT deferred-restore aborted: file changed", { targetFile, curFile });
+      log.info("VIEWPORT deferred-restore aborted: file changed", { targetFile, curFile });
       return;
     }
 
@@ -1698,7 +1747,7 @@ function probeSwitchScroll(app: App, framesLeft: number, total: number): void {
   if (mode === "preview") scroller = getRMPreviewEl(app);
   else if (mode === "source") scroller = (view?.editor?.cm?.scrollDOM ?? null) as HTMLElement | null;
   if (scroller) {
-    logger.debug("SWITCH probe", {
+    log.debug("SWITCH probe", {
       mode,
       frame: total - framesLeft,
       scrollTop: Math.round(scroller.scrollTop),
@@ -1750,14 +1799,94 @@ function applyEarly(app: App, seedAnchor: ViewportAnchor, seedPct: number): bool
 function scheduleRMHold(
   app: App, file: string, seedAnchor: ViewportAnchor, seedPct: number, holdFrames: number
 ): void {
+  cancelRMHoldChain();
+  const start = performance.now();
   const hold = () => {
+    _rmHoldChainId = null;
     const view = app.workspace.activeLeaf?.view as any;
     if ((view?.getMode?.() ?? "") !== "preview") return; // switched away
     if ((view?.file?.path ?? "") !== file) return;       // file changed
+    // Skip frames where the RM preview DOM has no content yet
+    // (post-processor may be mid-flight). Don't count these
+    // against the fixed hold budget.
+    const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+    const hasContent = previewEl && previewEl.scrollHeight > previewEl.clientHeight + 100;
+    if (!hasContent && performance.now() - start < 5000) {
+      _rmHoldChainId = requestAnimationFrame(hold);
+      return;
+    }
+    const before = previewEl?.scrollTop ?? -1;
     applyEarly(app, seedAnchor, seedPct);                // override the preview revert
-    if (--holdFrames > 0) requestAnimationFrame(hold);
+    if (--holdFrames > 0) {
+      // If scrollTop didn't change after the assertion, the revert either
+      // didn't happen or was already corrected — no need for further holds.
+      const after = (getRMPreviewEl(app) as HTMLElement | null)?.scrollTop ?? -2;
+      if (after === before) return;
+      _rmHoldChainId = requestAnimationFrame(hold);
+    }
   };
-  requestAnimationFrame(hold);
+  _rmHoldChainId = requestAnimationFrame(hold);
+}
+
+/** RM→LP (source) early restore, invoked in the Promise microtask after setState
+ *  resolves. CM is non-virtualized — its scrollDOM is mounted when setState
+ *  resolves. CM auto-restores its own stale scroll position on mount (from the
+ *  last time LP was visible), which may be hundreds of px away from where the
+ *  user is currently reading. We must overwrite it BEFORE the browser composites
+ *  the frame, otherwise the user sees a flash of the wrong position.
+ *
+ *  Strategy: write on the very first rAF where CM's scrollDOM has a non-zero
+ *  clientHeight. No docH-stability wait — delaying the write just lets the stale
+ *  position linger on screen longer, making the correction jump more visible.
+ *  After the write, set _lpEarlyRestoreDone so handleModeSwitch won't re-seed
+ *  from the RM slot; don't re-seed the anchor so the deferred restore won't
+ *  issue a redundant second write. On cold CM where the anchor can't resolve,
+ *  fall back to native line scroll + one rAF retry. */
+function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void {
+  _lpEarlyRestoreDone = false;
+  _rmEarlyRestoreDone = false;
+  const src = getRMLastAnchor();
+  if (!(src.file === file && src.anchor)) return;
+  const seedAnchor = src.anchor;
+  const seedPct = getLastFallbackPct();
+
+  if (_earlyRestoreId !== null) {
+    cancelAnimationFrame(_earlyRestoreId);
+    _earlyRestoreId = null;
+  }
+
+  let frames = 4;
+  let nativeTried = false;
+
+  const poll = () => {
+    _earlyRestoreId = null;
+    const view = app.workspace.activeLeaf?.view as any;
+    if ((view?.getMode?.() ?? "") !== "source") return;
+    if ((view?.file?.path ?? "") !== file) return;
+    const sc = view?.editor?.cm?.scrollDOM as HTMLElement | null;
+    if (!sc || sc.clientHeight === 0) {
+      if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
+      return;
+    }
+    // First frame with CM ready: write immediately. The stale CM auto-restore
+    // position is in the scrollDOM right now — overwrite it before paint.
+    const ok = applyEarly(app, seedAnchor, seedPct);
+    if (!ok && !nativeTried) {
+      nativeTried = true;
+      const line = anchorTargetLine(app);
+      if (nativeScrollToLine(app, line)) {
+        enterRestoreGuard();
+        if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
+        return;
+      }
+    }
+    exitRestoreGuard();
+    if (ok) _lpEarlyRestoreDone = true;
+    // Don't re-seed: we want the deferred restore to be a no-op (no active
+    // anchor) so it won't issue a second write that looks like jitter.
+  };
+
+  _earlyRestoreId = requestAnimationFrame(poll);
 }
 
 /** Seed the active anchor from the OUTGOING mode's slot (same source as
@@ -1765,22 +1894,32 @@ function scheduleRMHold(
  *  view is laid out (frame N) and restore in that pre-paint frame. On RM-incoming
  *  switches, follow with a short hold loop (the RM preview reverts a single write;
  *  CM does not). Bails (letting the layout-change safety net take over) if there's
- *  nothing to restore or the geometry never settles within EARLY_RESTORE_MAX_FRAMES. */
+ *  nothing to restore or the geometry never settles within EARLY_RESTORE_MAX_FRAMES.
+ *  Used for LP→RM only; RM→LP uses the Promise-chained scheduleEarlyRestoreLP. */
 function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: string): void {
+  _lpEarlyRestoreDone = false; // reset for this new transition
+  _rmEarlyRestoreDone = false;
   const src = fromMode === "preview" ? getRMLastAnchor() : getLPLastAnchor();
   if (!(src.file === file && src.anchor)) return; // nothing to restore early
   const seedAnchor = src.anchor;
   const seedPct = getLastFallbackPct();
 
+  // Cancel any previous early restore before starting a new one.
+  if (_earlyRestoreId !== null) {
+    cancelAnimationFrame(_earlyRestoreId);
+    _earlyRestoreId = null;
+  }
+
   let frames = EARLY_RESTORE_MAX_FRAMES;
   let nativeTried = false;
   const poll = () => {
+    _earlyRestoreId = null;
     const view = app.workspace.activeLeaf?.view as any;
     if ((view?.getMode?.() ?? "") !== toMode) return;   // switched away / superseded
     if ((view?.file?.path ?? "") !== file) return;      // file changed
     const sc = incomingScrollerOf(view, toMode);
     if (!sc || sc.clientHeight === 0) {                  // not laid out yet
-      if (--frames > 0) requestAnimationFrame(poll);
+      if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
       return;
     }
     // frame N, pre-paint: try precise pixel restore first (cached views).
@@ -1793,14 +1932,22 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
         enterRestoreGuard();
-        if (--frames > 0) requestAnimationFrame(poll);
+        if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
         return;
       }
     }
     exitRestoreGuard();
+    if (ok && toMode === "source") {
+      // Mark RM→LP early restore as done so handleModeSwitch won't re-seed
+      // the same anchor for a redundant deferred restore.
+      _lpEarlyRestoreDone = true;
+    }
+    if (ok && toMode === "preview") {
+      _rmEarlyRestoreDone = true;
+    }
     if (toMode === "preview") scheduleRMHold(app, file, seedAnchor, seedPct, RM_EARLY_HOLD_FRAMES);
   };
-  requestAnimationFrame(poll);
+  _earlyRestoreId = requestAnimationFrame(poll);
 }
 
 /** Install the early-restore hook (Phase 1). Returns an un-patch function; pass
@@ -1821,7 +1968,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
       // Step-3.1 verification logging (kept through Phase 1).
       const seq = ++_switchEntrySeq;
       const inc = incomingScrollerOf(this, toMode);
-      logger.debug("SWITCH setState-enter", {
+      log.debug("SWITCH setState-enter", {
         seq, t: Math.round(performance.now()),
         from: fromMode || "?", to: toMode || "?", file, isSwitch,
         incomingBuilt: !!inc, clientH: inc?.clientHeight ?? -1,
@@ -1832,7 +1979,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
         try {
           const nowMode = self?.getMode?.() ?? "?";
           const sc = incomingScrollerOf(self, nowMode);
-          logger.debug("SWITCH setState-raf", {
+          log.debug("SWITCH setState-raf", {
             seq, t: Math.round(performance.now()), mode: nowMode,
             clientH: sc?.clientHeight ?? -1,
             scrollTop: sc ? Math.round(sc.scrollTop) : -1,
@@ -1843,7 +1990,17 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
 
     const ret = original.call(this, state, result);
     if (isSwitch) {
-      try { scheduleEarlyRestore(app, fromMode, toMode, file); } catch { /* never break setState */ }
+      if (toMode === "source") {
+        // RM→LP: CM is non-virtualized, scrollDOM is ready when setState resolves.
+        // Use .then() microtask to skip the rAF wait (up to 16ms) and restore
+        // before the height-map reconstruction tail grows (24→354ms with images).
+        ret.then(() => {
+          try { scheduleEarlyRestoreLP(app, fromMode, file); } catch { /* never break setState */ }
+        });
+      } else {
+        // LP→RM: RM preview is virtualized, keep rAF polling.
+        try { scheduleEarlyRestore(app, fromMode, toMode, file); } catch { /* never break setState */ }
+      }
     }
     // Defend against spurious internal setState that re-renders the RM preview
     // from scratch, discarding our restored scroll position. Obsidian fires these
@@ -1852,13 +2009,23 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
     if (!isSwitch && toMode === "preview") {
       const sc = incomingScrollerOf(this, "preview");
       const saved = sc?.scrollTop ?? 0;
-      if (saved > 0) {
+
+      const rmAnchor = getRMLastAnchor().anchor;
+      // Defend when scrollTop > 0 (normal snapshot), or when we have a
+      // stored anchor whose scrollTop was already trashed to 0 by
+      // concurrent DOM disruption (e.g. post-processor widget destroy).
+      if (saved > 0 || rmAnchor) {
         ret.then(() => {
           requestAnimationFrame(() => {
             const sc2 = incomingScrollerOf(this, "preview");
             if (sc2 && sc2.scrollTop === 0 && sc2.scrollHeight > sc2.clientHeight) {
-              sc2.scrollTop = saved;
-              logger.debug("SWITCH spurious-reset defended", { saved });
+              if (saved > 0) {
+                sc2.scrollTop = saved;
+              } else if (rmAnchor) {
+                setActiveAnchor(rmAnchor);
+                restoreContentAnchor(app);
+              }
+              log.debug("SWITCH spurious-reset defended", { saved, hadAnchor: !!rmAnchor });
             }
           });
         });
@@ -1878,6 +2045,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
  *  reading view is often cached, so its post-processor afterRender may not
  *  re-run — scheduleRMDeferredRestore guarantees the restore fires anyway. */
 export function onViewModeChange(app: App): void {
+  cancelAllRestoreChains(); // kill any pending RM restore chains from prior switches
   const wasNotLP = getLastMode() !== "source";
   const wasNotRM = getLastMode() !== "preview";
   probeSwitchScroll(app, 10, 10); // DIAGNOSTIC: trace native→restore scroll timeline
@@ -1934,7 +2102,7 @@ function handleModeSwitch(app: App, mode: string, file: string, trigger: string)
   if (!(lastMode && lastMode !== mode)) return;
 
   const newDocH = computeDocH(app, mode);
-  logger.info("VIEWPORT mode-switch", {
+  log.info("VIEWPORT mode-switch", {
     from: lastMode, to: mode, trigger, file,
     oldDocH: getLastDocH(), newDocH,
     docHRatio: getLastDocH() > 0 && newDocH > 0 ? Math.round(newDocH / getLastDocH() * 100) : 0,
@@ -1943,9 +2111,9 @@ function handleModeSwitch(app: App, mode: string, file: string, trigger: string)
   // editor picks up the updated markdown before scroll is restored.
   if (lastMode === "preview" && mode === "source") {
     const pendingCount = getPendingAlignmentCount();
-    logger.info("ALIGN flush trigger: RM→LP switch", { pendingCount });
+    log.info("ALIGN flush trigger: RM→LP switch", { pendingCount });
     const modified = flushPendingAlignments(app);
-    logger.info("ALIGN flush done", { modifiedFiles: [...modified], remaining: getPendingAlignmentCount() });
+    log.info("ALIGN flush done", { modifiedFiles: [...modified], remaining: getPendingAlignmentCount() });
     for (const path of modified) invalidateImageRowIndex(path);
     // Immediately rebuild the index for the current file so the deferred
     // restore (which fires next) can use image-row-based disambiguation
@@ -1954,20 +2122,29 @@ function handleModeSwitch(app: App, mode: string, file: string, trigger: string)
   }
   // Seed the restore anchor from the OUTGOING mode's slot, so the
   // incoming view's stale-scroll noise can't hijack it.
-  const src = lastMode === "preview" ? getRMLastAnchor() : getLPLastAnchor();
-  if (src.file === file && src.anchor) {
-    setActiveAnchor(src.anchor);
-    // Also seed the coarse fallback percentage: the RM deferred restore uses
-    // it to force-render a virtualized target region when the precise anchor
-    // can't resolve yet. Cleared on the first successful precise restore.
-    if (getLastFallbackPct() >= 0) setFallbackPct(getLastFallbackPct());
-    logger.info("VIEWPORT anchor-captured", {
-      fromMode: lastMode,
-      ...anchorLogFields(src.anchor),
-    });
-  } else if (src.file === file && getLastFallbackPct() >= 0) {
-    setFallbackPct(getLastFallbackPct());
-    logger.info("VIEWPORT fallback-captured", { fromMode: lastMode, pct: Math.round(getLastFallbackPct() * 100) });
+  // When the early restore (from setState) has already handled this
+  // transition, skip re-seeding to avoid a redundant second restore
+  // from the deferred-restore path.
+  if (lastMode === "preview" && mode === "source" && _lpEarlyRestoreDone) {
+    _lpEarlyRestoreDone = false;
+  } else if (lastMode === "source" && mode === "preview" && _rmEarlyRestoreDone) {
+    _rmEarlyRestoreDone = false;
+  } else {
+    const src = lastMode === "preview" ? getRMLastAnchor() : getLPLastAnchor();
+    if (src.file === file && src.anchor) {
+      setActiveAnchor(src.anchor);
+      // Also seed the coarse fallback percentage: the RM deferred restore uses
+      // it to force-render a virtualized target region when the precise anchor
+      // can't resolve yet. Cleared on the first successful precise restore.
+      if (getLastFallbackPct() >= 0) setFallbackPct(getLastFallbackPct());
+      log.info("VIEWPORT anchor-captured", {
+        fromMode: lastMode,
+        ...anchorLogFields(src.anchor),
+      });
+    } else if (src.file === file && getLastFallbackPct() >= 0) {
+      setFallbackPct(getLastFallbackPct());
+      log.info("VIEWPORT fallback-captured", { fromMode: lastMode, pct: Math.round(getLastFallbackPct() * 100) });
+    }
   }
 }
 
@@ -2051,7 +2228,7 @@ function logViewportState(app: App, trigger: string): void {
     }
   }
 
-  logger.info("VIEWPORT", {
+  log.info("VIEWPORT", {
     trigger, mode, file,
     scrollY: Math.round(scrollY), viewportH, docH,
     scrollPct: docH > 0 ? Math.round(scrollY / docH * 100) : 0,
@@ -2070,7 +2247,7 @@ export function schedulePendingFlush(app: App): void {
   if (getFlushTimer()) clearFlushTimer();
   setFlushTimer(setTimeout(() => {
     setFlushTimer(0 as any);
-    logger.info("VIEWPORT flush-start", { pendingCount: getPendingAlignmentCount() });
+    log.info("VIEWPORT flush-start", { pendingCount: getPendingAlignmentCount() });
     const modified = flushPendingAlignments(app);
     for (const path of modified) invalidateImageRowIndex(path);
   }, 0));
