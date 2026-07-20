@@ -94,6 +94,24 @@ export function getLPLastAnchor(): LastAnchorSlot {
   return { anchor: _lpLastAnchor, file: _lpLastAnchorFile };
 }
 
+// ── Multi-anchor list (RM capture) ───────────────────────────────────
+// In addition to the single primary anchor, capture up to 3 visible text
+// blocks from RM. On LP restore, resolve all of them and validate spatial
+// consistency — a consensus across multiple anchors is more robust than
+// any single anchor's disambiguation priors when the fragment is ambiguous.
+
+let _rmLastAnchorList: ViewportAnchor[] = [];
+let _rmLastAnchorListFile = "";
+
+export function setRMLastAnchorList(anchors: ViewportAnchor[], file: string): void {
+  _rmLastAnchorList = anchors;
+  _rmLastAnchorListFile = file;
+}
+
+export function getRMLastAnchorList(): { anchors: ViewportAnchor[]; file: string } {
+  return { anchors: _rmLastAnchorList, file: _rmLastAnchorListFile };
+}
+
 // ── Fallback scroll percentage ──────────────────────────────────────
 
 let _fallbackPct = -1;

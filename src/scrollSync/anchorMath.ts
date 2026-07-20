@@ -117,6 +117,27 @@ export function sectionIndexEstimateY(
   return y;
 }
 
+/** Reverse of ledgerYForLine: map a document-space Y (pixels from content top)
+ *  to the approximate 1-based line whose section-top falls at or below Y.
+ *  Within a section, line number is linearly interpolated from the height ratio.
+ *  Returns -1 when Y is past the last section or sections are unusable. */
+export function ledgerLineForY(sections: LedgerSection[], y: number): number {
+  if (y < 0 || sections.length === 0) return -1;
+  let accumulatedY = 0;
+  for (const s of sections) {
+    if (typeof s?.lineEnd !== "number" || typeof s?.lineStart !== "number"
+        || typeof s?.height !== "number") return -1;
+    if (y < accumulatedY + s.height) {
+      const lineSpan = s.lineEnd - s.lineStart + 1;
+      if (lineSpan <= 0) return s.lineStart + 1; // 1-based
+      const ratio = Math.max(0, Math.min(1, (y - accumulatedY) / s.height));
+      return s.lineStart + Math.floor(ratio * lineSpan) + 1; // convert 0-based → 1-based
+    }
+    accumulatedY += s.height > 0 ? s.height : 0;
+  }
+  return -1;
+}
+
 /** Total ledger height (sum of section heights). -1 on unusable shape. Used to
  *  sanity-check the ledger against the live scrollHeight before trusting it. */
 export function ledgerTotalHeight(sections: LedgerSection[]): number {

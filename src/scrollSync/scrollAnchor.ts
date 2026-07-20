@@ -14,7 +14,7 @@ import {
 import {
   clamp01, intraRowRatio, gapRatioFromGeom,
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, sectionIndexEstimateY, LedgerSection,
+  nearestIndexBy, ledgerYForLine, ledgerLineForY, ledgerTotalHeight, sectionIndexEstimateY, LedgerSection,
 } from "./anchorMath";
 import { assertNever } from "../utils";
 import { normalizeAnchorText } from "./textAnchor";
@@ -25,7 +25,7 @@ import {
   getFallbackPct, setFallbackPct, getLastFallbackPct, setLastFallbackPct,
   setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor,
   getLastMode, setLastMode, getLastDocH, setLastDocH,
-  getImageLineRe,
+  getImageLineRe, setRMLastAnchorList, getRMLastAnchorList,
 } from "./anchorStore";
 
 // Re-export the store accessors that form scrollAnchor's public API, so the
@@ -338,29 +338,103 @@ function captureAnchorRM(app: App, filePath: string): ViewportAnchor | null {
   const viewportBottomClient = previewRect.top + previewEl.clientHeight;
   const imgIndex = getImageRowIndex(filePath);
 
-  // Strategy A: first visible text block that is not an image embed.
+  // Strategy A: collect up to 3 visible text blocks. Prefer headings
+  // (h1-h6) over paragraphs, list items, and blockquotes — heading text
+  // survives normalizeAnchorText with better cross-mode fidelity, and
+  // metadataCache provides precise line numbers for them.
+  // Build a heading→line map from metadataCache for precise calibration.
+  const headingLineMap = new Map<string, number>(); // trimmed heading text → 1-based line
+  try {
+    const fc = app.metadataCache?.getFileCache((app.workspace.activeLeaf?.view as any)?.file);
+    if (fc?.headings) {
+      for (const h of fc.headings) {
+        const key = h.heading.trim();
+        if (key && !headingLineMap.has(key)) headingLineMap.set(key, h.position.start.line + 1);
+      }
+    }
+  } catch { /* metadataCache unavailable */ }
+
+  // Score function for anchor-text quality: lower = better.
+  const quality = (el: HTMLElement): number => {
+    const t = el.tagName;
+    if (/^H[1-6]$/.test(t)) return 1;    // best: precise line from metadataCache
+    if (el.classList.contains("callout-title")) return 2;
+    if (t === "P") return 3;
+    if (t === "BLOCKQUOTE") return 4;
+    if (t === "LI") return 5;            // worst: complex nesting breaks normalization
+    return 6;
+  };
+
+  // Get all visible blocks, sort by quality, then take up to 3.
   const blocks = rmTextBlocks(previewEl);
+  const visibleBlocks: Array<{ el: HTMLElement; rect: DOMRect; topDoc: number }> = [];
   for (const block of blocks) {
     const rect = block.getBoundingClientRect();
-    if (rect.bottom <= viewportTopClient) continue; // above viewport
-    if (rect.top >= viewportBottomClient) break;    // below viewport
-    // Table cells make terrible anchors: rmTextBlocks yields individual
-    // td/th blocks whose text ("页面") is short and repeats all over the
-    // document — the LP capture side skips table rows for the same reason.
+    if (rect.bottom <= viewportTopClient) continue;
+    if (rect.top >= viewportBottomClient) break;
     if (block.closest("table")) continue;
     const text = normalizeAnchorText(block.textContent ?? "");
     if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
-    const blockTopDoc = rect.top - previewRect.top + previewEl.scrollTop;
+    visibleBlocks.push({ el: block, rect, topDoc: rect.top - previewRect.top + previewEl.scrollTop });
+  }
+  visibleBlocks.sort((a, b) => quality(a.el) - quality(b.el));
+
+  const collected: ViewportAnchor[] = [];
+  const secs = getLedgerSections(app, filePath);
+  for (const { el: block, rect, topDoc: blockTopDoc } of visibleBlocks) {
+    const text = normalizeAnchorText(block.textContent ?? "");
     const { before, after } = nearestImgRowsRM(previewEl, imgIndex, previewRect, blockTopDoc);
-    return {
+    const anchor: ViewportAnchor = {
       kind: "text",
       anchorText: text.slice(0, 100),
       anchorOffset: rect.top - viewportTopClient,
       nearestImgBefore: before,
       nearestImgAfter: after,
       docRatio: previewEl.scrollHeight > 0 ? blockTopDoc / previewEl.scrollHeight : -1,
-      totalLines: -1, // unavailable from RM; native-scroll uses other means
+      totalLines: -1,
     };
+    // Enrich with line-number priors. For headings, prefer the precise
+    // metadataCache position; fall back to ledger estimation for all others.
+    if (/^H[1-6]$/.test(block.tagName)) {
+      const dataHeading = block.getAttribute("data-heading")?.trim() ?? "";
+      const preciseLine = headingLineMap.get(dataHeading);
+      if (preciseLine && preciseLine > 0) {
+        anchor.anchorLine = preciseLine;
+        if (secs) {
+          anchor.totalLines = secs[secs.length - 1]?.lineEnd ?? -1;
+          const { before: lb, after: la } = nearestImgRowsByLine(imgIndex, preciseLine);
+          anchor.nearestImgBefore = lb;
+          anchor.nearestImgAfter = la;
+          const ledgerY = ledgerYForLine(secs, preciseLine - 1);
+          if (ledgerY >= 0) {
+            const totalH = ledgerTotalHeight(secs);
+            if (totalH > 0) anchor.docRatio = ledgerY / totalH;
+          }
+        }
+      }
+    }
+    // Fall back to ledger estimation when metadataCache wasn't used.
+    if (!anchor.anchorLine && secs) {
+      const line = ledgerLineForY(secs, blockTopDoc);
+      if (line > 0) {
+        anchor.anchorLine = line;
+        anchor.totalLines = secs[secs.length - 1]?.lineEnd ?? -1;
+        const { before: lb, after: la } = nearestImgRowsByLine(imgIndex, line);
+        anchor.nearestImgBefore = lb;
+        anchor.nearestImgAfter = la;
+        const ledgerY = ledgerYForLine(secs, line - 1);
+        if (ledgerY >= 0) {
+          const totalH = ledgerTotalHeight(secs);
+          if (totalH > 0) anchor.docRatio = ledgerY / totalH;
+        }
+      }
+    }
+    collected.push(anchor);
+    if (collected.length >= 3) break;
+  }
+  if (collected.length > 0) {
+    setRMLastAnchorList(collected, filePath);
+    return collected[0];
   }
 
   // Strategy B: viewport is entirely image rows → image-row ratio.
@@ -685,6 +759,30 @@ function findBestTextLine(
   if (lines.length === 1) return lines[0];
 
   // Multiple matches: disambiguate by the strongest prior available.
+  // 0) Direct anchor-line number (ledger-derived from RM or native from LP).
+  //    It is a strong hint, but when ledger-derived it is an ESTIMATE that
+  //    can be off by a few lines. Validate the best match against docRatio;
+  //    if the winner contradicts the captured position, try the next-closest
+  //    candidates before giving up.
+  const sd = cm.scrollDOM;
+  const scrollH = sd?.scrollHeight ?? 0;
+  if (anchor.anchorLine && anchor.anchorLine > 0) {
+    // Sort by distance to anchorLine so we try closest candidates first.
+    const sorted = [...lines].sort((a, b) => Math.abs(a - anchor.anchorLine!) - Math.abs(b - anchor.anchorLine!));
+    if (anchor.docRatio >= 0 && scrollH > 0) {
+      for (const ln of sorted) {
+        const ratio = lineBlockByNumber(cm, asLine1(ln)).top / scrollH;
+        if (Math.abs(ratio - anchor.docRatio) <= RATIO_GATE_TOL) {
+          return ln;
+        }
+      }
+      // No candidate passed the consistency gate — fall through to other priors.
+    } else {
+      // No docRatio to cross-check — trust anchorLine alone (LP-captured anchors
+      // always have docRatio, so this only runs for pre-docRatio RM captures).
+      return sorted[0];
+    }
+  }
   // 1) Nearest image row (anchors to a concrete row's neighborhood).
   const imgIndex = getImageRowIndex(filePath);
   let expectedLine = -1;
@@ -700,8 +798,6 @@ function findBestTextLine(
   // 2) Position-ratio prior: pick the match whose pixel position best matches
   //    where the anchor sat in the document. Robust to RM virtualization that
   //    leaves nearestImg at 0.
-  const sd = cm.scrollDOM;
-  const scrollH = sd?.scrollHeight ?? 0;
   if (anchor.docRatio >= 0 && scrollH > 0) {
     const ratios = lines.map(ln => lineBlockByNumber(cm, asLine1(ln)).top / scrollH);
     return lines[nearestIndexBy(ratios, anchor.docRatio)];
@@ -796,6 +892,30 @@ export function clearSectionSnapshot(file?: string): void {
 const LEDGER_DOCH_TOLERANCE = 0.2;  // ledger sum vs live scrollHeight sanity band
 const LEDGER_PARK_TOL_MIN = 1500;   // px — legitimate estimate drift stays far below
 const LEDGER_PARK_TOL_FRAC = 0.05;  // of docH — transient discrepancy is ~65% of docH
+
+/** Try to get a usable height ledger for the current RM view. Prefers the live
+ *  renderer.sections (validated against scrollHeight), falls back to the warmup
+ *  snapshot. Returns null when neither source is available or trusted. */
+function getLedgerSections(app: App, file?: string): LedgerSection[] | null {
+  const view = app.workspace.activeLeaf?.view as any;
+  const secs = view?.previewMode?.renderer?.sections;
+  if (Array.isArray(secs) && secs.length > 0) {
+    const total = ledgerTotalHeight(secs);
+    if (total > 0) {
+      const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+      if (docH <= 0 || Math.abs(total - docH) / docH <= LEDGER_DOCH_TOLERANCE) {
+        return secs as LedgerSection[];
+      }
+    }
+  }
+  // Fall back to warmup snapshot.
+  const key = file ?? (view?.file?.path ?? "");
+  const snap = _sectionSnapshot.get(key);
+  if (snap && snap.length > 0 && ledgerTotalHeight(snap) > 0) {
+    return snap;
+  }
+  return null;
+}
 const RATIO_GATE_TOL = 0.15;        // LP vs RM docRatio naturally differs by a few pts
 
 function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: number): number {
@@ -1716,12 +1836,18 @@ function scheduleLPDeferredRestore(app: App): void {
     _lpNativeTried = false;
     exitGuardOnce();
 
+    // Guard the post-restore anchor capture: a scroll event from the restore
+    // write may still be queued and would overwrite _lpLastAnchor with wrong
+    // text if it fires after us. Suppress scroll-capture for 50ms so any
+    // queued event lands inside the guard window.
+    enterRestoreGuard();
     const anchor = captureContentAnchor(app);
     if (anchor) {
       setLPLastAnchor(anchor, view?.file?.path ?? "");
     } else {
       setLPLastAnchor(null, getLPLastAnchor().file);
     }
+    setTimeout(() => exitRestoreGuard(), 50);
     const pct = computeScrollPct(app);
     if (pct >= 0) setLastFallbackPct(pct);
     driveViewportTransition(app, "lp-after-restore");
@@ -1857,33 +1983,98 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
 
   let frames = 4;
   let nativeTried = false;
+  let guardActive = false;
+
+  const exitGuardIfNeeded = () => {
+    if (guardActive) { exitRestoreGuard(); guardActive = false; }
+  };
 
   const poll = () => {
     _earlyRestoreId = null;
     const view = app.workspace.activeLeaf?.view as any;
-    if ((view?.getMode?.() ?? "") !== "source") return;
-    if ((view?.file?.path ?? "") !== file) return;
+    if ((view?.getMode?.() ?? "") !== "source") { exitGuardIfNeeded(); return; }
+    if ((view?.file?.path ?? "") !== file) { exitGuardIfNeeded(); return; }
     const sc = view?.editor?.cm?.scrollDOM as HTMLElement | null;
     if (!sc || sc.clientHeight === 0) {
       if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
       return;
     }
-    // First frame with CM ready: write immediately. The stale CM auto-restore
-    // position is in the scrollDOM right now — overwrite it before paint.
-    const ok = applyEarly(app, seedAnchor, seedPct);
+    // Suppress scroll events during early restore so the stale CM auto-scroll
+    // (and scroll events from our forced write) cannot pollute _lpLastAnchor
+    // with wrong-position text. Enter once, exit once when the poll settles.
+    if (!guardActive) {
+      enterRestoreGuard();
+      guardActive = true;
+    }
+    let ok = applyEarly(app, seedAnchor, seedPct);
+    // Multi-anchor fallback: if the primary anchor can't resolve (fragment
+    // is ambiguous and spatial priors are insufficient to disambiguate),
+    // try each sibling anchor captured from the same RM viewport — one of
+    // them may have a more unique fragment or stronger priors.
+    if (!ok && seedAnchor.kind === 'text') {
+      const list = getRMLastAnchorList();
+      if (list.file === file && list.anchors.length > 1) {
+        for (const sibling of list.anchors) {
+          if (sibling.kind !== 'text') continue;
+          if (sibling.anchorText === seedAnchor.anchorText) continue;
+          if (applyEarly(app, sibling, seedPct)) {
+            ok = true;
+            log.info('VIEWPORT anchor-fallback', {
+              from: seedAnchor.anchorText.slice(0, 20),
+              to: sibling.anchorText.slice(0, 20),
+            });
+            break;
+          }
+        }
+      }
+    }
     if (!ok && !nativeTried) {
       nativeTried = true;
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
-        enterRestoreGuard();
         if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
+        else { exitGuardIfNeeded(); }
         return;
       }
     }
-    exitRestoreGuard();
+    exitGuardIfNeeded();
     if (ok) _lpEarlyRestoreDone = true;
     // Don't re-seed: we want the deferred restore to be a no-op (no active
     // anchor) so it won't issue a second write that looks like jitter.
+
+    // ── Phase-2 refinement ─────────────────────────────────────────
+    // CM's height map continues to build for ~100ms after display:none→visible.
+    // The early write above used lb.top values that may be based on estimated
+    // line heights. Schedule a deferred cross-check: once the height map
+    // settles, re-compute targetY and correct the scroll position if the
+    // line's block-top has shifted.
+    if (ok && seedAnchor.kind === "text") {
+      const saved = seedAnchor;
+      setTimeout(() => {
+        try {
+          const v = app.workspace.activeLeaf?.view as any;
+          if ((v?.getMode?.() ?? "") !== "source") return;
+          if ((v?.file?.path ?? "") !== file) return;
+          const cm = v?.editor?.cm;
+          const sd = cm?.scrollDOM as HTMLElement | null;
+          if (!sd || sd.clientHeight === 0) return;
+          const line = findBestTextLine(cm, saved, file);
+          if (line > 0) {
+            const lb = lineBlockByNumber(cm, asLine1(line));
+            const inset = lpInset(cm, sd);
+            const refined = textTargetY(lb.top, inset, saved.anchorOffset);
+            const drift = refined - sd.scrollTop;
+            if (Math.abs(drift) > 15) {
+              sd.scrollTop = refined;
+              log.info("VIEWPORT lp-refined", {
+                line, drift: Math.round(drift),
+                capturedOffset: Math.round(saved.anchorOffset),
+              });
+            }
+          }
+        } catch { /* refinement must never throw */ }
+      }, 100);
+    }
   };
 
   _earlyRestoreId = requestAnimationFrame(poll);
@@ -1912,31 +2103,64 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
 
   let frames = EARLY_RESTORE_MAX_FRAMES;
   let nativeTried = false;
+  let guardActive = false;
+
+  const exitGuardIfNeeded = () => {
+    if (guardActive) { exitRestoreGuard(); guardActive = false; }
+  };
+
   const poll = () => {
     _earlyRestoreId = null;
     const view = app.workspace.activeLeaf?.view as any;
-    if ((view?.getMode?.() ?? "") !== toMode) return;   // switched away / superseded
-    if ((view?.file?.path ?? "") !== file) return;      // file changed
+    if ((view?.getMode?.() ?? "") !== toMode) { exitGuardIfNeeded(); return; }
+    if ((view?.file?.path ?? "") !== file) { exitGuardIfNeeded(); return; }
     const sc = incomingScrollerOf(view, toMode);
-    if (!sc || sc.clientHeight === 0) {                  // not laid out yet
+    if (!sc || sc.clientHeight === 0) {
       if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
       return;
+    }
+    // Suppress scroll events during early restore so the forced write (and any
+    // stale scroller auto-restore) cannot pollute the incoming mode's anchor slot.
+    if (!guardActive) {
+      enterRestoreGuard();
+      guardActive = true;
     }
     // frame N, pre-paint: try precise pixel restore first (cached views).
     // On cold RM render the target embeds may not exist yet — fall back to
     // native line-based scroll to force the renderer to build DOM around the
     // target, then retry. If even that fails, let layout-change handle it.
-    const ok = applyEarly(app, seedAnchor, seedPct);
+    let ok = applyEarly(app, seedAnchor, seedPct);
+    // Multi-anchor fallback: if the primary anchor can't resolve (fragment
+    // is ambiguous and spatial priors are insufficient to disambiguate),
+    // try each sibling anchor captured from the same RM viewport — one of
+    // them may have a more unique fragment or stronger priors.
+    if (!ok && seedAnchor.kind === 'text') {
+      const list = getRMLastAnchorList();
+      if (list.file === file && list.anchors.length > 1) {
+        for (const sibling of list.anchors) {
+          if (sibling.kind !== 'text') continue;
+          if (sibling.anchorText === seedAnchor.anchorText) continue;
+          if (applyEarly(app, sibling, seedPct)) {
+            ok = true;
+            log.info('VIEWPORT anchor-fallback', {
+              from: seedAnchor.anchorText.slice(0, 20),
+              to: sibling.anchorText.slice(0, 20),
+            });
+            break;
+          }
+        }
+      }
+    }
     if (!ok && !nativeTried) {
       nativeTried = true;
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
-        enterRestoreGuard();
         if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
+        else { exitGuardIfNeeded(); }
         return;
       }
     }
-    exitRestoreGuard();
+    exitGuardIfNeeded();
     if (ok && toMode === "source") {
       // Mark RM→LP early restore as done so handleModeSwitch won't re-seed
       // the same anchor for a redundant deferred restore.
@@ -1974,6 +2198,34 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
         incomingBuilt: !!inc, clientH: inc?.clientHeight ?? -1,
         scrollTop: inc ? Math.round(inc.scrollTop) : -1,
       });
+
+      // ── RM DOM bloat diagnosis ──────────────────────────────────────
+      // Hypothesis: RM preview DOM retains <img>/<embed> across switches,
+      // and the accumulated nodes slow down CM's full-document layout when
+      // it becomes visible (RM→LP).  Capture outgoing RM DOM stats for
+      // correlation with the CM mount latency logged in setState-raf.
+      if (isSwitch && fromMode === "preview") {
+        try {
+          const outgoingEl = (this?.contentEl ?? this?.containerEl) as HTMLElement | undefined;
+          const rmView = outgoingEl?.querySelector(".markdown-preview-view") as HTMLElement | null;
+          if (rmView) {
+            const all = rmView.querySelectorAll("*");
+            const imgs = rmView.querySelectorAll("img");
+            const embeds = rmView.querySelectorAll("embed, iframe, .internal-embed, .image-embed");
+            const totalNodes = rmView.getElementsByTagName?.("*")?.length ?? all.length;
+            log.info("RM-DOM-STATS", {
+              seq, file,
+              totalNodes,
+              imgCount: imgs.length,
+              embedCount: embeds.length,
+              scrollHeight: Math.round(rmView.scrollHeight),
+              clientHeight: Math.round(rmView.clientHeight),
+              // ratio > 1 means virtualized content is loaded
+              virtualRatio: Math.round(rmView.scrollHeight / Math.max(1, rmView.clientHeight)),
+            });
+          }
+        } catch { /* diagnostic must never throw */ }
+      }
       const self = this;
       requestAnimationFrame(() => {
         try {
