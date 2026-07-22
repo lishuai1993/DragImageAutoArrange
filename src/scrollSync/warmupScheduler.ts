@@ -1,14 +1,14 @@
 import { App, WorkspaceLeaf } from "obsidian";
 import { logger } from "../logger";
 const log = logger.channel("warmupScheduler");
-import { ENABLE_WARMUP_PROBE } from "./warmupProbe";
+import { ENABLE_WARMUP_PROBE, cancelWarmupProbe } from "./warmupProbe";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
 const IDLE_WAIT_MS = 10_000;         // 10s idle after last edit → trigger once
 const USER_ACTIVE_WINDOW_MS = 500;   // considered "active" if interacted within this window
 const USER_BUSY_BACKOFF_MS = 2000;   // wait 2s before retrying when user is busy
-const P0_DELAY_MS = 2000;            // P0: wait for LP editor to stabilise
+const P0_DELAY_MS = 500;             // P0: wait for LP editor to stabilise
 const P1_DELAY_MS = 1000;            // P1/P2: LP editor already settled in background
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ export function registerWarmupRunner(runner: WarmupRunner): void {
 let _rmFrequency = new Map<string, number>();
 let _warmedFiles = new Set<string>();
 let _queue: WarmupTask[] = [];
+let _p0RetryQueue: string[] = [];
 let _activeAbort: { aborted: boolean } | null = null;
 let _schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 let _idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -138,14 +139,17 @@ async function executeTask(
   }
 }
 
-/** Run P0 warmup for the active file. Preempts running P2 tasks. */
+/** Run P0 warmup for the active file. Preempts any running background task. */
 async function runP0Warmup(app: App, file: string): Promise<void> {
-  // Preempt running P2 task
-  if (_activeAbort && _queue.length > 0 && _queue[0]?.priority === 2) {
+  // Cancel legacy warmupProbe (clears global _active lock) so runWarmup can start.
+  cancelWarmupProbe();
+
+  // Preempt running P1/P2 task
+  if (_activeAbort && _queue.length > 0 && _queue[0]?.priority >= 1) {
     _activeAbort.aborted = true;
     _activeAbort = null;
     if (_schedulerTimer) { clearTimeout(_schedulerTimer); _schedulerTimer = null; }
-    log.debug("WARMUP P2 preempted for P0", { file });
+    log.debug("WARMUP background task preempted for P0", { file });
   }
 
   // Remove just-warmed flag so idle re-warmups aren't blocked
@@ -177,7 +181,19 @@ async function processNext(app: App): Promise<void> {
   if (_running || !ENABLE_WARMUP_PROBE) return;
   _running = true;
 
-  while (_queue.length > 0) {
+  while (_queue.length > 0 || _p0RetryQueue.length > 0) {
+    // ── Drain P0 retry queue first (preempted P0s that were blocked). ──
+    while (_p0RetryQueue.length > 0) {
+      const retryFile = _p0RetryQueue.shift()!;
+      const activeFile = app.workspace.getActiveFile()?.path ?? "";
+      if (retryFile === activeFile && isFileOpen(app, retryFile)) {
+        log.info("WARMUP P0 retry", { file: retryFile });
+        _running = false;
+        runP0Warmup(app, retryFile);
+        return; // runP0Warmup is async; the scheduler will resume naturally
+      }
+    }
+
     // ── Defer if user is actively interacting ──
     if (isUserActive()) {
       _schedulerTimer = setTimeout(() => {
@@ -273,6 +289,7 @@ export function cancelAllWarmups(): void {
   for (const t of _idleTimers.values()) clearTimeout(t);
   _idleTimers.clear();
   _queue = [];
+  _p0RetryQueue = [];
   _running = false;
   log.info("WARMUP all tasks cancelled");
 }

@@ -14,7 +14,7 @@ import {
 import {
   clamp01, intraRowRatio, gapRatioFromGeom,
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerLineForY, ledgerTotalHeight, sectionIndexEstimateY, LedgerSection,
+  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY, LedgerSection,
 } from "./anchorMath";
 import { assertNever } from "../utils";
 import { normalizeAnchorText } from "./textAnchor";
@@ -242,6 +242,33 @@ export function captureContentAnchor(app: App): ViewportAnchor | null {
 // disambiguation prior — skip them and anchor on the next richer line instead.
 const MIN_ANCHOR_TEXT_LEN = 4;
 
+/** Table row start chars: `|` + Unicode box-drawing verticals. */
+const TABLE_ROW_RE = /^\s*[|│├┌└]/;
+
+/** Table cell separators: `|` + box-drawing verticals / junctions. */
+const TABLE_SPLIT_RE = /[|│┬┴┼┤├]/;
+
+/** Strip all Box Drawing block chars (U+2500–U+257F) from cell content. */
+const BOX_DRAWING_RE = /[─-╿]/g;
+
+/** Split a source line into anchor-text candidates.
+ *  YAML frontmatter lines are skipped — they are metadata, not content.
+ *  Table rows are split into individual cell texts for cross-mode matching. */
+function extractCandidates(
+  lineText: string,
+  lineNum: number,
+  fmEndLine: number | undefined
+): string[] {
+  if (fmEndLine !== undefined && lineNum <= fmEndLine + 1) return [];
+  if (TABLE_ROW_RE.test(lineText)) {
+    return lineText
+      .split(TABLE_SPLIT_RE)
+      .map((c: string) => c.replace(BOX_DRAWING_RE, "").trim())
+      .filter((c: string) => c.length > 0);
+  }
+  return [lineText];
+}
+
 function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
   const view = (app.workspace.activeLeaf?.view as any);
   const cm = view.editor?.cm;
@@ -260,34 +287,110 @@ function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
   // viewport top edge (matching RM's getBoundingClientRect frame).
 
   // Strategy A: first visible non-blank, non-image line from viewport top.
+  // Detect YAML frontmatter bounds so its key-value pairs are never captured
+  // as anchor candidates. Primary: scan for `---` delimiters (most reliable,
+  // no dependency on cache warmth). Fallback: metadataCache yaml section.
+  let fmEndLine: number | undefined;
+  if (totalLines > 1) {
+    let yamlStart = -1;
+    for (let li = 1; li <= Math.min(50, totalLines); li++) {
+      if (cm.state.doc.line(li).text.trim() === "---") {
+        if (yamlStart < 0) { yamlStart = li; }
+        else { fmEndLine = li; break; }
+      }
+    }
+  }
+  if (fmEndLine === undefined) {
+    const fc = app.metadataCache.getFileCache(view.file);
+    fmEndLine = fc?.sections?.find(s => (s as any).type === "yaml")?.position?.end?.line;
+  }
+
+  // ── Structural improvement A: pre-compute un-anchorable regions ──────
+  // Instead of enumerating every non-body text pattern (whack-a-mole), mark
+  // the entire interior of fenced code blocks as excluded. Only the fence
+  // markers need to be pattern-matched; everything between them is excluded
+  // regardless of content. This closes the gap that let ASCII-tree content
+  // lines inside ``` blocks pass through every existing filter.
+  const codeBlockRanges: [number, number][] = [];
+  for (let li = 1; li <= totalLines; li++) {
+    const t = cm.state.doc.line(li).text;
+    if (/^\s*`{3,}/.test(t) || /^\s*~{3,}/.test(t)) {
+      const last = codeBlockRanges[codeBlockRanges.length - 1];
+      if (last && last[1] < 0) {
+        last[1] = li; // closing fence
+      } else {
+        codeBlockRanges.push([li, -1]); // opening fence
+      }
+    }
+  }
+  for (const r of codeBlockRanges) { if (r[1] < 0) r[1] = totalLines; }
+
+  const isInCodeBlock = (line: number): boolean => {
+    for (const [lo, hi] of codeBlockRanges) {
+      if (line >= lo && line <= hi) return true;
+    }
+    return false;
+  };
+
   const topBlock = cm.lineBlockAtHeight(scrollTop - inset);
-  const topLine = cm.state.doc.lineAt(topBlock.from).number;
+  const topLine = Math.max(1, cm.state.doc.lineAt(topBlock.from).number);
 
   for (let i = topLine; i <= totalLines; i++) {
     const lineObj = cm.state.doc.line(i);
     const lb = cm.lineBlockAt(lineObj.from);
     const screenTop = lb.top - scrollTop + inset;
     if (screenTop >= clientH) break; // past the viewport bottom
-    if (!lineObj.text.trim()) continue;                 // blank line
-    if (getImageLineRe().test(lineObj.text)) continue; // image line
-    // Table row: LP would capture the whole "| a | b |" source line, but RM's
-    // text blocks are individual td/th CELLS — a row-level frag is never a
-    // substring of a cell's text, so such anchors are unresolvable in RM
-    // (observed as the 2.5s bounce-to-head). Anchor on the next non-table line.
-    if (/^\s*\|/.test(lineObj.text)) continue;
-    const text = normalizeAnchorText(lineObj.text);
-    if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
-    const { before, after } = nearestImgRowsByLine(imgIndex, i);
-    return {
-      kind: "text",
-      anchorText: text.slice(0, 100),
-      anchorOffset: screenTop,
-      anchorLine: i,
-      nearestImgBefore: before,
-      nearestImgAfter: after,
-      docRatio: sd.scrollHeight > 0 ? lb.top / sd.scrollHeight : -1,
-      totalLines: cm.state.doc.lines,
-    };
+    // ── Quality gate B: line must be at or below the viewport top ──────
+    // A line whose block top is above the viewport (negative screenTop) is
+    // not truly visible — it was already scrolled past. Skip it and keep
+    // scanning for the first genuine visible line.
+    if (screenTop < 0) continue;
+    if (!lineObj.text.trim()) continue;
+    if (getImageLineRe().test(lineObj.text)) continue;
+    // ── Region gate A: skip lines in un-anchorable regions ─────────────
+    if (fmEndLine !== undefined && i <= fmEndLine) continue;
+    if (isInCodeBlock(i)) continue;
+    // Single-line patterns still excluded here.
+    if (/^\s*[-*_]{3,}\s*$/.test(lineObj.text)) continue; // horizontal rule
+    if (/^\s*<\/?[a-zA-Z]/.test(lineObj.text)) continue;   // HTML tag line
+
+    const candidates = extractCandidates(lineObj.text, i, fmEndLine);
+    for (const raw of candidates) {
+      const text = normalizeAnchorText(raw);
+      if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
+      const { before, after } = nearestImgRowsByLine(imgIndex, i);
+      // Build 3-line context: prev tail + current + next head (all normalized).
+      // Increases fragment uniqueness in template-heavy documents (Phase 4).
+      const prevTail = i > 1
+        ? normalizeAnchorText(cm.state.doc.line(i - 1).text).slice(-60)
+        : "";
+      const nextHead = i < totalLines
+        ? normalizeAnchorText(cm.state.doc.line(i + 1).text).slice(0, 60)
+        : "";
+      const context = [prevTail, text, nextHead].join("\n").trim();
+      // Nearest preceding heading (Phase 4.2): scan backward for a heading line
+      // and normalize it — the # markers are stripped, leaving just the title text.
+      let headingHint: string | undefined;
+      for (let hi = i - 1; hi >= 1; hi--) {
+        const ht = cm.state.doc.line(hi).text;
+        if (/^\s*#{1,6}\s/.test(ht)) {
+          headingHint = normalizeAnchorText(ht) || undefined;
+          break;
+        }
+      }
+      return {
+        kind: "text",
+        anchorText: text.slice(0, 100),
+        anchorContext: context || undefined,
+        headingHint,
+        anchorOffset: screenTop,
+        anchorLine: i,
+        nearestImgBefore: before,
+        nearestImgAfter: after,
+        docRatio: sd.scrollHeight > 0 ? lb.top / sd.scrollHeight : -1,
+        totalLines: cm.state.doc.lines,
+      };
+    }
   }
 
   // Strategy B: viewport has no visible text → image-row or image-gap anchor.
@@ -338,103 +441,45 @@ function captureAnchorRM(app: App, filePath: string): ViewportAnchor | null {
   const viewportBottomClient = previewRect.top + previewEl.clientHeight;
   const imgIndex = getImageRowIndex(filePath);
 
-  // Strategy A: collect up to 3 visible text blocks. Prefer headings
-  // (h1-h6) over paragraphs, list items, and blockquotes — heading text
-  // survives normalizeAnchorText with better cross-mode fidelity, and
-  // metadataCache provides precise line numbers for them.
-  // Build a heading→line map from metadataCache for precise calibration.
-  const headingLineMap = new Map<string, number>(); // trimmed heading text → 1-based line
-  try {
-    const fc = app.metadataCache?.getFileCache((app.workspace.activeLeaf?.view as any)?.file);
-    if (fc?.headings) {
-      for (const h of fc.headings) {
-        const key = h.heading.trim();
-        if (key && !headingLineMap.has(key)) headingLineMap.set(key, h.position.start.line + 1);
-      }
-    }
-  } catch { /* metadataCache unavailable */ }
-
-  // Score function for anchor-text quality: lower = better.
-  const quality = (el: HTMLElement): number => {
-    const t = el.tagName;
-    if (/^H[1-6]$/.test(t)) return 1;    // best: precise line from metadataCache
-    if (el.classList.contains("callout-title")) return 2;
-    if (t === "P") return 3;
-    if (t === "BLOCKQUOTE") return 4;
-    if (t === "LI") return 5;            // worst: complex nesting breaks normalization
-    return 6;
-  };
-
-  // Get all visible blocks, sort by quality, then take up to 3.
+  // Strategy A: first visible text block that is not an image embed.
   const blocks = rmTextBlocks(previewEl);
-  const visibleBlocks: Array<{ el: HTMLElement; rect: DOMRect; topDoc: number }> = [];
-  for (const block of blocks) {
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi];
     const rect = block.getBoundingClientRect();
     if (rect.bottom <= viewportTopClient) continue;
     if (rect.top >= viewportBottomClient) break;
-    if (block.closest("table")) continue;
+    if (block.closest("pre, code, table")) continue;
     const text = normalizeAnchorText(block.textContent ?? "");
     if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
-    visibleBlocks.push({ el: block, rect, topDoc: rect.top - previewRect.top + previewEl.scrollTop });
-  }
-  visibleBlocks.sort((a, b) => quality(a.el) - quality(b.el));
-
-  const collected: ViewportAnchor[] = [];
-  const secs = getLedgerSections(app, filePath);
-  for (const { el: block, rect, topDoc: blockTopDoc } of visibleBlocks) {
-    const text = normalizeAnchorText(block.textContent ?? "");
+    const blockTopDoc = rect.top - previewRect.top + previewEl.scrollTop;
     const { before, after } = nearestImgRowsRM(previewEl, imgIndex, previewRect, blockTopDoc);
-    const anchor: ViewportAnchor = {
+    // Build 3-block context from nearest text-bearing neighbors (Phase 4).
+    const prevTail = bi > 0
+      ? normalizeAnchorText(blocks[bi - 1].textContent ?? "").slice(-60)
+      : "";
+    const nextHead = bi < blocks.length - 1
+      ? normalizeAnchorText(blocks[bi + 1].textContent ?? "").slice(0, 60)
+      : "";
+    const context = [prevTail, text, nextHead].join("\n").trim();
+    // Nearest preceding heading (Phase 4.2): scan backward in block list.
+    let headingHint: string | undefined;
+    for (let hi = bi - 1; hi >= 0; hi--) {
+      if (/^H[1-6]$/.test(blocks[hi].tagName)) {
+        headingHint = normalizeAnchorText(blocks[hi].textContent ?? "") || undefined;
+        break;
+      }
+    }
+    return {
       kind: "text",
       anchorText: text.slice(0, 100),
+      anchorContext: context || undefined,
+      headingHint,
       anchorOffset: rect.top - viewportTopClient,
       nearestImgBefore: before,
       nearestImgAfter: after,
       docRatio: previewEl.scrollHeight > 0 ? blockTopDoc / previewEl.scrollHeight : -1,
       totalLines: -1,
     };
-    // Enrich with line-number priors. For headings, prefer the precise
-    // metadataCache position; fall back to ledger estimation for all others.
-    if (/^H[1-6]$/.test(block.tagName)) {
-      const dataHeading = block.getAttribute("data-heading")?.trim() ?? "";
-      const preciseLine = headingLineMap.get(dataHeading);
-      if (preciseLine && preciseLine > 0) {
-        anchor.anchorLine = preciseLine;
-        if (secs) {
-          anchor.totalLines = secs[secs.length - 1]?.lineEnd ?? -1;
-          const { before: lb, after: la } = nearestImgRowsByLine(imgIndex, preciseLine);
-          anchor.nearestImgBefore = lb;
-          anchor.nearestImgAfter = la;
-          const ledgerY = ledgerYForLine(secs, preciseLine - 1);
-          if (ledgerY >= 0) {
-            const totalH = ledgerTotalHeight(secs);
-            if (totalH > 0) anchor.docRatio = ledgerY / totalH;
-          }
-        }
-      }
-    }
-    // Fall back to ledger estimation when metadataCache wasn't used.
-    if (!anchor.anchorLine && secs) {
-      const line = ledgerLineForY(secs, blockTopDoc);
-      if (line > 0) {
-        anchor.anchorLine = line;
-        anchor.totalLines = secs[secs.length - 1]?.lineEnd ?? -1;
-        const { before: lb, after: la } = nearestImgRowsByLine(imgIndex, line);
-        anchor.nearestImgBefore = lb;
-        anchor.nearestImgAfter = la;
-        const ledgerY = ledgerYForLine(secs, line - 1);
-        if (ledgerY >= 0) {
-          const totalH = ledgerTotalHeight(secs);
-          if (totalH > 0) anchor.docRatio = ledgerY / totalH;
-        }
-      }
-    }
-    collected.push(anchor);
-    if (collected.length >= 3) break;
-  }
-  if (collected.length > 0) {
-    setRMLastAnchorList(collected, filePath);
-    return collected[0];
   }
 
   // Strategy B: viewport is entirely image rows → image-row ratio.
@@ -742,21 +787,80 @@ function findBestTextLine(
   const frag = anchor.anchorText;
   if (!frag) return 0;
 
-  // Scan source lines in the SAME normalized space the anchor was captured in,
-  // so markdown syntax in the source can't defeat the match. Collect ALL
-  // matches: capping the list head-biases the candidate set (a common frag's
-  // first N hits cluster in the early document), which starves the priors
-  // below of the correct deep occurrence.
-  const lines: number[] = [];
   const total = cm.state.doc.lines;
-  for (let i = 1; i <= total; i++) {
-    const norm = normalizeAnchorText(cm.state.doc.line(i).text);
-    if (norm && norm.includes(frag)) {
-      lines.push(i);
+
+  // Phase 4: if we have a multi-line context, prefer it for matching —
+  // 3-line fingerprints are far less ambiguous in template-heavy documents.
+  const ctxFrag = anchor.anchorContext;
+  const lines: number[] = [];
+  if (ctxFrag) {
+    for (let i = 1; i <= total; i++) {
+      const norm = normalizeAnchorText(cm.state.doc.line(i).text);
+      if (!norm) continue;
+      const prevTail = i > 1
+        ? normalizeAnchorText(cm.state.doc.line(i - 1).text).slice(-60)
+        : "";
+      const nextHead = i < total
+        ? normalizeAnchorText(cm.state.doc.line(i + 1).text).slice(0, 60)
+        : "";
+      const ctx = [prevTail, norm, nextHead].join("\n").trim();
+      if (ctx && ctx.includes(ctxFrag)) {
+        lines.push(i);
+      }
+    }
+  }
+  // Fall back to single-line matching when context yields no hits (e.g.
+  // cross-mode mismatch between LP source lines and RM DOM blocks).
+  if (lines.length === 0) {
+    for (let i = 1; i <= total; i++) {
+      const norm = normalizeAnchorText(cm.state.doc.line(i).text);
+      if (norm && norm.includes(frag)) {
+        lines.push(i);
+      }
+    }
+  }
+  // 2-line sliding window: when RM renders two LP source lines as one DOM
+  // block (e.g. bold heading + list item), neither single line fully matches
+  // the cross-mode anchor text. Joining adjacent normalized lines bridges this.
+  if (lines.length === 0 && total > 1) {
+    for (let i = 1; i < total; i++) {
+      const normA = normalizeAnchorText(cm.state.doc.line(i).text);
+      const normB = normalizeAnchorText(cm.state.doc.line(i + 1).text);
+      if (!normA || !normB) continue;
+      if ((normA + " " + normB).includes(frag)) {
+        lines.push(i);
+      }
     }
   }
   if (lines.length === 0) return 0;
   if (lines.length === 1) return lines[0];
+
+  // Phase 4.2: when multiple context matches exist, prefer candidates under
+  // the same heading as the capture point. In template-heavy documents the
+  // heading is often the only stable differentiator between repeated sections.
+  if (anchor.headingHint && lines.length > 1) {
+    const withHeading: number[] = [];
+    for (const ln of lines) {
+      for (let hi = ln - 1; hi >= 1; hi--) {
+        const ht = cm.state.doc.line(hi).text;
+        if (/^\s*#{1,6}\s/.test(ht)) {
+          if (normalizeAnchorText(ht) === anchor.headingHint) {
+            withHeading.push(ln);
+          }
+          break;
+        }
+      }
+    }
+    if (withHeading.length > 0) {
+      if (withHeading.length === 1) return withHeading[0];
+      // Narrow the candidate set; remaining priors disambiguate within it.
+      lines.length = 0;
+      lines.push(...withHeading);
+    }
+    // If headingHint matched nothing, keep the full candidate set — the
+    // heading may differ across modes (e.g. RM renders a heading as plain
+    // text in a different block), so this prior is advisory, not binding.
+  }
 
   // Multiple matches: disambiguate by the strongest prior available.
   // 0) Direct anchor-line number (ledger-derived from RM or native from LP).
@@ -806,6 +910,18 @@ function findBestTextLine(
   // 3) No reliable prior — refuse to guess (picking lines[0] would jump the
   //    viewport to the document top); let the caller degrade to the nearest
   //    image row or the coarse fallback percentage instead.
+  log.info("VIEWPORT text-match-lp", {
+    frag: frag.slice(0, 40),
+    anchorCtx: ctxFrag ? "yes" : "no",
+    ctxHits: ctxFrag ? lines.length > 0 ? lines.length : 0 : -1,
+    singleHits: lines.length > 0 ? lines.length : (() => { let c = 0; for (let i = 1; i <= total; i++) { const norm = normalizeAnchorText(cm.state.doc.line(i).text); if (norm && norm.includes(frag)) c++; } return c; })(),
+    candidates: lines.length,
+    anchorLine: anchor.anchorLine ?? -1,
+    imgB: anchor.nearestImgBefore, imgA: anchor.nearestImgAfter,
+    docRatio: Math.round(anchor.docRatio * 100),
+    headingHint: anchor.headingHint ? anchor.headingHint.slice(0, 30) : "",
+    result: 0,
+  });
   return 0;
 }
 
@@ -858,7 +974,9 @@ function restoreTextInLP(
         mode: "source", kind: "text-degraded", refLine,
         targetY: Math.round(targetY), actualY: Math.round(sd.scrollTop),
       });
-      return true;
+      // Return false so the early-restore poll retries text matching on the
+      // next frame (degraded positioning is only a stopgap, not a success).
+      return false;
     }
   }
   log.info("VIEWPORT text unresolvable in LP", { frag: anchor.anchorText.slice(0, 30) });
@@ -893,32 +1011,12 @@ const LEDGER_DOCH_TOLERANCE = 0.2;  // ledger sum vs live scrollHeight sanity ba
 const LEDGER_PARK_TOL_MIN = 1500;   // px — legitimate estimate drift stays far below
 const LEDGER_PARK_TOL_FRAC = 0.05;  // of docH — transient discrepancy is ~65% of docH
 
-/** Try to get a usable height ledger for the current RM view. Prefers the live
- *  renderer.sections (validated against scrollHeight), falls back to the warmup
- *  snapshot. Returns null when neither source is available or trusted. */
-function getLedgerSections(app: App, file?: string): LedgerSection[] | null {
-  const view = app.workspace.activeLeaf?.view as any;
-  const secs = view?.previewMode?.renderer?.sections;
-  if (Array.isArray(secs) && secs.length > 0) {
-    const total = ledgerTotalHeight(secs);
-    if (total > 0) {
-      const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
-      if (docH <= 0 || Math.abs(total - docH) / docH <= LEDGER_DOCH_TOLERANCE) {
-        return secs as LedgerSection[];
-      }
-    }
-  }
-  // Fall back to warmup snapshot.
-  const key = file ?? (view?.file?.path ?? "");
-  const snap = _sectionSnapshot.get(key);
-  if (snap && snap.length > 0 && ledgerTotalHeight(snap) > 0) {
-    return snap;
-  }
-  return null;
-}
 const RATIO_GATE_TOL = 0.15;        // LP vs RM docRatio naturally differs by a few pts
 
 function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: number): number {
+  log.info("VIEWPORT ledger debug: rmLedgerYForLine called", {
+    line1, totalLines: totalLines ?? "undefined", file: file ?? "undefined",
+  });
   const view = app.workspace.activeLeaf?.view as any;
   const secs = view?.previewMode?.renderer?.sections;
   if (!Array.isArray(secs) || secs.length === 0) {
@@ -942,14 +1040,25 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
       } else {
         const y = ledgerYForLine(secs, line1 - 1);
         if (y >= 0) return y;
-        // Live sections are structurally ok (non-empty, non-zero, docH matches)
-        // but don't cover this line yet — the renderer is still building after
-        // a display:none→block transition. Fall through to the snapshot.
         log.debug("VIEWPORT ledger line-out-of-range", {
           line: line1, secLen: secs.length,
           lastLineEnd: secs[secs.length - 1]?.lineEnd,
         });
       }
+    }
+  }
+
+  // Fallback: when all sections lack lineStart/lineEnd, estimate Y from
+  // proportional section heights.
+  if (Array.isArray(secs) && secs.length > 0 && totalLines && totalLines > 0) {
+    const heights = secs.map((s: any) => (s.height as number) ?? 0);
+    const totalH = heights.reduce((a, b) => a + b, 0);
+    if (totalH > 0) {
+      const y = sectionIndexEstimateY(heights, totalLines, line1);
+      log.info("VIEWPORT ledger debug: live estimateY", {
+        line1, totalLines, heightsLen: heights.length, totalH, estY: Math.round(y),
+      });
+      if (y >= 0) return y;
     }
   }
 
@@ -968,23 +1077,40 @@ function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: n
       }
       const y = ledgerYForLine(snap, line1 - 1);
       if (y >= 0) return y;
-      // Snapshot entries also lack lineStart/lineEnd (Obsidian sections only
-      // carry height). Fall back to proportion-based section-index estimation
-      // using real measured heights, which naturally tracks large image gaps.
       if (totalLines && totalLines > 0) {
-        const heights = snap.map((s: any) => typeof s.height === "number" ? s.height : 0);
-        const estY = sectionIndexEstimateY(heights, totalLines, line1);
-        if (estY >= 0) {
-          log.debug("VIEWPORT ledger section-index-estimate", {
-            line: line1, totalLines, secLen: snap.length,
-            ledgerY: Math.round(estY), totalH: Math.round(total),
+        const heights = snap.map((s: any) => (s.height as number) ?? 0);
+        const totalH = heights.reduce((a, b) => a + b, 0);
+        if (totalH > 0) {
+          const y2 = sectionIndexEstimateY(heights, totalLines, line1);
+          log.info("VIEWPORT ledger debug: snapshot estimateY", {
+            line1, totalLines, heightsLen: heights.length, totalH, estY: Math.round(y2),
           });
-          return estY;
+          if (y2 >= 0) return y2;
         }
       }
-      return -1;
     }
   }
+
+  // Both live ledger and warmup snapshot failed — try extrapolation from the
+  // last known section for lines near the document tail.
+  if (Array.isArray(secs) && secs.length > 0 && totalLines && totalLines > 0) {
+    const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+    if (docH > 0) {
+      const y = extrapolateLedgerY(secs, line1, totalLines, docH);
+      if (y >= 0) return y;
+    }
+  }
+  if (snap && snap.length > 0 && totalLines && totalLines > 0) {
+    const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+    if (docH > 0) {
+      const y = extrapolateLedgerY(snap, line1, totalLines, docH);
+      if (y >= 0) return y;
+    }
+  }
+
+  log.info("VIEWPORT ledger debug: all fallbacks failed, returning -1", {
+    line1, totalLines: totalLines ?? "undefined",
+  });
   return -1;
 }
 
@@ -998,84 +1124,171 @@ function restoreTextInRM(
   const previewRect = previewEl.getBoundingClientRect();
   const frag = anchor.anchorText;
   const blocks = rmTextBlocks(previewEl);
-  const matches = frag
-    ? blocks.filter(b => normalizeAnchorText(b.textContent ?? "").includes(frag))
-    : [];
 
-  let chosen: HTMLElement | null = null;
-  if (matches.length === 1) {
-    chosen = matches[0];
-  } else if (matches.length > 1) {
-    // Disambiguate by the strongest prior available (mirrors findBestTextLine).
-    // 1) Nearest image row.
-    const imgIndex = getImageRowIndex(filePath);
-    const refIdx = anchor.nearestImgBefore > 0 ? anchor.nearestImgBefore : anchor.nearestImgAfter;
-    let expectedDocY = -1;
-    if (refIdx > 0 && imgIndex) {
-      const r = imgIndex.find(x => x.index === refIdx);
-      if (r) {
-        const embed = previewEl.querySelector(
-          `.internal-embed[data-diaa-line="${r.startLine}"]`
-        ) as HTMLElement | null;
-        if (embed) {
-          const eRect = embed.getBoundingClientRect();
-          expectedDocY = eRect.top - previewRect.top + previewEl.scrollTop;
-        }
+  // Phase 4: prefer 3-block context matching over single-block (mirrors
+  // findBestTextLine). Falls back to single-block when context is absent
+  // or yields no hits.
+  let matches: HTMLElement[];
+  const ctxFrag = anchor.anchorContext;
+  if (ctxFrag) {
+    const ctxMatches: HTMLElement[] = [];
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const text = normalizeAnchorText(blocks[bi].textContent ?? "");
+      if (!text) continue;
+      const prevTail = bi > 0
+        ? normalizeAnchorText(blocks[bi - 1].textContent ?? "").slice(-60)
+        : "";
+      const nextHead = bi < blocks.length - 1
+        ? normalizeAnchorText(blocks[bi + 1].textContent ?? "").slice(0, 60)
+        : "";
+      const ctx = [prevTail, text, nextHead].join("\n").trim();
+      if (ctx && ctx.includes(ctxFrag)) {
+        ctxMatches.push(blocks[bi]);
       }
     }
-    const tops = matches.map(m => m.getBoundingClientRect().top - previewRect.top + previewEl.scrollTop);
-    if (expectedDocY >= 0) {
-      chosen = matches[nearestIndexBy(tops, expectedDocY)];
-    } else if (anchor.docRatio >= 0 && previewEl.scrollHeight > 0) {
-      // 2) Position-ratio prior.
-      const ratios = tops.map(t => t / previewEl.scrollHeight);
-      chosen = matches[nearestIndexBy(ratios, anchor.docRatio)];
-    }
-    // 3) else: no reliable prior — leave chosen null and degrade below rather
-    //    than guessing matches[0] (which would jump to the document top).
+    matches = ctxMatches.length > 0
+      ? ctxMatches
+      : frag
+        ? blocks.filter(b => normalizeAnchorText(b.textContent ?? "").includes(frag))
+        : [];
+  } else {
+    matches = frag
+      ? blocks.filter(b => normalizeAnchorText(b.textContent ?? "").includes(frag))
+      : [];
   }
 
+  log.info("VIEWPORT ledger debug: restoreTextInRM about to call rmLedgerYForLine", {
+    anchorLine: anchor.anchorLine, anchorTotalLines: anchor.totalLines, filePath,
+  });
   const ledgerY = anchor.anchorLine && anchor.anchorLine > 0
     ? rmLedgerYForLine(app, anchor.anchorLine, filePath, anchor.totalLines)
     : -1;
+  log.info("VIEWPORT ledger debug: rmLedgerYForLine returned", { ledgerY: Math.round(ledgerY) });
+
+  let chosen: HTMLElement | null = null;
+  // ── diagnostic: text matching summary ──────────────────────────
+  const _ctxHits = ctxFrag ? (() => {
+    const m: HTMLElement[] = [];
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const text = normalizeAnchorText(blocks[bi].textContent ?? "");
+      if (!text) continue;
+      const prevTail = bi > 0 ? normalizeAnchorText(blocks[bi - 1].textContent ?? "").slice(-60) : "";
+      const nextHead = bi < blocks.length - 1 ? normalizeAnchorText(blocks[bi + 1].textContent ?? "").slice(0, 60) : "";
+      const ctx = [prevTail, text, nextHead].join("\n").trim();
+      if (ctx && ctx.includes(ctxFrag)) m.push(blocks[bi]);
+    }
+    return m.length;
+  })() : -1;
+  const _singleHits = frag ? blocks.filter(b => normalizeAnchorText(b.textContent ?? "").includes(frag)).length : -1;
+  let _disambig = "";
+  if (matches.length === 1) {
+    chosen = matches[0];
+    _disambig = "sole-match";
+  } else if (matches.length > 1) {
+    // Phase 4.2: prefer candidates under the same heading (advisory).
+    if (anchor.headingHint) {
+      const withHeading: HTMLElement[] = [];
+      for (const m of matches) {
+        const mi = blocks.indexOf(m);
+        if (mi < 0) continue;
+        for (let hi = mi - 1; hi >= 0; hi--) {
+          if (/^H[1-6]$/.test(blocks[hi].tagName)) {
+            if (normalizeAnchorText(blocks[hi].textContent ?? "") === anchor.headingHint) {
+              withHeading.push(m);
+            }
+            break;
+          }
+        }
+      }
+      if (withHeading.length === 1) {
+        chosen = withHeading[0];
+        _disambig = "headingHint→sole";
+      } else if (withHeading.length > 1) {
+        // Narrow to heading-matched set for further disambiguation.
+        while (matches.length > 0) matches.pop();
+        matches.push(...withHeading);
+        _disambig = "headingHint→" + withHeading.length;
+      } else {
+        _disambig = "headingHint→0of" + matches.length;
+      }
+    }
+
+    // Disambiguate by the strongest prior available (mirrors findBestTextLine).
+    if (!chosen) {
+    const tops = matches.map(m => m.getBoundingClientRect().top - previewRect.top + previewEl.scrollTop);
+
+    // 0) Position-ratio prior — measured scrollTop/scrollHeight, not affected by
+    //    RM section density unevenness, more reliable than the ledger estimate.
+    if (anchor.docRatio >= 0 && previewEl.scrollHeight > 0) {
+      const ratios = tops.map(t => t / previewEl.scrollHeight);
+      chosen = matches[nearestIndexBy(ratios, anchor.docRatio)];
+      _disambig = _disambig ? _disambig + "+ratio" : "ratio";
+    }
+
+    // 1) Nearest image row.
+    if (!chosen) {
+      const imgIndex = getImageRowIndex(filePath);
+      const refIdx = anchor.nearestImgBefore > 0 ? anchor.nearestImgBefore : anchor.nearestImgAfter;
+      let expectedDocY = -1;
+      if (refIdx > 0 && imgIndex) {
+        const r = imgIndex.find(x => x.index === refIdx);
+        if (r) {
+          const embed = previewEl.querySelector(
+            `.internal-embed[data-diaa-line="${r.startLine}"]`
+          ) as HTMLElement | null;
+          if (embed) {
+            const eRect = embed.getBoundingClientRect();
+            expectedDocY = eRect.top - previewRect.top + previewEl.scrollTop;
+          }
+        }
+      }
+      if (expectedDocY >= 0) {
+        chosen = matches[nearestIndexBy(tops, expectedDocY)];
+        _disambig = _disambig ? _disambig + "+img" : "img";
+      }
+    }
+
+    // 2) anchorLine → ledger estimate (coarse proportional estimate, last resort).
+    if (!chosen && ledgerY >= 0) {
+      chosen = matches[nearestIndexBy(tops, ledgerY)];
+      _disambig = _disambig ? _disambig + "+ledger" : "ledger";
+    }
+    // 3) else: no reliable prior — leave chosen null and degrade below rather
+    //    than guessing matches[0] (which would jump to the document top).
+    } // if (!chosen)
+  }
+
+  // ── diagnostic: text matching summary ──────────────────────────
+  log.info("VIEWPORT text-match-rm", {
+    frag: frag.slice(0, 40),
+    anchorCtx: ctxFrag ? "yes" : "no",
+    blocks: blocks.length,
+    ctxHits: _ctxHits,
+    singleHits: _singleHits,
+    rawMatches: matches.length + (chosen ? 1 : 0), // after narrowing
+    disambig: _disambig || "none",
+    ledgerY: ledgerY >= 0 ? Math.round(ledgerY) : -1,
+    headingHint: anchor.headingHint ? anchor.headingHint.slice(0, 30) : "",
+    chosen: chosen ? normalizeAnchorText(chosen.textContent ?? "").slice(0, 40) : "(none)",
+  });
 
   if (chosen) {
     const rect = chosen.getBoundingClientRect();
     const blockTop = rect.top - previewRect.top + previewEl.scrollTop;
 
-    // Plausibility gate: a DOM rect that disagrees wildly with the ledger is
-    // a first-show transient (block measured in the compact stack) — park at
-    // the ledger position and let the settle-hold fine-pin once layout lands.
-    const tol = Math.max(LEDGER_PARK_TOL_MIN, previewEl.scrollHeight * LEDGER_PARK_TOL_FRAC);
-    if (ledgerY >= 0 && Math.abs(blockTop - ledgerY) > tol) {
+    // Only park at ledger when the DOM rect is clearly un-laid-out (transient
+    // rect of zero). Otherwise trust the browser's measured position — it is
+    // more precise than any estimate.
+    if (rect.top === 0 && rect.bottom === 0 && ledgerY >= 0) {
       const targetY = textTargetY(ledgerY, 0, anchor.anchorOffset);
       previewEl.scrollTop = targetY;
       log.info("VIEWPORT anchor-restored", {
         mode: "preview", kind: "text-ledger-park",
         frag: frag.slice(0, 30), line: anchor.anchorLine,
-        measuredTop: Math.round(blockTop), ledgerY: Math.round(ledgerY),
+        measuredTop: 0, ledgerY: Math.round(ledgerY),
         targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
       });
       return true;
-    }
-
-    // No ledger available → docRatio plausibility gate (weaker prior, wider
-    // band): refuse a measurement that contradicts the captured position.
-    if (ledgerY < 0 && anchor.docRatio >= 0 && previewEl.scrollHeight > 0) {
-      const measuredRatio = blockTop / previewEl.scrollHeight;
-      if (Math.abs(measuredRatio - anchor.docRatio) > RATIO_GATE_TOL) {
-        const parkY = anchor.docRatio * previewEl.scrollHeight;
-        const targetY = textTargetY(parkY, 0, anchor.anchorOffset);
-        previewEl.scrollTop = targetY;
-        log.info("VIEWPORT anchor-restored", {
-          mode: "preview", kind: "text-ratio-park",
-          frag: frag.slice(0, 30),
-          measuredPct: Math.round(measuredRatio * 100),
-          docPct: Math.round(anchor.docRatio * 100),
-          targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
-        });
-        return true;
-      }
     }
 
     const targetY = textTargetY(blockTop, 0, anchor.anchorOffset);
@@ -1095,7 +1308,7 @@ function restoreTextInRM(
     const targetY = textTargetY(ledgerY, 0, anchor.anchorOffset);
     previewEl.scrollTop = targetY;
     log.info("VIEWPORT anchor-restored", {
-      mode: "preview", kind: "text-ledger-park-nomatch",
+      mode: "preview", kind: "text-ledger-park",
       line: anchor.anchorLine, ledgerY: Math.round(ledgerY),
       targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
     });
@@ -1123,7 +1336,9 @@ function restoreTextInRM(
           mode: "preview", kind: "text-degraded", refLine: line,
           targetY: Math.round(targetY), actualY: Math.round(previewEl.scrollTop),
         });
-        return true;
+        // Return false so the early-restore poll retries text matching on the
+        // next frame (degraded positioning is only a stopgap, not a success).
+        return false;
       }
     }
   }
@@ -1141,6 +1356,15 @@ function restoreTextInRM(
 const ENABLE_NATIVE_SCROLL = true;
 let _restoreGuardDepth = 0;
 let _restoreGuardTimeoutId: ReturnType<typeof setTimeout> | null = null;
+// ── Structural improvement D: post-restore silence window ──────────────
+// When the restore guard exits, the scrollTop write that triggered the guard
+// may still have a scroll event queued in the browser. If that event fires
+// after the guard is released, it gets treated as a valid user scroll and
+// overwrites the correct anchor with whatever text happens to be at the
+// forced scroll position (which could be inside a code block, frontmatter,
+// etc.). A short silence window after guard exit drops these stale events.
+let _lastGuardExitMs = 0;
+const SILENCE_WINDOW_MS = 300;
 
 function enterRestoreGuard(): void {
   _restoreGuardDepth++;
@@ -1148,6 +1372,7 @@ function enterRestoreGuard(): void {
   _restoreGuardTimeoutId = setTimeout(() => {
     log.warn("RESTORE_GUARD safety timeout — force-released");
     _restoreGuardDepth = 0;
+    _lastGuardExitMs = performance.now();
   }, 2000);
 }
 function exitRestoreGuard(): void {
@@ -1155,9 +1380,13 @@ function exitRestoreGuard(): void {
   if (_restoreGuardDepth === 0 && _restoreGuardTimeoutId) {
     clearTimeout(_restoreGuardTimeoutId);
     _restoreGuardTimeoutId = null;
+    _lastGuardExitMs = performance.now();
   }
 }
 function isRestoreGuardActive(): boolean { return _restoreGuardDepth > 0; }
+function isInSilenceWindow(): boolean {
+  return _lastGuardExitMs > 0 && (performance.now() - _lastGuardExitMs) < SILENCE_WINDOW_MS;
+}
 
 // ── Native line-based scroll ──────────────────────────────────────────
 // Two-phase restore engine (Solution A): when a precise pixel restore fails
@@ -1233,7 +1462,11 @@ function nativeScrollToLine(app: App, targetLine: number): boolean {
       if (!cm) return false;
       if (targetLine > (cm.state?.doc?.lines ?? 0)) return false;
       const pos = cm.state.doc.line(targetLine).from;
-      cm.scrollIntoView(pos, { y: "center" });
+      if (typeof cm.scrollIntoView === "function") {
+        cm.scrollIntoView(pos, { y: "center" });
+      } else {
+        return false;
+      }
       // CM height maps are virtual: scrollTop updates synchronously.
       // Wait one rAF for the scroll position to stabilize, then verify.
       const sd = cm.scrollDOM as HTMLElement | null;
@@ -1331,6 +1564,10 @@ let _rmScrollCleanup: (() => void) | null = null;
 // Throttled diagnostic: records the anchor's distance-to-viewport-top as
 // the user scrolls, and (for RM) which container is actually scrolling.
 let _lastScrollLogTs = 0;
+let _rmSuppressCount = 0;
+let _rmSilenceCount = 0;
+let _lpSuppressCount = 0;
+let _lpSilenceCount = 0;
 function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: ViewportAnchor | null): void {
   const now = Date.now();
   if (now - _lastScrollLogTs < 150) return;
@@ -1341,6 +1578,12 @@ function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: ViewportAn
       case "text":
         info.frag = anchor.anchorText.slice(0, 16);
         info.offset = Math.round(anchor.anchorOffset);
+        if (anchor.anchorLine && anchor.anchorLine > 0) info.line = anchor.anchorLine;
+        if (anchor.anchorContext) info.ctx = anchor.anchorContext.slice(0, 60);
+        if (anchor.headingHint) info.hdg = anchor.headingHint.slice(0, 30);
+        info.imgB = anchor.nearestImgBefore;
+        info.imgA = anchor.nearestImgAfter;
+        info.ratio = Math.round(anchor.docRatio * 100);
         break;
       case "image-row":
         info.imageRowIndex = anchor.imageRowIndex;
@@ -1361,6 +1604,21 @@ function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: ViewportAn
       .map(s => { const e = document.querySelector(s) as HTMLElement | null; return e ? `${s}=${Math.round(e.scrollTop)}` : `${s}=n/a`; })
       .join(" ");
   }
+  if (side === "RM") {
+    if (_rmSuppressCount > 0 || _rmSilenceCount > 0) {
+      info.suppressed = _rmSuppressCount;
+      info.silenced = _rmSilenceCount;
+    }
+    _rmSuppressCount = 0;
+    _rmSilenceCount = 0;
+  } else {
+    if (_lpSuppressCount > 0 || _lpSilenceCount > 0) {
+      info.suppressed = _lpSuppressCount;
+      info.silenced = _lpSilenceCount;
+    }
+    _lpSuppressCount = 0;
+    _lpSilenceCount = 0;
+  }
   log.debug(`SCROLL ${side}`, info);
 }
 
@@ -1376,7 +1634,8 @@ export function ensureRMScrollTracking(app: App): void {
   _rmTrackedEl = null;
 
   const onScroll = () => {
-    if (isRestoreGuardActive()) return; // native-scroll window: don't capture intermediate state
+    if (isRestoreGuardActive()) { _rmSuppressCount++; return; }
+    if (isInSilenceWindow()) { _rmSilenceCount++; return; }
     const anchor = captureContentAnchor(app);
     if (anchor) {
       setRMLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
@@ -1429,8 +1688,8 @@ let _rmFramesSinceNative = 0;
 // the target content glued to the viewport while the height ledger settles.
 // Exits when the layout is calm, on user input (never fight the user), or on
 // timeout.
-const RM_HOLD_TIMEOUT_MS = 3000;
-const RM_HOLD_CALM_FRAMES = 10; // consecutive no-correction frames = settled
+const RM_HOLD_TIMEOUT_MS = 2000;
+const RM_HOLD_CALM_FRAMES = 6; // consecutive no-correction frames = settled
 let _rmHoldId: number | null = null;
 let _rmHoldCleanup: (() => void) | null = null;
 let _rmHoldChainId: number | null = null;
@@ -1516,7 +1775,7 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
     _rmHoldCleanup = null;
     cleanup();
     setActiveAnchor(null);
-    log.debug("VIEWPORT settle-hold end", {
+    log.info("VIEWPORT settle-hold end", {
       reason, corrections,
       ms: Math.round(performance.now() - start),
       scrollTop: hookedEl ? Math.round(hookedEl.scrollTop) : -1,
@@ -1618,6 +1877,11 @@ function scheduleRMDeferredRestore(app: App): void {
   _rmNativeTried = false;
   _rmFramesSinceNative = 0;
   let _rmLastSeenDocH = -1;
+  // Stable-degraded counter: when restoreContentAnchor returns false
+  // (text-degraded) and the scroller isn't moving, further retries won't help.
+  let _rmStableDegraded = 0;
+  let _rmLastSeenScrollTop = -1;
+  const STABLE_DEGRADED_EXIT = 8;
   const targetFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
 
   const enterGuardOnce = rmLoopEnterGuard;
@@ -1685,6 +1949,23 @@ function scheduleRMDeferredRestore(app: App): void {
             restoreScrollPct(app);
           }
         }
+        // Stable-degraded exit: when restoreContentAnchor keeps returning
+        // false and the scroller position isn't changing (native-scroll
+        // made no progress), further retries won't help. Exit silently.
+        const curScrollTop = previewEl.scrollTop;
+        if (curScrollTop === _rmLastSeenScrollTop) {
+          _rmStableDegraded++;
+          if (_rmStableDegraded >= STABLE_DEGRADED_EXIT) {
+            setActiveAnchor(null); setFallbackPct(-1);
+            _rmDeferredRestoreId = null;
+            _rmNativeTried = false;
+            exitGuardOnce();
+            return;
+          }
+        } else {
+          _rmStableDegraded = 0;
+          _rmLastSeenScrollTop = curScrollTop;
+        }
         _rmDeferredRestoreId = requestAnimationFrame(attempt);
         return;
       }
@@ -1743,7 +2024,8 @@ function ensureLPScrollTracking(app: App): void {
   _lpTrackedEl = null;
 
   const onScroll = () => {
-    if (isRestoreGuardActive()) return; // native-scroll window: don't capture intermediate state
+    if (isRestoreGuardActive()) { _lpSuppressCount++; return; }
+    if (isInSilenceWindow()) { _lpSilenceCount++; return; }
     const anchor = captureContentAnchor(app);
     if (anchor) {
       setLPLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
@@ -1984,6 +2266,13 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
   let frames = 4;
   let nativeTried = false;
   let guardActive = false;
+  // ── Structural improvement C: hard exit after consecutive degraded frames ──
+  // When applyEarly falls to text-degraded (which returns false by design),
+  // the poll must not retry indefinitely — each retry writes scrollTop to the
+  // same position, creating visible flicker without making progress. After 5
+  // consecutive degraded frames (~80ms), accept the degraded position and stop.
+  let degradedFrames = 0;
+  const DEGRADED_EXIT = 5;
 
   const exitGuardIfNeeded = () => {
     if (guardActive) { exitRestoreGuard(); guardActive = false; }
@@ -1992,11 +2281,12 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
   const poll = () => {
     _earlyRestoreId = null;
     const view = app.workspace.activeLeaf?.view as any;
-    if ((view?.getMode?.() ?? "") !== "source") { exitGuardIfNeeded(); return; }
-    if ((view?.file?.path ?? "") !== file) { exitGuardIfNeeded(); return; }
+    if ((view?.getMode?.() ?? "") !== "source") { _lpEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
+    if ((view?.file?.path ?? "") !== file) { _lpEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
     const sc = view?.editor?.cm?.scrollDOM as HTMLElement | null;
     if (!sc || sc.clientHeight === 0) {
       if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
+      else { _lpEarlyRestoreDone = true; }
       return;
     }
     // Suppress scroll events during early restore so the stale CM auto-scroll
@@ -2007,6 +2297,17 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
       guardActive = true;
     }
     let ok = applyEarly(app, seedAnchor, seedPct);
+    // Hard-exit gate C: too many consecutive degraded frames → accept and stop.
+    if (!ok) {
+      degradedFrames++;
+      if (degradedFrames >= DEGRADED_EXIT) {
+        _lpEarlyRestoreDone = true;
+        exitGuardIfNeeded();
+        return;
+      }
+    } else {
+      degradedFrames = 0;
+    }
     // Multi-anchor fallback: if the primary anchor can't resolve (fragment
     // is ambiguous and spatial priors are insufficient to disambiguate),
     // try each sibling anchor captured from the same RM viewport — one of
@@ -2019,6 +2320,7 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
           if (sibling.anchorText === seedAnchor.anchorText) continue;
           if (applyEarly(app, sibling, seedPct)) {
             ok = true;
+            degradedFrames = 0;
             log.info('VIEWPORT anchor-fallback', {
               from: seedAnchor.anchorText.slice(0, 20),
               to: sibling.anchorText.slice(0, 20),
@@ -2033,12 +2335,12 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
         if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
-        else { exitGuardIfNeeded(); }
+        else { _lpEarlyRestoreDone = true; exitGuardIfNeeded(); }
         return;
       }
     }
+    _lpEarlyRestoreDone = true;
     exitGuardIfNeeded();
-    if (ok) _lpEarlyRestoreDone = true;
     // Don't re-seed: we want the deferred restore to be a no-op (no active
     // anchor) so it won't issue a second write that looks like jitter.
 
@@ -2104,6 +2406,9 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
   let frames = EARLY_RESTORE_MAX_FRAMES;
   let nativeTried = false;
   let guardActive = false;
+  // ── Structural improvement C: hard exit after consecutive degraded frames ──
+  let degradedFrames = 0;
+  const DEGRADED_EXIT = 5;
 
   const exitGuardIfNeeded = () => {
     if (guardActive) { exitRestoreGuard(); guardActive = false; }
@@ -2112,11 +2417,12 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
   const poll = () => {
     _earlyRestoreId = null;
     const view = app.workspace.activeLeaf?.view as any;
-    if ((view?.getMode?.() ?? "") !== toMode) { exitGuardIfNeeded(); return; }
-    if ((view?.file?.path ?? "") !== file) { exitGuardIfNeeded(); return; }
+    if ((view?.getMode?.() ?? "") !== toMode) { _rmEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
+    if ((view?.file?.path ?? "") !== file) { _rmEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
     const sc = incomingScrollerOf(view, toMode);
     if (!sc || sc.clientHeight === 0) {
       if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
+      else { _rmEarlyRestoreDone = true; }
       return;
     }
     // Suppress scroll events during early restore so the forced write (and any
@@ -2130,6 +2436,17 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
     // native line-based scroll to force the renderer to build DOM around the
     // target, then retry. If even that fails, let layout-change handle it.
     let ok = applyEarly(app, seedAnchor, seedPct);
+    // Hard-exit gate C: too many consecutive degraded frames → accept and stop.
+    if (!ok) {
+      degradedFrames++;
+      if (degradedFrames >= DEGRADED_EXIT) {
+        _rmEarlyRestoreDone = true;
+        exitGuardIfNeeded();
+        return;
+      }
+    } else {
+      degradedFrames = 0;
+    }
     // Multi-anchor fallback: if the primary anchor can't resolve (fragment
     // is ambiguous and spatial priors are insufficient to disambiguate),
     // try each sibling anchor captured from the same RM viewport — one of
@@ -2142,6 +2459,7 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
           if (sibling.anchorText === seedAnchor.anchorText) continue;
           if (applyEarly(app, sibling, seedPct)) {
             ok = true;
+            degradedFrames = 0;
             log.info('VIEWPORT anchor-fallback', {
               from: seedAnchor.anchorText.slice(0, 20),
               to: sibling.anchorText.slice(0, 20),
@@ -2156,19 +2474,12 @@ function scheduleEarlyRestore(app: App, fromMode: string, toMode: string, file: 
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
         if (--frames > 0) { _earlyRestoreId = requestAnimationFrame(poll); }
-        else { exitGuardIfNeeded(); }
+        else { _rmEarlyRestoreDone = true; exitGuardIfNeeded(); }
         return;
       }
     }
+    _rmEarlyRestoreDone = true;
     exitGuardIfNeeded();
-    if (ok && toMode === "source") {
-      // Mark RM→LP early restore as done so handleModeSwitch won't re-seed
-      // the same anchor for a redundant deferred restore.
-      _lpEarlyRestoreDone = true;
-    }
-    if (ok && toMode === "preview") {
-      _rmEarlyRestoreDone = true;
-    }
     if (toMode === "preview") scheduleRMHold(app, file, seedAnchor, seedPct, RM_EARLY_HOLD_FRAMES);
   };
   _earlyRestoreId = requestAnimationFrame(poll);
@@ -2325,6 +2636,9 @@ function anchorLogFields(a: ViewportAnchor): Record<string, any> {
         kind: a.kind, frag: a.anchorText.slice(0, 30), offset: Math.round(a.anchorOffset),
         nearestBefore: a.nearestImgBefore, nearestAfter: a.nearestImgAfter,
         docRatio: Math.round(a.docRatio * 100),
+        ...(a.anchorLine && a.anchorLine > 0 ? { line: a.anchorLine } : {}),
+        ...(a.anchorContext ? { ctx: a.anchorContext.slice(0, 60) } : {}),
+        ...(a.headingHint ? { hdg: a.headingHint.slice(0, 30) } : {}),
       };
     default:
       return assertNever(a);

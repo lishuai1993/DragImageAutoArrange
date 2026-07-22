@@ -14,6 +14,15 @@ export type ViewportAnchor =
   | {
       kind: "text";
       anchorText: string;    // trimmed source/rendered text of the anchor line
+      anchorContext?: string; // 3-line normalized context: prevLineTail + "\n" +
+                             // currentLine + "\n" + nextLineHead. Used as the
+                             // primary match key in template-heavy docs where
+                             // single-line fragments are ambiguous; falls back
+                             // to anchorText when context match fails.
+      headingHint?: string;  // nearest preceding heading text (normalized, no #
+                             // markers). Used as a secondary disambiguation
+                             // prior when context matching still has multiple
+                             // candidates. Experimental (Phase 4.2).
       anchorOffset: number;  // pixel distance from viewport top to the line top
       anchorLine?: number;   // 1-based source line at capture (LP capture only).
                              // Lets the RM restore park at the renderer height

@@ -89,8 +89,8 @@ export function ledgerYForLine(sections: LedgerSection[], line0: number): number
   if (line0 < 0) return -1;
   let y = 0;
   for (const s of sections) {
-    if (typeof s?.lineEnd !== "number" || typeof s?.height !== "number") return -1;
-    if (line0 <= s.lineEnd) return y;
+    if (typeof s?.height !== "number") return -1;
+    if (typeof s?.lineEnd === "number" && line0 <= s.lineEnd) return y;
     y += s.height > 0 ? s.height : 0;
   }
   return -1;
@@ -125,17 +125,41 @@ export function ledgerLineForY(sections: LedgerSection[], y: number): number {
   if (y < 0 || sections.length === 0) return -1;
   let accumulatedY = 0;
   for (const s of sections) {
-    if (typeof s?.lineEnd !== "number" || typeof s?.lineStart !== "number"
-        || typeof s?.height !== "number") return -1;
-    if (y < accumulatedY + s.height) {
-      const lineSpan = s.lineEnd - s.lineStart + 1;
-      if (lineSpan <= 0) return s.lineStart + 1; // 1-based
-      const ratio = Math.max(0, Math.min(1, (y - accumulatedY) / s.height));
-      return s.lineStart + Math.floor(ratio * lineSpan) + 1; // convert 0-based → 1-based
+    if (typeof s?.height !== "number") return -1;
+    if (typeof s?.lineEnd === "number" && typeof s?.lineStart === "number") {
+      if (y < accumulatedY + s.height) {
+        const lineSpan = s.lineEnd - s.lineStart + 1;
+        if (lineSpan <= 0) return s.lineStart + 1; // 1-based
+        const ratio = Math.max(0, Math.min(1, (y - accumulatedY) / s.height));
+        return s.lineStart + Math.floor(ratio * lineSpan) + 1; // convert 0-based → 1-based
+      }
     }
     accumulatedY += s.height > 0 ? s.height : 0;
   }
   return -1;
+}
+
+/** Linear extrapolation for a 1-based line that falls beyond all known
+ *  sections. Distributes the remaining document height (docH − totalLedgerH)
+ *  proportionally across the remaining lines (totalLines − lastLineEnd).
+ *  Returns -1 when any input is unusable. */
+export function extrapolateLedgerY(
+  sections: LedgerSection[], line1: number, totalLines: number, docH: number,
+): number {
+  const totalH = ledgerTotalHeight(sections);
+  if (totalH <= 0 || totalLines <= 0 || docH <= 0 || line1 <= 0) return -1;
+  let lastLineEnd = 0;
+  for (const s of sections) {
+    if (typeof s.lineEnd === "number" && s.lineEnd > lastLineEnd) {
+      lastLineEnd = s.lineEnd;
+    }
+  }
+  if (lastLineEnd <= 0 || lastLineEnd >= totalLines) return -1;
+  const remainingLines = totalLines - lastLineEnd;
+  const offset = line1 - lastLineEnd;
+  if (offset <= 0) return -1; // within section range — caller should use ledgerYForLine
+  const remainingH = Math.max(0, docH - totalH);
+  return totalH + (offset / remainingLines) * remainingH;
 }
 
 /** Total ledger height (sum of section heights). -1 on unusable shape. Used to

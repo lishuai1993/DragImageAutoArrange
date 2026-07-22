@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   clamp01, intraRowRatio, gapRatioFromGeom,
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerTotalHeight,
-  sectionIndexEstimateY, LedgerSection,
+  nearestIndexBy, ledgerYForLine, ledgerLineForY, ledgerTotalHeight,
+  sectionIndexEstimateY, extrapolateLedgerY, LedgerSection,
 } from '../src/scrollSync/anchorMath';
 
 describe('clamp01', () => {
@@ -146,8 +146,28 @@ describe('ledgerYForLine', () => {
   });
   it('returns -1 on unusable shapes', () => {
     expect(ledgerYForLine([], 0)).toBe(-1);
-    expect(ledgerYForLine([{ lineStart: 0 } as any], 0)).toBe(-1);
-    expect(ledgerYForLine([{ lineStart: 0, lineEnd: 2, height: 'x' } as any], 5)).toBe(-1);
+    expect(ledgerYForLine([{ height: 'x' } as any], 5)).toBe(-1);
+  });
+  it('tolerates gap/spacer entries without lineEnd', () => {
+    const secs: LedgerSection[] = [
+      { lineStart: 0, lineEnd: 2, height: 100 },
+      { height: 20 } as any,                         // gap — no lineEnd
+      { lineStart: 4, lineEnd: 4, height: 50 },
+      { height: 30 } as any,                         // gap — no lineEnd
+      { lineStart: 6, lineEnd: 10, height: 300 },
+    ];
+    // Line in first section (before any gap)
+    expect(ledgerYForLine(secs, 0)).toBe(0);
+    // Gap line between section 1 and section 2: parks at section 2's top (100 + 20)
+    expect(ledgerYForLine(secs, 3)).toBe(120);
+    // Line in section 2: top = 100 + 20 = 120
+    expect(ledgerYForLine(secs, 4)).toBe(120);
+    // Gap line between section 2 and section 3: parks at section 3's top (120 + 50 + 30)
+    expect(ledgerYForLine(secs, 5)).toBe(200);
+    // Line in section 3: top = 200
+    expect(ledgerYForLine(secs, 6)).toBe(200);
+    // Line past all sections
+    expect(ledgerYForLine(secs, 11)).toBe(-1);
   });
   it('skips non-positive heights in the cumulative sum', () => {
     const secs: LedgerSection[] = [
@@ -157,6 +177,41 @@ describe('ledgerYForLine', () => {
     ];
     expect(ledgerYForLine(secs, 2)).toBe(0);
     expect(ledgerYForLine(secs, 4)).toBe(40);
+  });
+});
+
+describe('ledgerLineForY', () => {
+  const sections: LedgerSection[] = [
+    { lineStart: 0, lineEnd: 2, height: 100 },
+    { lineStart: 4, lineEnd: 4, height: 50 },
+    { lineStart: 6, lineEnd: 10, height: 300 },
+  ];
+
+  it('maps y to the correct 1-based line', () => {
+    expect(ledgerLineForY(sections, 0)).toBe(1);
+    expect(ledgerLineForY(sections, 50)).toBe(2);   // halfway through first section → line 2
+    expect(ledgerLineForY(sections, 99)).toBe(3);
+    expect(ledgerLineForY(sections, 100)).toBe(5);
+    expect(ledgerLineForY(sections, 140)).toBe(5);
+    expect(ledgerLineForY(sections, 150)).toBe(7);
+  });
+
+  it('returns -1 for y past all sections or invalid inputs', () => {
+    expect(ledgerLineForY(sections, 451)).toBe(-1);
+    expect(ledgerLineForY([], 100)).toBe(-1);
+    expect(ledgerLineForY(sections, -1)).toBe(-1);
+  });
+
+  it('tolerates gap entries without lineStart/lineEnd', () => {
+    const gapped: LedgerSection[] = [
+      { lineStart: 0, lineEnd: 2, height: 100 },
+      { height: 20 } as any,
+      { lineStart: 4, lineEnd: 4, height: 50 },
+    ];
+    // Y in the gap (110): maps to first line of next section (line 5)
+    expect(ledgerLineForY(gapped, 110)).toBe(5);
+    // Y in second section
+    expect(ledgerLineForY(gapped, 130)).toBe(5);
   });
 });
 
@@ -227,5 +282,61 @@ describe('sectionIndexEstimateY', () => {
     // Single section: all lines belong to section 0, start Y is always 0.
     expect(sectionIndexEstimateY([500], 100, 50)).toBe(0);
     expect(sectionIndexEstimateY([500], 100, 100)).toBe(0);
+  });
+});
+
+describe('extrapolateLedgerY', () => {
+  // A typical document: 3 sections covering lines 1-105, total 4000px docH,
+  // 135 total lines. Lines 106-135 are beyond the last section (tail gap).
+  const secs: LedgerSection[] = [
+    { lineStart: 0, lineEnd: 10, height: 200 },
+    { lineStart: 11, lineEnd: 50, height: 1800 },
+    { lineStart: 51, lineEnd: 104, height: 2000 },
+  ];
+
+  it('returns -1 when line is within section range (caller should use ledgerYForLine)', () => {
+    // Line 51 is within section 3 (lineEnd=104), offset <= 0
+    const y = extrapolateLedgerY(secs, 51, 135, 5000);
+    expect(y).toBe(-1);
+  });
+
+  it('extrapolates for a line beyond the last section', () => {
+    // Line 127, remainingLines = 135-104 = 31, remainingH = 5000-4000 = 1000
+    // offset = 127 - 104 = 23
+    const y = extrapolateLedgerY(secs, 127, 135, 5000);
+    expect(y).toBeCloseTo(4000 + (23 / 31) * 1000, 0); // ~4742
+  });
+
+  it('returns totalH when docH equals total ledger height', () => {
+    const y = extrapolateLedgerY(secs, 120, 135, 4000);
+    // reminingH = 0, so just totalH = 4000
+    expect(y).toBe(4000);
+  });
+
+  it('extrapolates for the very last line', () => {
+    const y = extrapolateLedgerY(secs, 135, 135, 5000);
+    // Last line is at totalH + 30/30 * 1000 = 5000 (bottom of doc)
+    expect(y).toBeCloseTo(5000, 0);
+  });
+
+  it('returns -1 for empty sections', () => {
+    expect(extrapolateLedgerY([], 50, 100, 5000)).toBe(-1);
+  });
+
+  it('returns -1 when lastLineEnd >= totalLines', () => {
+    const y = extrapolateLedgerY([{ lineStart: 0, lineEnd: 100, height: 4000 }], 50, 100, 5000);
+    expect(y).toBe(-1);
+  });
+
+  it('returns -1 for unusable inputs', () => {
+    expect(extrapolateLedgerY(secs, 0, 135, 5000)).toBe(-1);  // line1 <= 0
+    expect(extrapolateLedgerY(secs, 50, 0, 5000)).toBe(-1);   // totalLines <= 0
+    expect(extrapolateLedgerY(secs, 50, 135, 0)).toBe(-1);    // docH <= 0
+  });
+
+  it('returns -1 when line is at the last section boundary', () => {
+    // line at lastLineEnd: offset=0, not beyond → caller should use ledgerYForLine
+    const y = extrapolateLedgerY(secs, 104, 135, 5000);
+    expect(y).toBe(-1);
   });
 });

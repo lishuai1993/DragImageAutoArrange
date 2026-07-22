@@ -52,7 +52,17 @@
       "Read(//tmp/**)",
       "Bash(git *)",
       "Bash(awk *)",
-      "Bash(uniq -f1)"
+      "Bash(uniq -f1)",
+      "Bash(sed -n '1623,1654p' /Users/lishuai/work/custom/obsidian-DragImageAutoArrange/src/scrollSync/scrollAnchor.ts)",
+      "Bash(xxd /tmp/orig_tick.txt)",
+      "Bash(xxd /tmp/new_tick.txt)",
+      "Read(//Users/lishuai/lishuai/知识库/笔记管理/工作管理/.obsidian/**)",
+      "Read(//Users/lishuai/lishuai/知识库/笔记管理/生活管理/.obsidian/plugins/**)",
+      "Bash(open *)",
+      "Read(//Users/lishuai/Downloads/文档/**)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(sed -n '1362p' /Users/lishuai/work/custom/obsidian-DragImageAutoArrange/src/scrollSync/scrollAnchor.ts)",
+      "Bash(sed -n '1363p' /Users/lishuai/work/custom/obsidian-DragImageAutoArrange/src/scrollSync/scrollAnchor.ts)"
     ]
   }
 }

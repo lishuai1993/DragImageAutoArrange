@@ -48,7 +48,16 @@ export function normalizeAnchorText(sourceLine: string): string {
   s = s.replace(/_([^_]+)_/g, "$1");
   s = s.replace(/`([^`]+)`/g, "$1");
 
-  // 5. Collapse runs of whitespace so RM's rendered spacing and LP's source
+  // 5. HTML tags — LP source may include inline HTML that RM renders.
+  s = s.replace(/<[^>]+>/g, "");
+
+  // 6. Highlight markers: "==text==" → text.
+  s = s.replace(/==([^=]+)==/g, "$1");
+
+  // 7. Footnote references: "[^1]" or "[^label]".
+  s = s.replace(/\[\^[^\]]+\]/g, "");
+
+  // 8. Collapse runs of whitespace so RM's rendered spacing and LP's source
   //    spacing compare equal.
   return s.replace(/\s+/g, " ").trim();
 }

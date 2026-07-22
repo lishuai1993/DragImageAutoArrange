@@ -18,8 +18,9 @@ export const ENABLE_WARMUP_PROBE = true;
 
 // ── Timing ─────────────────────────────────────────────────────────────
 
-const WARMUP_TIMEOUT_MS = 10000;
-const STABLE_FRAMES = 30;
+const WARMUP_TIMEOUT_MS = 5000;
+const STABLE_FRAMES = 8;
+const STABLE_FRAMES_EARLY = 2;
 const SET_FALLBACK_AT_MS = 3000;
 
 // ── CSS override machinery ─────────────────────────────────────────────
@@ -273,8 +274,26 @@ export async function runWarmup(
       finish("rendered+stable");
       return;
     }
+    // Early exit: sections populated with line mapping, docH still settling.
+    // lineStart/lineEnd are determined at first render; later docH drift is
+    // layout micro-adjustment that doesn't affect line mapping correctness.
+    if (rendered && elapsed > 500 && stableFrames >= STABLE_FRAMES_EARLY) {
+      const secs = pm?.renderer?.sections;
+      if (Array.isArray(secs) && secs.length > 0) {
+        finish("rendered+stale");
+        return;
+      }
+    }
     if (elapsed >= WARMUP_TIMEOUT_MS) {
-      finish(rendered ? "rendered (docH never settled)" : "failed: nothing rendered");
+      if (rendered) {
+        finish("rendered (docH never settled)");
+      } else {
+        // Even if the sizer never reached full child count, the renderer's
+        // section ledger may still be populated and useful for fallback.
+        const secs = pm?.renderer?.sections;
+        const hasSecs = Array.isArray(secs) && secs.length > 0;
+        finish(hasSecs ? "rendered+stale" : "failed: nothing rendered");
+      }
       return;
     }
     requestAnimationFrame(tick);
