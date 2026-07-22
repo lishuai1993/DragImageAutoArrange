@@ -31,6 +31,11 @@ import {
  * 2. Makes standalone images draggable — drop near another image to merge.
  * 3. Within a flex row, images are draggable for reorder.
  */
+// Per-section re-entrancy guard: the post-processor fires per section, and
+// image wrapping can trigger DOM mutations that cause Obsidian to re-invoke it
+// within the same tick. Prevent duplicate runs for the same section element.
+const _postProcessing = new WeakSet<HTMLElement>();
+
 export function createReadingModeProcessor(
   app: App,
   getOptions: () => ImageRowOptions,
@@ -38,6 +43,8 @@ export function createReadingModeProcessor(
 ) {
   return async (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
     if (!enabled()) return;
+    if (_postProcessing.has(el)) return;
+    _postProcessing.add(el);
 
     const allInternalEmbeds = Array.from(
       el.querySelectorAll(".internal-embed")
@@ -59,7 +66,7 @@ export function createReadingModeProcessor(
       enabled: enabled(),
     });
 
-    if (imageEmbeds.length === 0) return;
+    if (imageEmbeds.length === 0) { return; }
 
     const options = getOptions();
 

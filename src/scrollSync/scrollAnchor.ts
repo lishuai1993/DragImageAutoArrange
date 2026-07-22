@@ -593,6 +593,76 @@ function captureImageRowRM(
 
 // ── Anchor restore ─────────────────────────────────────
 
+// Timer for deferred restore-accuracy check (800ms post-restore).
+let _accuracyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRestoreAccuracyCheck(
+  app: App, mode: string, anchor: ViewportAnchor, kind: string,
+  restoreScrollTop: number, restoreDocH: number,
+): void {
+  if (_accuracyTimer) clearTimeout(_accuracyTimer);
+  const capturedDocRatio = anchor.kind === "text" ? anchor.docRatio : -1;
+  const expectedOffset = anchor.kind === "text" ? anchor.anchorOffset : -1;
+  const frag = anchor.kind === "text" ? anchor.anchorText.slice(0, 40) : "";
+  _accuracyTimer = setTimeout(() => {
+    _accuracyTimer = null;
+    const v = (app.workspace.activeLeaf?.view as any);
+    const curMode = v?.getMode?.() ?? "";
+    if (curMode !== mode) return; // mode changed since restore, stale check
+
+    let curScrollTop = 0, curDocH = 0;
+    let anchorElFound = false;
+    let actualViewportOffset = -1;
+
+    if (mode === "preview") {
+      const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+      if (!previewEl) return;
+      curScrollTop = previewEl.scrollTop;
+      curDocH = previewEl.scrollHeight;
+      // Try to locate the anchor element in RM DOM
+      if (anchor.kind === "text" && frag) {
+        const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+        const blocks = Array.from(previewEl.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, pre, div.cm-line"));
+        for (const b of blocks) {
+          if (norm(b.textContent ?? "").includes(frag)) {
+            const rect = b.getBoundingClientRect();
+            const previewRect = previewEl.getBoundingClientRect();
+            actualViewportOffset = rect.top - previewRect.top;
+            anchorElFound = true;
+            break;
+          }
+        }
+      }
+    } else if (mode === "source") {
+      const sd = (v?.editor?.cm?.scrollDOM) as HTMLElement | null;
+      if (sd) { curScrollTop = sd.scrollTop; curDocH = sd.scrollHeight; }
+    }
+
+    const restoredDocRatio = curDocH > 0 ? curScrollTop / curDocH : -1;
+    const ratioDrift = capturedDocRatio >= 0 && restoredDocRatio >= 0
+      ? Math.round((restoredDocRatio - capturedDocRatio) * 1000) / 10 // percentage points, 1 decimal
+      : -999;
+    const pxError = anchorElFound && expectedOffset >= 0
+      ? Math.round(actualViewportOffset - expectedOffset)
+      : -999;
+    const docHDrift = restoreDocH > 0 ? curDocH - restoreDocH : 0;
+    const scrollTopDrift = curScrollTop - restoreScrollTop;
+
+    log.info("VIEWPORT restore-accuracy", {
+      mode, kind, frag,
+      capturedDocRatio: Math.round(capturedDocRatio * 100),
+      restoredDocRatio: Math.round(restoredDocRatio * 100),
+      ratioDrift,
+      anchorElFound,
+      actualViewportOffset: anchorElFound ? Math.round(actualViewportOffset) : -1,
+      expectedViewportOffset: Math.round(expectedOffset),
+      pxError,
+      docHDrift: Math.round(docHDrift),
+      scrollTopDrift: Math.round(scrollTopDrift),
+    });
+  }, 800);
+}
+
 export function restoreContentAnchor(app: App): boolean {
   const active = getActiveAnchor();
   if (!active) return false;
@@ -626,6 +696,16 @@ export function restoreContentAnchor(app: App): boolean {
   // the anchor lets the deferred-restore retry loop and readingMode.afterRender
   // try again once the section (and its data-diaa-line embeds) exist.
   if (ok) {
+    // Schedule a deferred accuracy check (self-debouncing: repeated calls within
+    // the settle-hold reschedule the timer, so it fires only 800ms after calm).
+    const curDocH = computeDocH(app, mode);
+    let curScrollTop = 0;
+    if (mode === "preview") {
+      curScrollTop = (getRMPreviewEl(app) as HTMLElement)?.scrollTop ?? 0;
+    } else if (mode === "source") {
+      curScrollTop = (view?.editor?.cm?.scrollDOM as HTMLElement)?.scrollTop ?? 0;
+    }
+    scheduleRestoreAccuracyCheck(app, mode, anchor, anchor.kind, curScrollTop, curDocH);
     setActiveAnchor(null);
     setFallbackPct(-1);
   }
@@ -989,14 +1069,45 @@ function restoreTextInLP(
 // override keeps layout alive, so the first real LP→RM switch can park
 // at the correct Y before the renderer re-measures.
 const _sectionSnapshot = new Map<string, LedgerSection[]>();
+const _snapshotLineCount = new Map<string, number>();
 
-export function setSectionSnapshot(file: string, secs: LedgerSection[]): void {
+export function setSectionSnapshot(file: string, secs: LedgerSection[], totalLines?: number): void {
   _sectionSnapshot.set(file, secs);
+  if (totalLines !== undefined && totalLines > 0) {
+    _snapshotLineCount.set(file, totalLines);
+  }
 }
 
 export function clearSectionSnapshot(file?: string): void {
-  if (file) _sectionSnapshot.delete(file);
-  else _sectionSnapshot.clear();
+  if (file) { _sectionSnapshot.delete(file); _snapshotLineCount.delete(file); }
+  else { _sectionSnapshot.clear(); _snapshotLineCount.clear(); }
+}
+
+/** Apply a line-count delta to the snapshot after an edit before a full re-warmup.
+ *  Sections entirely after editLine get their lineStart/lineEnd shifted by delta.
+ *  Sections that straddle editLine are removed (stale), falling back to live ledger. */
+export function applySnapshotLineDelta(
+  file: string, newLineCount: number, editLine: number,
+): void {
+  const oldCount = _snapshotLineCount.get(file);
+  const snap = _sectionSnapshot.get(file);
+  if (oldCount === undefined || !snap || snap.length === 0) return;
+
+  const delta = newLineCount - oldCount;
+  if (delta === 0) { _snapshotLineCount.set(file, newLineCount); return; }
+
+  // Iterate backwards — splicing while iterating is safe this way.
+  for (let i = snap.length - 1; i >= 0; i--) {
+    const sec = snap[i];
+    if (sec.lineStart > editLine) {
+      sec.lineStart += delta;
+      sec.lineEnd += delta;
+    } else if (sec.lineEnd >= editLine) {
+      snap.splice(i, 1);
+    }
+  }
+
+  _snapshotLineCount.set(file, newLineCount);
 }
 
 // ── RM height-ledger lookup ─────────────────────────────
@@ -1208,6 +1319,17 @@ function restoreTextInRM(
         while (matches.length > 0) matches.pop();
         matches.push(...withHeading);
         _disambig = "headingHint→" + withHeading.length;
+        // Prefer heading elements only when the anchor text itself IS a
+        // heading (matches a heading element's text). Otherwise a body-text
+        // anchor inside a heading section would lose all body matches and
+        // be forced onto the heading — a ~1000px positioning error.
+        const headingEls = withHeading.filter(m => /^H[1-6]$/.test(m.tagName));
+        if (headingEls.length > 0 && headingEls.some(h =>
+            normalizeAnchorText(h.textContent ?? "") === anchor.anchorText)) {
+          while (matches.length > 0) matches.pop();
+          matches.push(...headingEls);
+          _disambig = _disambig + "+h" + headingEls.length;
+        }
       } else {
         _disambig = "headingHint→0of" + matches.length;
       }
@@ -1768,6 +1890,9 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
   let lastDocH = hookedEl.scrollHeight;
   let calm = 0;
   let corrections = 0;
+  let firstCorrectionPx = 0;
+  let lastCorrectionPx = 0;
+  let maxDriftPx = 0;
   let firstTick = true;
 
   const finish = (reason: string, recapture: boolean) => {
@@ -1777,6 +1902,9 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
     setActiveAnchor(null);
     log.info("VIEWPORT settle-hold end", {
       reason, corrections,
+      firstPx: Math.round(firstCorrectionPx),
+      lastPx: Math.round(lastCorrectionPx),
+      maxDriftPx: Math.round(maxDriftPx),
       ms: Math.round(performance.now() - start),
       scrollTop: hookedEl ? Math.round(hookedEl.scrollTop) : -1,
     });
@@ -1840,6 +1968,10 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
     const top = el.scrollTop;
     const moved = docH !== lastDocH || Math.abs(top - lastTop) > 1;
     if (moved) {
+      // Track max layout drift between ticks (before correction).
+      const drift = Math.abs(top - lastTop);
+      if (drift > maxDriftPx) maxDriftPx = drift;
+
       // Layout reflowed (or an external write scrolled us) — re-pin.
       // enterRestoreGuard also refreshes the guard's 2s safety timer, so a
       // hold that keeps correcting can't be force-released mid-flight.
@@ -1849,7 +1981,12 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
       if (!ok) setActiveAnchor(null); // target block mid-rerender; retry next frame
       exitRestoreGuard();
       const newTop = el.scrollTop;
-      if (Math.abs(newTop - top) > 2) { corrections++; calm = 0; } else calm++;
+      const correctionPx = Math.abs(newTop - top);
+      if (correctionPx > 2) {
+        if (corrections === 0) firstCorrectionPx = correctionPx;
+        lastCorrectionPx = correctionPx;
+        corrections++; calm = 0;
+      } else calm++;
       lastTop = newTop;
       lastDocH = el.scrollHeight;
     } else {
@@ -2257,6 +2394,20 @@ function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string): void 
   if (!(src.file === file && src.anchor)) return;
   const seedAnchor = src.anchor;
   const seedPct = getLastFallbackPct();
+
+  // Short-circuit: RM scrollTop was at or near the document top. No text
+  // matching needed — the user was at the top in RM, they belong at the top
+  // in LP. Text matching can mis-map a common first-heading phrase to a
+  // later occurrence (e.g. TOC entry), producing a large downward offset.
+  if (seedPct >= 0 && seedPct <= 0.02) {
+    _lpEarlyRestoreDone = true;
+    const sd = (app.workspace.activeLeaf?.view as any)?.editor?.cm?.scrollDOM as HTMLElement | null;
+    if (sd && sd.clientHeight > 0) {
+      sd.scrollTop = 0;
+      log.info("VIEWPORT anchor-restored", { mode: "source", kind: "top-shortcut", targetY: 0 });
+    }
+    return;
+  }
 
   if (_earlyRestoreId !== null) {
     cancelAnimationFrame(_earlyRestoreId);

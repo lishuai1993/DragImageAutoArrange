@@ -18,7 +18,7 @@ export const ENABLE_WARMUP_PROBE = true;
 
 // ── Timing ─────────────────────────────────────────────────────────────
 
-const WARMUP_TIMEOUT_MS = 5000;
+const CIRCUIT_BREAKER_MS = 30_000;
 const STABLE_FRAMES = 8;
 const STABLE_FRAMES_EARLY = 2;
 const SET_FALLBACK_AT_MS = 3000;
@@ -189,32 +189,44 @@ export async function runWarmup(
   let setFallbackTried = false;
 
   const finish = (result: string) => {
+    const ms = Math.round(performance.now() - t0);
+    const secs = pm?.renderer?.sections;
+    const sectionsLen = Array.isArray(secs) ? secs.length : -1;
+
+    // Capture snapshot if sections are available
     try {
-      const secs = pm?.renderer?.sections;
       if (Array.isArray(secs) && secs.length > 0) {
         const snap = secs.map((s: any) => ({
           lineStart: s.lineStart, lineEnd: s.lineEnd, height: s.height,
         }));
-        setSectionSnapshot(file, snap);
-        log.debug("WARMUP snapshot captured", { sections: snap.length });
+        const totalLines = view.editor?.lineCount?.()
+          ?? (snap.length > 0 ? snap[snap.length - 1].lineEnd : 0);
+        setSectionSnapshot(file, snap, totalLines);
+        log.debug("WARMUP snapshot captured", { sections: snap.length, totalLines });
       } else {
         log.debug("WARMUP snapshot skipped", {
-          hasSecs: Array.isArray(secs), len: Array.isArray(secs) ? secs.length : -1,
+          hasSecs: Array.isArray(secs), len: sectionsLen,
         });
       }
     } catch (e) {
       log.debug("WARMUP snapshot failed", { error: String(e) });
     }
-    const ms = Math.round(performance.now() - t0);
+
+    const finalChildren = sizer?.childElementCount ?? -1;
     removeOverride();
     _active = false;
-    requestAnimationFrame(() => {
-      log.info("WARMUP end", {
-        file, result, ms,
-        children: sizer?.childElementCount ?? -1,
-        lastVisibleDocH: lastDocH,
-        docHAfterRestore: previewEl.scrollHeight,
-      });
+
+    // Single structured log for every warmup completion
+    log.info("WARMUP finish", {
+      file, result, totalMs: ms,
+      finalDocH: lastDocH,
+      finalChildren,
+      preChildren,
+      stableFrames,
+      fallbackFired: setFallbackTried,
+      sectionsLen,
+      rerenderOk,
+      docHAfterRestore: previewEl.scrollHeight,
     });
   };
 
@@ -249,7 +261,7 @@ export async function runWarmup(
       stableFrames = 0;
       lastDocH = docH;
       log.debug("WARMUP progress", {
-        t: Math.round(elapsed), docH, children, clientH: previewEl.clientHeight,
+        t: Math.round(elapsed), docH, children, clientH: previewEl.clientHeight, stableFrames,
       });
     }
 
@@ -269,7 +281,7 @@ export async function runWarmup(
       }
     }
 
-    const rendered = docH > previewEl.clientHeight && children > Math.max(preChildren, 1);
+    const rendered = docH > previewEl.clientHeight && children > 1;
     if (rendered && stableFrames >= STABLE_FRAMES) {
       finish("rendered+stable");
       return;
@@ -284,16 +296,18 @@ export async function runWarmup(
         return;
       }
     }
-    if (elapsed >= WARMUP_TIMEOUT_MS) {
-      if (rendered) {
-        finish("rendered (docH never settled)");
-      } else {
-        // Even if the sizer never reached full child count, the renderer's
-        // section ledger may still be populated and useful for fallback.
-        const secs = pm?.renderer?.sections;
-        const hasSecs = Array.isArray(secs) && secs.length > 0;
-        finish(hasSecs ? "rendered+stale" : "failed: nothing rendered");
-      }
+    // 30s circuit breaker: sections populate within ~1s in all observed cases.
+    // Only reached if rendering fails entirely (pm.rerender threw + fallback
+    // pm.set also failed + sections never populated).
+    if (elapsed >= CIRCUIT_BREAKER_MS) {
+      const secs = pm?.renderer?.sections;
+      log.error("WARMUP circuit breaker", {
+        file, elapsed: Math.round(elapsed), docH, children, preChildren,
+        stableFrames, rerenderOk, fallbackFired: setFallbackTried,
+        sectionsLen: Array.isArray(secs) ? secs.length : -1,
+      });
+      removeOverride();
+      _active = false;
       return;
     }
     requestAnimationFrame(tick);

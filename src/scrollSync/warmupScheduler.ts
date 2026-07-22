@@ -2,10 +2,12 @@ import { App, WorkspaceLeaf } from "obsidian";
 import { logger } from "../logger";
 const log = logger.channel("warmupScheduler");
 import { ENABLE_WARMUP_PROBE, cancelWarmupProbe } from "./warmupProbe";
+import { applySnapshotLineDelta } from "./scrollAnchor";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-const IDLE_WAIT_MS = 10_000;         // 10s idle after last edit → trigger once
+const COARSE_IDLE_MS = 1_000;        // 1s idle → line-delta patch on snapshot
+const FINE_IDLE_MS = 5_000;          // 5s idle → full re-warmup
 const USER_ACTIVE_WINDOW_MS = 500;   // considered "active" if interacted within this window
 const USER_BUSY_BACKOFF_MS = 2000;   // wait 2s before retrying when user is busy
 const P0_DELAY_MS = 500;             // P0: wait for LP editor to stabilise
@@ -42,7 +44,8 @@ let _queue: WarmupTask[] = [];
 let _p0RetryQueue: string[] = [];
 let _activeAbort: { aborted: boolean } | null = null;
 let _schedulerTimer: ReturnType<typeof setTimeout> | null = null;
-let _idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let _coarseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let _fineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let _lastUserActivity = 0;
 let _running = false;
 
@@ -246,23 +249,37 @@ export function recordRMSwitch(file: string): void {
   _rmFrequency.set(file, (_rmFrequency.get(file) ?? 0) + 1);
 }
 
-/** Start/reset the 10s idle timer for a file. Fires ONCE when the timer
- *  expires — each subsequent edit resets the timer. */
-export function scheduleIdleWarmup(app: App, file: string): void {
+/** Two-tier idle warmup after an edit:
+ *  1s idle → coarse: line-delta patch on snapshot (no rendering)
+ *  5s idle → fine: full re-warmup via runP0Warmup */
+export function scheduleIdleWarmup(
+  app: App, file: string, lineCount: number, editLine: number,
+): void {
   if (!ENABLE_WARMUP_PROBE || !file) return;
 
-  const old = _idleTimers.get(file);
-  if (old) clearTimeout(old);
-
-  const timer = setTimeout(() => {
-    _idleTimers.delete(file);
+  // ── 1s coarse timer: line-number delta on existing snapshot ──
+  const oldCoarse = _coarseTimers.get(file);
+  if (oldCoarse) clearTimeout(oldCoarse);
+  _coarseTimers.set(file, setTimeout(() => {
+    _coarseTimers.delete(file);
     const activeFile = app.workspace.getActiveFile()?.path ?? "";
-    if (activeFile !== file) return;  // user switched away
+    if (activeFile !== file) return;
+    log.debug("WARMUP coarse delta", { file, lineCount, editLine });
+    applySnapshotLineDelta(file, lineCount, editLine);
+  }, COARSE_IDLE_MS));
+
+  // ── 5s fine timer: full re-warmup ──
+  const oldFine = _fineTimers.get(file);
+  if (oldFine) clearTimeout(oldFine);
+  _fineTimers.set(file, setTimeout(() => {
+    _fineTimers.delete(file);
+    const c = _coarseTimers.get(file);
+    if (c) { clearTimeout(c); _coarseTimers.delete(file); }
+    const activeFile = app.workspace.getActiveFile()?.path ?? "";
+    if (activeFile !== file) return;
     log.info("WARMUP idle trigger", { file });
     runP0Warmup(app, file);
-  }, IDLE_WAIT_MS);
-
-  _idleTimers.set(file, timer);
+  }, FINE_IDLE_MS));
 }
 
 /** Request P0 (immediate) warmup for the given file.
@@ -286,8 +303,10 @@ export function cancelAllWarmups(): void {
   if (_activeAbort) _activeAbort.aborted = true;
   _activeAbort = null;
   if (_schedulerTimer) { clearTimeout(_schedulerTimer); _schedulerTimer = null; }
-  for (const t of _idleTimers.values()) clearTimeout(t);
-  _idleTimers.clear();
+  for (const t of _coarseTimers.values()) clearTimeout(t);
+  _coarseTimers.clear();
+  for (const t of _fineTimers.values()) clearTimeout(t);
+  _fineTimers.clear();
   _queue = [];
   _p0RetryQueue = [];
   _running = false;

@@ -6,7 +6,7 @@ import {
   loadSettings,
 } from "./settings";
 import { createReadingModeProcessor } from "./readingMode";
-import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore, clearSectionSnapshot } from "./scrollSync/scrollAnchor";
+import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore } from "./scrollSync/scrollAnchor";
 import { runWarmup, cancelWarmupProbe } from "./scrollSync/warmupProbe";
 import {
   registerWarmupRunner, installUserActivityListener,
@@ -166,11 +166,14 @@ export default class DragImageAutoArrangePlugin
       })
     );
 
-    // Idle warmup: re-warm after 10s of inactivity following an edit.
+    // Two-tier idle warmup + image-row index invalidation on editor change.
+    // Coarse (1s idle): line-delta patch on snapshot. Fine (5s idle): full re-warmup.
     this.registerEvent(
-      this.app.workspace.on("editor-change", (_editor, info) => {
+      this.app.workspace.on("editor-change", (editor, info) => {
         const path = (info as any)?.file?.path;
-        if (path) scheduleIdleWarmup(this.app, path);
+        if (!path) return;
+        invalidateImageRowIndex(path);
+        scheduleIdleWarmup(this.app, path, editor.lineCount(), editor.getCursor().line);
       })
     );
 
@@ -178,17 +181,6 @@ export default class DragImageAutoArrangePlugin
       cancelWarmupProbe();
       cancelAllWarmups();
     });
-
-    // Invalidate the cached image-row index when the LP document changes.
-    // ensureImageRowIndexFromCM only builds the index on a cache miss, so
-    // adding/removing an image line in LP would otherwise leave stale line
-    // ranges and misalign the next cross-mode scroll restore.
-    this.registerEvent(
-      this.app.workspace.on("editor-change", (_editor, info) => {
-        const path = (info as any)?.file?.path;
-        if (path) { invalidateImageRowIndex(path); clearSectionSnapshot(path); }
-      })
-    );
 
     // Live Preview editor extension (CodeMirror ViewPlugin)
     this.registerEditorExtension(
