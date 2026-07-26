@@ -80,9 +80,6 @@ function applyContainerOverrides(leaf: WorkspaceLeaf): () => void {
   };
 }
 
-// ── Legacy scheduling (deprecated by warmupScheduler, kept for compat) ─
-
-let _timer: number | null = null;
 let _active = false;
 let _overriddenEl: HTMLElement | null = null;
 let _removeContainerOverride: (() => void) | null = null;
@@ -98,29 +95,11 @@ function removeOverride(): void {
   }
 }
 
-/** Cancel any pending/running probe and remove all DOM traces. */
+/** Cancel any running probe and remove all DOM traces. */
 export function cancelWarmupProbe(): void {
-  if (_timer !== null) {
-    clearTimeout(_timer);
-    _timer = null;
-  }
   removeOverride();
   _active = false;
   document.getElementById(STYLE_ID)?.remove();
-}
-
-/** Debounced entry point for the active leaf only (legacy). */
-export function scheduleWarmupProbe(app: App): void {
-  if (!ENABLE_WARMUP_PROBE) return;
-  if (_timer !== null) clearTimeout(_timer);
-  _timer = window.setTimeout(() => {
-    _timer = null;
-    try { runWarmup(app); } catch (e) {
-      log.warn("WARMUP probe threw", { error: String(e) });
-      removeOverride();
-      _active = false;
-    }
-  }, 2000);
 }
 
 // ── Core warmup runner ─────────────────────────────────────────────────

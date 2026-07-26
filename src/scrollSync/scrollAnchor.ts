@@ -2318,7 +2318,6 @@ const EARLY_RESTORE_MAX_FRAMES = 6;
 // our early write, unlike CM which holds it. Re-assert the target for a few
 // frames on RM-incoming switches to override that revert (see Step-3.1 Phase 2).
 const RM_EARLY_HOLD_FRAMES = 4;
-let _switchEntrySeq = 0;
 
 /** The scroller that will show `mode` after the switch (same lookup the
  *  restore path uses), read from the view instance directly. */
@@ -2652,10 +2651,9 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
         && (toMode === "source" || toMode === "preview") && file);
 
       // Step-3.1 verification logging (kept through Phase 1).
-      const seq = ++_switchEntrySeq;
       const inc = incomingScrollerOf(this, toMode);
       log.debug("SWITCH setState-enter", {
-        seq, t: Math.round(performance.now()),
+        t: Math.round(performance.now()),
         from: fromMode || "?", to: toMode || "?", file, isSwitch,
         incomingBuilt: !!inc, clientH: inc?.clientHeight ?? -1,
         scrollTop: inc ? Math.round(inc.scrollTop) : -1,
@@ -2676,7 +2674,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
             const embeds = rmView.querySelectorAll("embed, iframe, .internal-embed, .image-embed");
             const totalNodes = rmView.getElementsByTagName?.("*")?.length ?? all.length;
             log.info("RM-DOM-STATS", {
-              seq, file,
+              file,
               totalNodes,
               imgCount: imgs.length,
               embedCount: embeds.length,
@@ -2694,7 +2692,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
           const nowMode = self?.getMode?.() ?? "?";
           const sc = incomingScrollerOf(self, nowMode);
           log.debug("SWITCH setState-raf", {
-            seq, t: Math.round(performance.now()), mode: nowMode,
+            t: Math.round(performance.now()), mode: nowMode,
             clientH: sc?.clientHeight ?? -1,
             scrollTop: sc ? Math.round(sc.scrollTop) : -1,
           });
