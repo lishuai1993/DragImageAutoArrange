@@ -168,10 +168,6 @@ export function setLastDocH(docH: number): void {
 // File whose RM has completed initial post-processor render.
 let _rmRenderedFile = "";
 
-export function getRMRenderedFile(): string {
-  return _rmRenderedFile;
-}
-
 export function setRMRenderedFile(path: string): void {
   _rmRenderedFile = path;
 }

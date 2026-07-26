@@ -43,10 +43,8 @@ export const DEFAULT_SETTINGS = {
 
 export const SINGLE_IMAGE_MIN_WIDTH = 100;
 
-export const MIN_IMAGE_WIDTH = 50;
 export const DIVIDER_WIDTH = 4;
 export const RESIZE_HANDLE_SIZE = 10;
-export const RESIZE_DEBOUNCE_MS = 100;
 
 export function buildImageLineRe(extensions: string): RegExp {
   const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");

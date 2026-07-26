@@ -57,21 +57,3 @@ export function validateRowFlexGrows(
   return result;
 }
 
-/**
- * Validate an entire row's scale array.
- * Invalid entries are replaced with null (use uniform height).
- * Returns a new safe array (does not mutate the input).
- */
-export function validateRowScales(
-  scales: Array<number | null>,
-  _grows: number[],
-  _metas: ImageMeta[],
-  _containerWidth: number,
-  _gap: number
-): Array<number | null> {
-  return scales.map((s) => {
-    if (s == null) return null;
-    if (!isFinite(s) || s <= 0 || s > 1) return null;
-    return s;
-  });
-}

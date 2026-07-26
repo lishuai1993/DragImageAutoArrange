@@ -1078,11 +1078,6 @@ export function setSectionSnapshot(file: string, secs: LedgerSection[], totalLin
   }
 }
 
-export function clearSectionSnapshot(file?: string): void {
-  if (file) { _sectionSnapshot.delete(file); _snapshotLineCount.delete(file); }
-  else { _sectionSnapshot.clear(); _snapshotLineCount.clear(); }
-}
-
 /** Apply a line-count delta to the snapshot after an edit before a full re-warmup.
  *  Sections entirely after editLine get their lineStart/lineEnd shifted by delta.
  *  Sections that straddle editLine are removed (stale), falling back to live ledger. */
