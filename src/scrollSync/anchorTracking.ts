@@ -35,6 +35,7 @@ import {
   SILENCE_WINDOW_MS,
   RM_RESTORE_TIMEOUT_MS,
   NATIVE_RETRY_INTERVAL,
+  RM_EMBED_WAIT_MS,
   RM_HOLD_TIMEOUT_MS,
   RM_HOLD_CALM_FRAMES,
   EARLY_RESTORE_MAX_FRAMES,
@@ -55,6 +56,7 @@ import {
   cancelRMDeferredRestore,
 } from "./anchorStore";
 import { runRestoreLoop } from "./anchorRestoreSession";
+import { whenEmbedPresent } from "./anchorSignals";
 
 const log = logger.channel("scrollAnchor");
 
@@ -384,11 +386,15 @@ export function scheduleRMDeferredRestore(app: App): void {
   // P4-B: the per-frame `attempt` body is now `onFrame`; runRestoreLoop owns the
   // rAF id slot and the synchronous-first-frame behavior. "continue" reschedules,
   // "stop" halts (clears the slot) — identical to the old terminal returns.
+  // P4-C2: onFrame is now async so the cold-render retry can `await` the real
+  // "embed appeared" signal (image anchors) instead of blindly re-pushing native
+  // every NATIVE_RETRY_INTERVAL frames. runRestoreLoop (C1) handles a Promise
+  // return; the synchronous head of the first frame still runs before paint.
   runRestoreLoop({
     getId: () => state._rmDeferredRestoreId,
     setId: (id) => { state._rmDeferredRestoreId = id; },
     firstFrameSync: true,
-    onFrame: () => {
+    onFrame: async () => {
       const mode = (app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
       if (mode !== "preview") { exitGuardOnce(); return "stop"; }
 
@@ -414,12 +420,22 @@ export function scheduleRMDeferredRestore(app: App): void {
         const ok = restoreContentAnchor(app);
         const elapsed = performance.now() - state._rmRestoreStartTime;
         if (!ok && elapsed < RM_RESTORE_TIMEOUT_MS) {
+          // Image anchors have a real DOM signal — the `.internal-embed` row for
+          // the target line — so C2 waits for that instead of a frame counter.
+          // Text anchors have no such element, so they keep the frame-count
+          // re-push cadence unchanged.
+          const anchorIsImage =
+            seedAnchor.kind === "image-row" || seedAnchor.kind === "image-gap";
+
           // Periodically re-push native-scroll so the renderer keeps building
           // DOM toward the target region (cold RM may need multiple pushes).
-          state._rmFramesSinceNative++;
-          if (state._rmFramesSinceNative >= NATIVE_RETRY_INTERVAL) {
-            state._rmNativeTried = false;
-            state._rmFramesSinceNative = 0;
+          // (text anchors only — image anchors gate re-push on whenEmbedPresent)
+          if (!anchorIsImage) {
+            state._rmFramesSinceNative++;
+            if (state._rmFramesSinceNative >= NATIVE_RETRY_INTERVAL) {
+              state._rmNativeTried = false;
+              state._rmFramesSinceNative = 0;
+            }
           }
           let advanced = false;
           if (!state._rmNativeTried) {
@@ -428,6 +444,15 @@ export function scheduleRMDeferredRestore(app: App): void {
             if (nativeScrollToLine(app, line)) {
               enterGuardOnce();
               advanced = true;
+              if (anchorIsImage) {
+                // P4-C2: await the real "renderer built the target embed" signal
+                // instead of re-pushing native blindly every N frames. On timeout
+                // (embed never appeared) re-arm the native push for next cycle.
+                const appeared = await whenEmbedPresent(previewEl, line, {
+                  timeoutMs: RM_EMBED_WAIT_MS,
+                });
+                if (!appeared) state._rmNativeTried = false;
+              }
               return "continue";
             }
           }
@@ -557,6 +582,13 @@ export function scheduleLPDeferredRestore(app: App): void {
   };
 
   // P4-B: see scheduleRMDeferredRestore — runRestoreLoop owns the rAF id slot.
+  // P4-C2: intentionally NOT converted to async signals. Unlike cold RM, the LP
+  // (CodeMirror) height map is authoritative from frame one and is not
+  // virtualized — lineBlockAt resolves any line regardless of scroll, so there
+  // is no "wait for the renderer to build the target embed" phase and no
+  // frame-count / magic-timeout polling to replace. The single post-native
+  // `continue` is a legitimate one-frame settle, and a native-scroll failure is
+  // terminal by design. Adding await here would only add latency and risk.
   runRestoreLoop({
     getId: () => state._lpDeferredRestoreId,
     setId: (id) => { state._lpDeferredRestoreId = id; },

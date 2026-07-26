@@ -263,7 +263,11 @@ export const RATIO_GATE_TOL = 0.15;        // LP vs RM docRatio naturally differ
 export const ENABLE_NATIVE_SCROLL = true;
 export const SILENCE_WINDOW_MS = 300;
 export const RM_RESTORE_TIMEOUT_MS = 5000;
-export const NATIVE_RETRY_INTERVAL = 30; // frames between setEphemeralState re-pushes
+export const NATIVE_RETRY_INTERVAL = 30; // frames between setEphemeralState re-pushes (text anchors)
+export const RM_EMBED_WAIT_MS = 500;     // P4-C2: per-cycle budget to await the target embed
+                                         // appearing in the DOM (image anchors). ~= the old
+                                         // NATIVE_RETRY_INTERVAL cadence (30 frames), but gated on
+                                         // the real MutationObserver signal instead of a frame count.
 export const RM_HOLD_TIMEOUT_MS = 2000;
 export const RM_HOLD_CALM_FRAMES = 6; // consecutive no-correction frames = settled
 export const EARLY_RESTORE_MAX_FRAMES = 6;
