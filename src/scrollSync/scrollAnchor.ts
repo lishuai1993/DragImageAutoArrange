@@ -13,14 +13,14 @@
 export {
   getRMDeferredRestoreId, cancelRMDeferredRestore, setSectionSnapshot,
   applySnapshotLineDelta, getScrollAnchor, setLastAnchor,
-} from "./anchorStore";
-export { computeScrollPct, captureContentAnchor } from "./anchorCapture";
-export { restoreContentAnchor, restoreScrollPct } from "./anchorRestore";
-export { ensureRMScrollTracking, startRMSettleHold } from "./anchorTracking";
+} from "../anchor/anchorStore";
+export { computeScrollPct, captureContentAnchor } from "../anchor/anchorCapture";
+export { restoreContentAnchor, restoreScrollPct } from "../anchor/anchorRestore";
+export { ensureRMScrollTracking, startRMSettleHold } from "../anchor/anchorTracking";
 export {
   installEarlyModeSwitchRestore, onViewModeChange, driveViewportTransition, schedulePendingFlush,
-} from "./anchorModeSwitch";
+} from "../anchor/anchorModeSwitch";
 export {
   setImageRowIndex, invalidateImageRowIndex, setImageLineRe,
   setLastFallbackPct, getFallbackPct,
-} from "./anchorStore";
+} from "../anchor/anchorStore";

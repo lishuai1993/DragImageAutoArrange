@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   nextFrame, waitFor, whenEmbedPresent, whenScrollSettled,
-} from "../src/scrollSync/anchorSignals";
+} from "../src/anchor/anchorSignals";
 
 // Node env has no rAF / MutationObserver — shim both for deterministic tests.
 class FakeMutationObserver {

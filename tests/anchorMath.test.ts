@@ -5,7 +5,7 @@ import {
   nearestIndexBy, ledgerYForLine, ledgerLineForY, ledgerTotalHeight,
   sectionIndexEstimateY, extrapolateLedgerY, LedgerSection,
   clientTopToDocY, scrollTopToPct, pctToScrollTop,
-} from '../src/scrollSync/anchorMath';
+} from '../src/anchor/anchorMath';
 
 describe('clamp01', () => {
   it('clamps below 0, above 1, passes through inside', () => {

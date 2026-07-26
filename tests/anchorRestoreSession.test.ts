@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { runRestoreLoop, type FrameOutcome } from "../src/scrollSync/anchorRestoreSession";
+import { runRestoreLoop, type FrameOutcome } from "../src/anchor/anchorRestoreSession";
 
 // The loops run in Obsidian where requestAnimationFrame exists; vitest's node
 // env has none, so shim a setTimeout-backed rAF for the primitive's control flow.

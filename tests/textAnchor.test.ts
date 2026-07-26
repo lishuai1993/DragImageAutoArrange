@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeAnchorText } from '../src/scrollSync/textAnchor';
+import { normalizeAnchorText } from '../src/anchor/textAnchor';
 
 describe('normalizeAnchorText', () => {
   describe('leading block markers', () => {

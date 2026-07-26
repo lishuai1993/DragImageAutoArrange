@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { runRestoreLoop } from "../src/scrollSync/anchorRestoreSession";
-import { whenEmbedPresent } from "../src/scrollSync/anchorSignals";
+import { runRestoreLoop } from "../src/anchor/anchorRestoreSession";
+import { whenEmbedPresent } from "../src/anchor/anchorSignals";
 
 // P4-C2 composition test.
 //

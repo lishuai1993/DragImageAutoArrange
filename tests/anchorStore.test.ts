@@ -7,8 +7,8 @@ import {
   getFallbackPct, setFallbackPct, getLastFallbackPct, setLastFallbackPct,
   getLastMode, setLastMode, getLastDocH, setLastDocH,
   getImageLineRe, setImageLineRe,
-} from '../src/scrollSync/anchorStore';
-import { asLine1, ImageRowIndex } from '../src/scrollSync/viewportAnchor';
+} from '../src/anchor/anchorStore';
+import { asLine1, ImageRowIndex } from '../src/anchor/viewportAnchor';
 
 const rowAnchor = (i: number): ViewportAnchor => ({
   kind: 'image-row', imageRowIndex: i, intraRowRatio: 0.5,

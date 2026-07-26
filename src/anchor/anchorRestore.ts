@@ -12,7 +12,7 @@ import {
   LedgerSection, clientTopToDocY, scrollTopToPct, pctToScrollTop,
 } from "./anchorMath";
 import { assertNever } from "../utils";
-import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "./domLocators";
+import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "../scrollSync/domLocators";
 import { normalizeAnchorText } from "./textAnchor";
 import {
   ViewportAnchor, setImageRowIndex, getImageRowIndex, invalidateImageRowIndex,

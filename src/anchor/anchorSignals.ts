@@ -10,7 +10,7 @@
 // All are promise-based so the loops can `await` completion instead of
 // recursing rAF and guessing frame budgets.
 
-import { findEmbedByLine } from "./domLocators";
+import { findEmbedByLine } from "../scrollSync/domLocators";
 
 /** Resolve on the next animation frame. The single primitive every other
  *  signal is built on. */

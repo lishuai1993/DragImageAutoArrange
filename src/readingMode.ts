@@ -17,7 +17,7 @@ import {
   startRMSettleHold,
   driveViewportTransition,
 } from "./scrollSync/scrollAnchor";
-import { buildImageRowIndex, toLine1 } from "./scrollSync/viewportAnchor";
+import { buildImageRowIndex, toLine1 } from "./anchor/viewportAnchor";
 import {
   getFileNameFromEmbed, isImageEmbed,
   applyStandaloneAlignment,

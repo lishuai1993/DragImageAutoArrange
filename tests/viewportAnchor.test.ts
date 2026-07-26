@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyCenter, ImageRowIndex } from '../src/scrollSync/viewportAnchor';
+import { classifyCenter, ImageRowIndex } from '../src/anchor/viewportAnchor';
 
 const IMG = /!\[\[.*\.(?:png|jpg|jpeg|gif|webp|svg|bmp|avif)/i;
 
