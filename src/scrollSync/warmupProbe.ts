@@ -2,6 +2,10 @@ import { App, WorkspaceLeaf } from "obsidian";
 import { logger } from "../logger";
 const log = logger.channel("warmupProbe");
 import { setSectionSnapshot } from "./scrollAnchor";
+// L3: release the per-section re-entry marks this warmup pass wrote into the RM
+// post-processor guard, so the real RM render can reprocess any section the warmup
+// touched but did not fully wrap (cross-pass mark leak → problem 1).
+import { releasePostProcessingMarks } from "../readingMode";
 
 // ── RM warm-up probe ───────────────────────────────────────────────────
 // Pre-renders the real previewMode in the background (visibility:hidden) so
@@ -194,6 +198,15 @@ export async function runWarmup(
     const finalChildren = sizer?.childElementCount ?? -1;
     removeOverride();
     _active = false;
+
+    // L3: this warmup pass (success or abort) is over — release the re-entry marks
+    // it wrote into the RM post-processor guard. Without this, a warmup that touched
+    // a section but did not finish wrapping it (e.g. "aborted: reading view detached")
+    // would leave that section permanently marked, so the real RM render skips it and
+    // images fall back to native Obsidian form. Already-wrapped sections stay skipped
+    // via the L1 completion-marker short-circuit in the processor entry.
+    releasePostProcessingMarks();
+    log.debug("WARMUP marks released", { result });
 
     // Single structured log for every warmup completion
     log.info("WARMUP finish", {

@@ -34,7 +34,21 @@ import {
 // Per-section re-entrancy guard: the post-processor fires per section, and
 // image wrapping can trigger DOM mutations that cause Obsidian to re-invoke it
 // within the same tick. Prevent duplicate runs for the same section element.
-const _postProcessing = new WeakSet<HTMLElement>();
+// L2: declared `let` so a warmup (background) render pass can release its marks
+// via releasePostProcessingMarks() — otherwise a warmup that touched-but-did-not-
+// finish-wrapping a section permanently blocks the subsequent real RM render
+// (cross-pass mark leak). See warmupProbe.finish() / L3.
+let _postProcessing = new WeakSet<HTMLElement>();
+
+/**
+ * L2/L3: release re-entry marks accumulated during a warmup render pass.
+ * Called from warmupProbe.finish() so sections a warmup touched but did not fully
+ * wrap are no longer skipped by the real RM render. Sections already fully wrapped
+ * stay skipped via the L1 completion-marker short-circuit in the processor entry.
+ */
+export function releasePostProcessingMarks(): void {
+  _postProcessing = new WeakSet<HTMLElement>();
+}
 
 export function createReadingModeProcessor(
   app: App,
@@ -43,6 +57,22 @@ export function createReadingModeProcessor(
 ) {
   return async (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
     if (!enabled()) return;
+    // L1: short-circuit sections already fully rendered. wrapAsFlexRow produces a
+    // [data-diaa-group] wrapper (rmFlexRow.ts) for >=2-image rows;
+    // applyStandaloneAlignment produces a [data-diaa-standalone] wrapper for single
+    // images. Presence of either means a prior pass already wrapped this section,
+    // so skip to avoid double-wrap. This also makes the guard state-aware: a warmup
+    // pass that completed wrapping is correctly skipped even after L2 resets the
+    // WeakSet (only incomplete sections get reprocessed).
+    if (el.querySelector("[data-diaa-group], [data-diaa-standalone]")) {
+      log.debug("ReadingMode processor skipped", {
+        reason: "already-wrapped", sourcePath: ctx.sourcePath,
+      });
+      return;
+    }
+    // Intra-pass dedup: Obsidian may re-invoke the post-processor for the same
+    // section element within the same tick (129b2aa fix preserved). The WeakSet is
+    // reset between render passes by releasePostProcessingMarks() (L2/L3).
     if (_postProcessing.has(el)) return;
     _postProcessing.add(el);
 
