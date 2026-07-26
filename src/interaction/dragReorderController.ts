@@ -1,8 +1,8 @@
-import { CLASSES } from "./constants";
-import { computeDividerXPositions, findClosestDividerIndex } from "./layoutEngine";
-import { logger } from "./logger";
+import { CLASSES } from "../constants";
+import { computeDividerXPositions, findClosestDividerIndex } from "../imageLayout/layoutEngine";
+import { logger } from "../logger";
 const log = logger.channel("dragReorder");
-import { createDragGhost } from "./rowRenderer";
+import { createDragGhost } from "../imageRender/rowRenderer";
 
 /**
  * Narrow host interface the DragReorderController needs from ImageRowWidget.

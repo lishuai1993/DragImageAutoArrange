@@ -1,4 +1,4 @@
-import { ImageMeta } from "./imageDetector";
+import { ImageMeta } from "../imageParse/imageDetector";
 import { computeFlexGrows } from "./layoutEngine";
 
 /**

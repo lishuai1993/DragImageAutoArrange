@@ -1,12 +1,12 @@
 import { App, TFile } from "obsidian";
-import { CLASSES } from "./constants";
-import { ImageRowOptions } from "./types";
-import { ImageMeta } from "./imageDetector";
-import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights } from "./layoutEngine";
-import { alignmentToCSS } from "./utils";
-import { logger } from "./logger";
+import { CLASSES } from "../constants";
+import { ImageRowOptions } from "../types";
+import { ImageMeta } from "../imageParse/imageDetector";
+import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights } from "../imageLayout/layoutEngine";
+import { alignmentToCSS } from "../utils";
+import { logger } from "../logger";
 const log = logger.channel("rmFlexRow");
-import { validateRowFlexGrows } from "./parameterValidator";
+import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
 

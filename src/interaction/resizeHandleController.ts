@@ -1,6 +1,6 @@
-import { CLASSES, RESIZE_HANDLE_SIZE } from "./constants";
-import { ImageMeta } from "./imageDetector";
-import { logger } from "./logger";
+import { CLASSES, RESIZE_HANDLE_SIZE } from "../constants";
+import { ImageMeta } from "../imageParse/imageDetector";
+import { logger } from "../logger";
 const log = logger.channel("resize");
 
 export interface HandleDef {

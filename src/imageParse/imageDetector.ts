@@ -1,5 +1,5 @@
-import { buildImageLineRe } from "./constants";
-import { logger } from "./logger";
+import { buildImageLineRe } from "../constants";
+import { logger } from "../logger";
 const log = logger.channel("imageDetector");
 
 export interface ImageEmbed {

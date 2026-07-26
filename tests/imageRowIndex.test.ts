@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildImageRowIndex, toLine1, ImageRowIndex } from '../src/anchor/viewportAnchor';
-import { parseImageLine } from '../src/imageDetector';
+import { parseImageLine } from '../src/imageParse/imageDetector';
 import { buildImageLineRe } from '../src/constants';
 
 const EXTS = 'png,jpg,jpeg,gif,webp,svg,bmp,avif';

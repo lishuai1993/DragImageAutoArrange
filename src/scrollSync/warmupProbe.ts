@@ -5,7 +5,7 @@ import { setSectionSnapshot } from "./scrollAnchor";
 // L3: release the per-section re-entry marks this warmup pass wrote into the RM
 // post-processor guard, so the real RM render can reprocess any section the warmup
 // touched but did not fully wrap (cross-pass mark leak → problem 1).
-import { releasePostProcessingMarks } from "../readingMode";
+import { releasePostProcessingMarks } from "../imageRender/readingMode";
 
 // ── RM warm-up probe ───────────────────────────────────────────────────
 // Pre-renders the real previewMode in the background (visibility:hidden) so

@@ -2,7 +2,7 @@ import { App, MarkdownView } from "obsidian";
 import { logger } from "../logger";
 import {
   getPendingAlignmentCount, clearFlushTimer, setFlushTimer, getFlushTimer, flushPendingAlignments,
-} from "../rmAlignStore";
+} from "../imageRender/rmAlignStore";
 import {
   classifyCenter, ImageRowIndex, Line1, asLine1, buildImageRowIndex,
 } from "./viewportAnchor";

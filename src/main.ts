@@ -5,7 +5,7 @@ import {
   IDragImagePlugin,
   loadSettings,
 } from "./settings";
-import { createReadingModeProcessor } from "./readingMode";
+import { createReadingModeProcessor } from "./imageRender/readingMode";
 import { schedulePendingFlush, onViewModeChange, invalidateImageRowIndex, installEarlyModeSwitchRestore } from "./scrollSync/scrollAnchor";
 import { runWarmup, cancelWarmupProbe } from "./scrollSync/warmupProbe";
 import {
@@ -13,10 +13,10 @@ import {
   requestP0Warmup, requestGlobalWarmup, cancelAllWarmups,
   recordRMSwitch, scheduleIdleWarmup,
 } from "./scrollSync/warmupScheduler";
-import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./livePreview";
-import { exportPreservedSizes, importPreservedSizes } from "./imageRowWidget";
+import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./imageRender/livePreview";
+import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
-import { showImageAlignmentMenu } from "./alignmentContextMenu";
+import { showImageAlignmentMenu } from "./interaction/alignmentContextMenu";
 import { logger } from "./logger";
 const log = logger.channel("main");
 

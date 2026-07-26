@@ -1,5 +1,5 @@
 import { App } from "obsidian";
-import { logger } from "./logger";
+import { logger } from "../logger";
 const log = logger.channel("rmAlignStore");
 
 // ── Pending alignment store ─────────────────────────────────────────

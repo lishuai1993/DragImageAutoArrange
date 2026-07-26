@@ -4,7 +4,7 @@
  * click-to-close handler interferes with hover behavior).
  */
 
-import { logger } from "./logger";
+import { logger } from "../logger";
 const log = logger.channel("alignmentCtx");
 
 // ── Global singleton state for cleanup ──

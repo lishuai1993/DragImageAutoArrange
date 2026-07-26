@@ -1,9 +1,9 @@
 import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
-import { buildImageLineRe } from "./constants";
-import { ImageRowOptions } from "./types";
-import { ImageEmbed, parseImageLine } from "./imageDetector";
-import { matchEmbedsToParsed } from "./matchEmbeds";
-import { logger } from "./logger";
+import { buildImageLineRe } from "../constants";
+import { ImageRowOptions } from "../types";
+import { ImageEmbed, parseImageLine } from "../imageParse/imageDetector";
+import { matchEmbedsToParsed } from "../imageParse/matchEmbeds";
+import { logger } from "../logger";
 const log = logger.channel("readingMode");
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
 import {
@@ -16,8 +16,8 @@ import {
   captureContentAnchor, computeScrollPct,
   startRMSettleHold,
   driveViewportTransition,
-} from "./scrollSync/scrollAnchor";
-import { buildImageRowIndex, toLine1 } from "./anchor/viewportAnchor";
+} from "../scrollSync/scrollAnchor";
+import { buildImageRowIndex, toLine1 } from "../anchor/viewportAnchor";
 import {
   getFileNameFromEmbed, isImageEmbed,
   applyStandaloneAlignment,

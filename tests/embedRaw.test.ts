@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripEmbedParams, parseEmbedParams } from "../src/embedRaw";
+import { stripEmbedParams, parseEmbedParams } from "../src/imageParse/embedRaw";
 
 describe("stripEmbedParams", () => {
   it("strips a single width param", () => {

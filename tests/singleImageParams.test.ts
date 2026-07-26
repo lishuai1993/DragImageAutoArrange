@@ -4,8 +4,8 @@ import {
   singleImageScaleFor,
   formatSingleImageLine,
   normalizeSingleImageParams,
-} from '../src/singleImageParams';
-import type { ImageGroup, ImageEmbed } from '../src/imageDetector';
+} from '../src/imageParse/singleImageParams';
+import type { ImageGroup, ImageEmbed } from '../src/imageParse/imageDetector';
 
 function embed(raw: string): ImageEmbed {
   return {

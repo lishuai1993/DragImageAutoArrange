@@ -19,8 +19,8 @@ vi.mock('obsidian', () => ({
   })),
 }));
 
-import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRowWidget';
-import { ImageGroup, ImageEmbed } from '../src/imageDetector';
+import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRender/imageRowWidget';
+import { ImageGroup, ImageEmbed } from '../src/imageParse/imageDetector';
 
 // ── Test helpers ─────────────────────────────────────────────────────
 

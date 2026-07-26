@@ -15,22 +15,22 @@ import { describe, it, expect } from "vitest";
 //
 // Keep the module list in sync with the modules actually touched by refactor.
 
-import * as livePreview from "../src/livePreview";
-import * as rmFlexRow from "../src/rmFlexRow";
-import * as readingMode from "../src/readingMode";
+import * as livePreview from "../src/imageRender/livePreview";
+import * as rmFlexRow from "../src/imageRender/rmFlexRow";
+import * as readingMode from "../src/imageRender/readingMode";
 import * as scrollAnchor from "../src/scrollSync/scrollAnchor";
-import * as imageRowWidget from "../src/imageRowWidget";
-import * as layoutEngine from "../src/layoutEngine";
+import * as imageRowWidget from "../src/imageRender/imageRowWidget";
+import * as layoutEngine from "../src/imageLayout/layoutEngine";
 import * as anchorMath from "../src/anchor/anchorMath";
 import * as domLocators from "../src/scrollSync/domLocators";
 import * as anchorRestoreSession from "../src/anchor/anchorRestoreSession";
 import * as anchorSignals from "../src/anchor/anchorSignals";
 import * as warmupProbe from "../src/scrollSync/warmupProbe";
 import * as warmupScheduler from "../src/scrollSync/warmupScheduler";
-import * as rmAlignStore from "../src/rmAlignStore";
-import * as matchEmbeds from "../src/matchEmbeds";
-import * as singleImageParams from "../src/singleImageParams";
-import * as embedRaw from "../src/embedRaw";
+import * as rmAlignStore from "../src/imageRender/rmAlignStore";
+import * as matchEmbeds from "../src/imageParse/matchEmbeds";
+import * as singleImageParams from "../src/imageParse/singleImageParams";
+import * as embedRaw from "../src/imageParse/embedRaw";
 import * as settings from "../src/settings";
 import * as constants from "../src/constants";
 import * as utils from "../src/utils";

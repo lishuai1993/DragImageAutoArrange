@@ -4,7 +4,7 @@ import {
   detectImageGroups,
   isImageLine,
   ImageGroup,
-} from '../src/imageDetector';
+} from '../src/imageParse/imageDetector';
 import { buildImageLineRe } from '../src/constants';
 
 const rePng = buildImageLineRe('png,jpg');

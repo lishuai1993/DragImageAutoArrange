@@ -14,17 +14,17 @@ import {
   Annotation,
 } from "@codemirror/state";
 import { editorLivePreviewField } from "obsidian";
-import { detectImageGroups } from "./imageDetector";
-import type { ImageGroup, ImageEmbed } from "./imageDetector";
+import { detectImageGroups } from "../imageParse/imageDetector";
+import type { ImageGroup, ImageEmbed } from "../imageParse/imageDetector";
 import { ImageRowWidget, ImageRowOptions, getSidebarWidths } from "./imageRowWidget";
-import { DragImageSettings } from "./settings";
-import { CLASSES } from "./constants";
-import { computeFlexGrowsFromWidths } from "./layoutEngine";
-import { logger } from "./logger";
+import { DragImageSettings } from "../settings";
+import { CLASSES } from "../constants";
+import { computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
+import { logger } from "../logger";
 const log = logger.channel("livePreview");
-import { clampFlexGrow, clampScale } from "./parameterValidator";
-import { isSingleImageManual, formatSingleImageLine, normalizeSingleImageParams } from "./singleImageParams";
-import { stripEmbedParams, parseEmbedParams } from "./embedRaw";
+import { clampFlexGrow, clampScale } from "../imageLayout/parameterValidator";
+import { isSingleImageManual, formatSingleImageLine, normalizeSingleImageParams } from "../imageParse/singleImageParams";
+import { stripEmbedParams, parseEmbedParams } from "../imageParse/embedRaw";
 import { createDragGhost } from "./rowRenderer";
 
 /**

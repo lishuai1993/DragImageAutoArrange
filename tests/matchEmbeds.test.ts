@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { matchEmbedsToParsed } from '../src/matchEmbeds';
-import { ImageEmbed } from '../src/imageDetector';
+import { matchEmbedsToParsed } from '../src/imageParse/matchEmbeds';
+import { ImageEmbed } from '../src/imageParse/imageDetector';
 
 // Minimal ImageEmbed factory — only the fields matching cares about matter.
 function emb(fileName: string, line: number, extra: Partial<ImageEmbed> = {}): ImageEmbed {

@@ -19,7 +19,7 @@ import { EditorState } from '@codemirror/state';
 import {
   layoutVersionField,
   forceLayoutRefresh,
-} from '../src/livePreview';
+} from '../src/imageRender/livePreview';
 
 describe('layoutVersionField', () => {
   it('create returns 0', () => {

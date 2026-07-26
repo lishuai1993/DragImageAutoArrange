@@ -1,5 +1,5 @@
-import { ImageMeta } from "./imageDetector";
-import { SingleImageSizeMode, SINGLE_IMAGE_MIN_WIDTH } from "./constants";
+import { ImageMeta } from "../imageParse/imageDetector";
+import { SingleImageSizeMode, SINGLE_IMAGE_MIN_WIDTH } from "../constants";
 
 export interface LayoutResult {
   /** Computed uniform row height in px */

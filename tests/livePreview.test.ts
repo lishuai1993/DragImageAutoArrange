@@ -22,7 +22,7 @@ vi.mock('@codemirror/view', () => ({
   EditorView: {},
 }));
 
-import { normalizeRaw, updateImageLineWidth } from '../src/livePreview';
+import { normalizeRaw, updateImageLineWidth } from '../src/imageRender/livePreview';
 
 // ── normalizeRaw ──
 describe('normalizeRaw', () => {

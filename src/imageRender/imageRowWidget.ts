@@ -1,16 +1,16 @@
-import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode } from "./constants";
-import { ImageGroup, ImageEmbed, ImageMeta } from "./imageDetector";
-import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth } from "./layoutEngine";
-import { resolveImageSrc, alignmentToCSS } from "./utils";
-import { logger } from "./logger";
+import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode } from "../constants";
+import { ImageGroup, ImageEmbed, ImageMeta } from "../imageParse/imageDetector";
+import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth } from "../imageLayout/layoutEngine";
+import { resolveImageSrc, alignmentToCSS } from "../utils";
+import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
-import { clampFlexGrow, clampScale, validateRowFlexGrows } from "./parameterValidator";
-import { isSingleImageManual, singleImageScaleFor, formatSingleImageLine } from "./singleImageParams";
-import { parseEmbedParams } from "./embedRaw";
+import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
+import { isSingleImageManual, singleImageScaleFor, formatSingleImageLine } from "../imageParse/singleImageParams";
+import { parseEmbedParams } from "../imageParse/embedRaw";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
-import { DividerController, DividerHost } from "./dividerController";
-import { ResizeHandleController, ResizeHost, HandleDef } from "./resizeHandleController";
-import { DragReorderController, DragReorderHost } from "./dragReorderController";
+import { DividerController, DividerHost } from "../interaction/dividerController";
+import { ResizeHandleController, ResizeHost, HandleDef } from "../interaction/resizeHandleController";
+import { DragReorderController, DragReorderHost } from "../interaction/dragReorderController";
 
 function mkRowKey(sourcePath: string, _lineStart: number, fileNames: string[]): string {
   const sorted = [...fileNames].sort().join(",");

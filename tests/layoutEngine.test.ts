@@ -14,8 +14,8 @@ import {
   computeScaleBasedHeights,
   computeFlexGrowsFromWidths,
   computeSingleImageWidth,
-} from '../src/layoutEngine';
-import { ImageMeta } from '../src/imageDetector';
+} from '../src/imageLayout/layoutEngine';
+import { ImageMeta } from '../src/imageParse/imageDetector';
 
 // ── Helpers ──
 const m = (w: number, h: number): ImageMeta => ({ naturalWidth: w, naturalHeight: h });

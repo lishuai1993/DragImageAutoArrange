@@ -1,8 +1,8 @@
-import { CLASSES, DIVIDER_WIDTH } from "./constants";
-import { ImageMeta } from "./imageDetector";
-import { logger } from "./logger";
+import { CLASSES, DIVIDER_WIDTH } from "../constants";
+import { ImageMeta } from "../imageParse/imageDetector";
+import { logger } from "../logger";
 const log = logger.channel("divider");
-import { clampFlexGrow } from "./parameterValidator";
+import { clampFlexGrow } from "../imageLayout/parameterValidator";
 
 /**
  * Narrow host interface the DividerController needs from ImageRowWidget.
