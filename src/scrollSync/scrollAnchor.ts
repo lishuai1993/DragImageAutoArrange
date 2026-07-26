@@ -1,7 +1,7 @@
 // scrollAnchor.ts — re-export barrel for the split scroll-sync implementation.
 //
 // During the P3 refactor the ~2947-line scrollAnchor.ts was split into:
-//   anchorState.ts      — shared mutable state + guard/restore primitives
+//   anchorStore.ts      — shared mutable state (incl. P3 anchorState) + guard/restore primitives
 //   anchorCapture.ts    — anchor capture (LP + RM)
 //   anchorRestore.ts    — anchor restore (LP + RM)
 //   anchorTracking.ts   — RM/LP scroll tracking + deferred/settle-hold restores
@@ -13,7 +13,7 @@
 export {
   getRMDeferredRestoreId, cancelRMDeferredRestore, setSectionSnapshot,
   applySnapshotLineDelta, getScrollAnchor, setLastAnchor,
-} from "./anchorState";
+} from "./anchorStore";
 export { computeScrollPct, captureContentAnchor } from "./anchorCapture";
 export { restoreContentAnchor, restoreScrollPct } from "./anchorRestore";
 export { ensureRMScrollTracking, startRMSettleHold } from "./anchorTracking";

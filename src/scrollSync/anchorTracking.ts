@@ -20,11 +20,6 @@ import {
   setLastFallbackPct, setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor,
   getLastMode, setLastMode, getLastDocH, setLastDocH, getImageLineRe,
   setRMLastAnchorList, getRMLastAnchorList,
-} from "./anchorStore";
-
-const log = logger.channel("scrollAnchor");
-
-import {
   state,
   MIN_ANCHOR_TEXT_LEN,
   TABLE_ROW_RE,
@@ -58,7 +53,10 @@ import {
   cancelRMHoldChain,
   getScrollAnchor,
   cancelRMDeferredRestore,
-} from "./anchorState";
+} from "./anchorStore";
+
+const log = logger.channel("scrollAnchor");
+
 
 import {
   ensureImageRowIndexFromCM,
