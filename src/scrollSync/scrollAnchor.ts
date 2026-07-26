@@ -18,6 +18,7 @@ import {
   clientTopToDocY, scrollTopToPct, pctToScrollTop,
 } from "./anchorMath";
 import { assertNever } from "../utils";
+import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "./domLocators";
 import { normalizeAnchorText } from "./textAnchor";
 import {
   ViewportAnchor,
@@ -207,17 +208,6 @@ export function computeScrollPct(app: App): number {
   }
 
   return -1;
-}
-
-/** The active view's reading-mode scroll container. RM-side capture/restore must
- *  query WITHIN the active MarkdownView — a global `document.querySelector`
- *  can hit a hidden/zero-height `.markdown-preview-view` from another leaf or a
- *  mid-switch stub, which silently makes all RM geometry read 0 and degrades
- *  cross-mode sync to LP-only. Scoping to the active view's contentEl fixes it. */
-function getRMPreviewEl(app: App): HTMLElement | null {
-  const view = app.workspace.activeLeaf?.view as any;
-  const container = (view?.contentEl ?? view?.containerEl) as HTMLElement | undefined;
-  return (container?.querySelector(".markdown-preview-view") as HTMLElement | null) ?? null;
 }
 
 // ── Anchor capture ─────────────────────────────────────
@@ -494,9 +484,7 @@ function nearestImgRowsRM(
   let before = 0, after = 0;
   if (imgIndex) {
     for (const r of imgIndex) {
-      const embed = previewEl.querySelector(
-        `.internal-embed[data-diaa-line="${r.startLine}"]`
-      ) as HTMLElement | null;
+      const embed = findEmbedByLine(previewEl, r.startLine);
       if (!embed) continue;
       const eRect = embed.getBoundingClientRect();
       const eTop = clientTopToDocY(eRect.top, previewRect.top, previewEl.scrollTop);
@@ -1349,9 +1337,7 @@ function restoreTextInRM(
       if (refIdx > 0 && imgIndex) {
         const r = imgIndex.find(x => x.index === refIdx);
         if (r) {
-          const embed = previewEl.querySelector(
-            `.internal-embed[data-diaa-line="${r.startLine}"]`
-          ) as HTMLElement | null;
+          const embed = findEmbedByLine(previewEl, r.startLine);
           if (embed) {
             const eRect = embed.getBoundingClientRect();
             expectedDocY = clientTopToDocY(eRect.top, previewRect.top, previewEl.scrollTop);
@@ -1438,9 +1424,7 @@ function restoreTextInRM(
     const r = imgIndex.find(x => x.index === refIdx);
     if (r) {
       const line = anchor.nearestImgBefore > 0 ? r.endLine : r.startLine;
-      const embed = previewEl.querySelector(
-        `.internal-embed[data-diaa-line="${line}"]`
-      ) as HTMLElement | null;
+      const embed = findEmbedByLine(previewEl, line);
       if (embed) {
         const eRect = embed.getBoundingClientRect();
         const eTop = clientTopToDocY(eRect.top, previewRect.top, previewEl.scrollTop);
@@ -2319,7 +2303,7 @@ function incomingScrollerOf(view: any, mode: string): HTMLElement | null {
   if (mode === "source") return (view?.editor?.cm?.scrollDOM ?? null) as HTMLElement | null;
   if (mode === "preview") {
     const c = (view?.contentEl ?? view?.containerEl) as HTMLElement | undefined;
-    return (c?.querySelector(".markdown-preview-view") as HTMLElement | null) ?? null;
+    return queryPreviewViewIn(c);
   }
   return null;
 }
@@ -2661,7 +2645,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
       if (isSwitch && fromMode === "preview") {
         try {
           const outgoingEl = (this?.contentEl ?? this?.containerEl) as HTMLElement | undefined;
-          const rmView = outgoingEl?.querySelector(".markdown-preview-view") as HTMLElement | null;
+          const rmView = queryPreviewViewIn(outgoingEl);
           if (rmView) {
             const all = rmView.querySelectorAll("*");
             const imgs = rmView.querySelectorAll("img");

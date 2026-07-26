@@ -22,6 +22,7 @@ import * as scrollAnchor from "../src/scrollSync/scrollAnchor";
 import * as imageRowWidget from "../src/imageRowWidget";
 import * as layoutEngine from "../src/layoutEngine";
 import * as anchorMath from "../src/scrollSync/anchorMath";
+import * as domLocators from "../src/scrollSync/domLocators";
 import * as warmupProbe from "../src/scrollSync/warmupProbe";
 import * as warmupScheduler from "../src/scrollSync/warmupScheduler";
 import * as rmAlignStore from "../src/rmAlignStore";
@@ -35,7 +36,7 @@ type Mod = Record<string, unknown>;
 
 const MODULES: Record<string, Mod> = {
   livePreview, rmFlexRow, readingMode, scrollAnchor, imageRowWidget,
-  layoutEngine, anchorMath, warmupProbe, warmupScheduler, rmAlignStore,
+  layoutEngine, anchorMath, domLocators, warmupProbe, warmupScheduler, rmAlignStore,
   matchEmbeds, singleImageParams, settings, constants, utils,
 };
 
