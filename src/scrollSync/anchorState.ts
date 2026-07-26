@@ -1,0 +1,262 @@
+import { logger } from "../logger";
+import { LedgerSection } from "./anchorMath";
+import {
+  getActiveAnchor, setRMLastAnchor, getLPLastAnchor, setLPLastAnchor, ViewportAnchor,
+} from "./anchorStore";
+
+const log = logger.channel("scrollAnchor");
+
+// ── Shared mutable scroll-sync state (P3 split) ──
+// All module-local `let` state from the old scrollAnchor.ts now lives in this
+// single const object. A const *binding* is immutable, but its *properties*
+// are writable and (as an imported binding) can be mutated from the feature
+// modules without tripping TS2632 (no reassignment of an imported binding).
+export const state: {
+  _rmDeferredRestoreId: number | null;
+  _rmLoopGuardActive: boolean;
+  _accuracyTimer: ReturnType<typeof setTimeout> | null;
+  _restoreGuardDepth: number;
+  _restoreGuardTimeoutId: ReturnType<typeof setTimeout> | null;
+  _lastGuardExitMs: number;
+  _rmTrackedEl: HTMLElement | null;
+  _rmScrollCleanup: (() => void) | null;
+  _lastScrollLogTs: number;
+  _rmSuppressCount: number;
+  _rmSilenceCount: number;
+  _lpSuppressCount: number;
+  _lpSilenceCount: number;
+  _rmRestoreStartTime: number;
+  _rmNativeTried: boolean;
+  _rmFramesSinceNative: number;
+  _rmHoldId: number | null;
+  _rmHoldCleanup: (() => void) | null;
+  _rmHoldChainId: number | null;
+  _earlyRestoreId: number | null;
+  _lpEarlyRestoreDone: boolean;
+  _rmEarlyRestoreDone: boolean;
+  _lpTrackedEl: HTMLElement | null;
+  _lpScrollCleanup: (() => void) | null;
+  _lpDeferredRestoreId: number | null;
+} = {
+  _rmDeferredRestoreId: null,
+  _rmLoopGuardActive: false,
+  _accuracyTimer: null,
+  _restoreGuardDepth: 0,
+  _restoreGuardTimeoutId: null,
+  _lastGuardExitMs: 0,
+  _rmTrackedEl: null,
+  _rmScrollCleanup: null,
+  _lastScrollLogTs: 0,
+  _rmSuppressCount: 0,
+  _rmSilenceCount: 0,
+  _lpSuppressCount: 0,
+  _lpSilenceCount: 0,
+  _rmRestoreStartTime: 0,
+  _rmNativeTried: false,
+  _rmFramesSinceNative: 0,
+  _rmHoldId: null,
+  _rmHoldCleanup: null,
+  _rmHoldChainId: null,
+  _earlyRestoreId: null,
+  _lpEarlyRestoreDone: false,
+  _rmEarlyRestoreDone: false,
+  _lpTrackedEl: null,
+  _lpScrollCleanup: null,
+  _lpDeferredRestoreId: null,
+};
+
+// ── Read-only constants / shared maps (imported by name) ──
+export const MIN_ANCHOR_TEXT_LEN = 4;
+export const TABLE_ROW_RE = /^\s*[|│├┌└]/;
+export const TABLE_SPLIT_RE = /[|│┬┴┼┤├]/;
+export const BOX_DRAWING_RE = /[─-╿]/g;
+export const _sectionSnapshot = new Map<string, LedgerSection[]>();
+export const _snapshotLineCount = new Map<string, number>();
+export const LEDGER_DOCH_TOLERANCE = 0.2;  // ledger sum vs live scrollHeight sanity band
+export const LEDGER_PARK_TOL_MIN = 1500;   // px — legitimate estimate drift stays far below
+export const LEDGER_PARK_TOL_FRAC = 0.05;  // of docH — transient discrepancy is ~65% of docH
+export const RATIO_GATE_TOL = 0.15;        // LP vs RM docRatio naturally differs by a few pts
+export const ENABLE_NATIVE_SCROLL = true;
+export const SILENCE_WINDOW_MS = 300;
+export const RM_RESTORE_TIMEOUT_MS = 5000;
+export const NATIVE_RETRY_INTERVAL = 30; // frames between setEphemeralState re-pushes
+export const RM_HOLD_TIMEOUT_MS = 2000;
+export const RM_HOLD_CALM_FRAMES = 6; // consecutive no-correction frames = settled
+export const EARLY_RESTORE_MAX_FRAMES = 6;
+export const RM_EARLY_HOLD_FRAMES = 4;
+
+// ── State-touching helpers (used by the feature modules) ──
+
+export function getRMDeferredRestoreId(): number | null {
+  return state._rmDeferredRestoreId;
+}
+
+
+
+export function rmLoopEnterGuard(): void {
+  if (!state._rmLoopGuardActive) { enterRestoreGuard(); state._rmLoopGuardActive = true; }
+}
+
+
+export function cancelAllRestoreChains(): void {
+  if (state._rmHoldId !== null) {
+    cancelAnimationFrame(state._rmHoldId);
+    state._rmHoldId = null;
+  }
+  if (state._rmHoldCleanup) {
+    state._rmHoldCleanup();
+    state._rmHoldCleanup = null;
+  }
+  if (state._rmDeferredRestoreId !== null) {
+    cancelAnimationFrame(state._rmDeferredRestoreId);
+    state._rmDeferredRestoreId = null;
+  }
+  if (state._lpDeferredRestoreId !== null) {
+    cancelAnimationFrame(state._lpDeferredRestoreId);
+    state._lpDeferredRestoreId = null;
+  }
+  if (state._earlyRestoreId !== null) {
+    cancelAnimationFrame(state._earlyRestoreId);
+    state._earlyRestoreId = null;
+  }
+  cancelRMHoldChain();
+}
+
+
+
+export function applySnapshotLineDelta(
+  file: string, newLineCount: number, editLine: number,
+): void {
+  const oldCount = _snapshotLineCount.get(file);
+  const snap = _sectionSnapshot.get(file);
+  if (oldCount === undefined || !snap || snap.length === 0) return;
+
+  const delta = newLineCount - oldCount;
+  if (delta === 0) { _snapshotLineCount.set(file, newLineCount); return; }
+
+  // Iterate backwards — splicing while iterating is safe this way.
+  for (let i = snap.length - 1; i >= 0; i--) {
+    const sec = snap[i];
+    if (sec.lineStart > editLine) {
+      sec.lineStart += delta;
+      sec.lineEnd += delta;
+    } else if (sec.lineEnd >= editLine) {
+      snap.splice(i, 1);
+    }
+  }
+
+  _snapshotLineCount.set(file, newLineCount);
+}
+
+// ── RM height-ledger lookup ─────────────────────────────
+// Obsidian's preview renderer keeps a JS height ledger (renderer.sections)
+// that survives display:none — it's why docH is full-scale on the very first
+// frame of a mode switch. During that first-show window the DOM sits in a
+// transient compact layout (leading spacers not yet re-established), so DOM
+// rects lie about positions while the ledger already knows the settled truth.
+// Read the ledger directly; anything unexpected → -1 and the caller falls
+// back to DOM measurement / the docRatio prior.
+
+
+export function setLastAnchor(anchor: ViewportAnchor | null, file: string): void {
+  setRMLastAnchor(anchor, file);
+  if (anchor && file && !getLPLastAnchor().anchor) {
+    setLPLastAnchor(anchor, file);
+  }
+}
+
+// ── Small helpers ──────────────────────────────────────
+
+/** Clamp a raw ratio into [0,1], warning when the measured geometry produced
+ *  an out-of-range value (a signal the layout drifted from expectations). */
+
+
+export function rmLoopExitGuard(): void {
+  if (state._rmLoopGuardActive) { exitRestoreGuard(); state._rmLoopGuardActive = false; }
+}
+
+
+
+export function enterRestoreGuard(): void {
+  state._restoreGuardDepth++;
+  if (state._restoreGuardTimeoutId) clearTimeout(state._restoreGuardTimeoutId);
+  state._restoreGuardTimeoutId = setTimeout(() => {
+    log.warn("RESTORE_GUARD safety timeout — force-released");
+    state._restoreGuardDepth = 0;
+    state._lastGuardExitMs = performance.now();
+  }, 2000);
+}
+
+
+export function setSectionSnapshot(file: string, secs: LedgerSection[], totalLines?: number): void {
+  _sectionSnapshot.set(file, secs);
+  if (totalLines !== undefined && totalLines > 0) {
+    _snapshotLineCount.set(file, totalLines);
+  }
+}
+
+/** Apply a line-count delta to the snapshot after an edit before a full re-warmup.
+ *  Sections entirely after editLine get their lineStart/lineEnd shifted by delta.
+ *  Sections that straddle editLine are removed (stale), falling back to live ledger. */
+
+
+export function exitRestoreGuard(): void {
+  state._restoreGuardDepth = Math.max(0, state._restoreGuardDepth - 1);
+  if (state._restoreGuardDepth === 0 && state._restoreGuardTimeoutId) {
+    clearTimeout(state._restoreGuardTimeoutId);
+    state._restoreGuardTimeoutId = null;
+    state._lastGuardExitMs = performance.now();
+  }
+}
+
+
+export function isRestoreGuardActive(): boolean { return state._restoreGuardDepth > 0; }
+
+
+export function isInSilenceWindow(): boolean {
+  return state._lastGuardExitMs > 0 && (performance.now() - state._lastGuardExitMs) < SILENCE_WINDOW_MS;
+}
+
+// ── Native line-based scroll ──────────────────────────────────────────
+// Two-phase restore engine (Solution A): when a precise pixel restore fails
+// because the target row isn't rendered (cold RM / virtualized region), coerce
+// the renderer to build DOM around the target line itself instead of crawling
+// from scrollTop=0. This eliminates the ~1.5s "jump to document head" during
+// the first switch to a deep region. Falls back to the legacy percentage-based
+// coarse-jump (restoreScrollPct) when native scroll is unavailable or fails.
+
+/** Derive a best-effort source-line number from the active anchor for the
+ *  native scroll engine. Returns 0 when no reliable line is derivable. */
+
+
+export function cancelRMHoldChain(): void {
+  if (state._rmHoldChainId !== null) {
+    cancelAnimationFrame(state._rmHoldChainId);
+    state._rmHoldChainId = null;
+  }
+}
+
+
+
+export function getScrollAnchor(): ViewportAnchor | null {
+  return getActiveAnchor();
+}
+
+// Called from readingMode.ts afterRender (RM context) → RM slot.
+// When the afterRender fires while the active view is still in source mode
+// (e.g. during warmup), the captured anchor actually describes the LP view.
+// Seed the LP slot too so scheduleEarlyRestore can use it for the first real
+// LP→RM switch. The guard (LP slot empty) prevents overwriting a real LP
+// anchor set by a prior RM→LP switch.
+
+
+export function cancelRMDeferredRestore(): void {
+  if (state._rmDeferredRestoreId !== null) {
+    cancelAnimationFrame(state._rmDeferredRestoreId);
+    state._rmDeferredRestoreId = null;
+  }
+  rmLoopExitGuard();
+}
+
+
+
