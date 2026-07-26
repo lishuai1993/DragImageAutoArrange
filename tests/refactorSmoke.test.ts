@@ -28,6 +28,7 @@ import * as warmupScheduler from "../src/scrollSync/warmupScheduler";
 import * as rmAlignStore from "../src/rmAlignStore";
 import * as matchEmbeds from "../src/matchEmbeds";
 import * as singleImageParams from "../src/singleImageParams";
+import * as embedRaw from "../src/embedRaw";
 import * as settings from "../src/settings";
 import * as constants from "../src/constants";
 import * as utils from "../src/utils";

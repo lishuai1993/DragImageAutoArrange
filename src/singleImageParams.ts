@@ -11,6 +11,7 @@
 // back to that convention so downstream widget/persist code stays unchanged.
 
 import type { ImageGroup } from "./imageDetector";
+import { stripEmbedParams, parseEmbedParams } from "./embedRaw";
 
 /** True when the stored scale encodes the single-image manual flag S=1. */
 export function isSingleImageManual(scale: number | null): boolean {
@@ -34,7 +35,7 @@ export function formatSingleImageLine(
   alignment?: "left" | "center" | "right"
 ): string {
   const w = Math.max(1, Math.round(widthPx));
-  const out = raw.replace(/\|[^\]]*(?=\]\])/, "");
+  const out = stripEmbedParams(raw);
   const alignPart = alignment ? `|${alignment}` : "";
   return out.replace(/\]\]/, `${alignPart}|${sFlag}|${w}]]`);
 }
@@ -47,8 +48,7 @@ export function formatSingleImageLine(
 export function normalizeSingleImageParams(group: ImageGroup): void {
   if (group.images.length !== 1) return;
   const img = group.images[0];
-  const m = img.raw.match(/\|([^\]]*)\]\]/);
-  const parts = m ? m[1].split("|") : [];
+  const parts = parseEmbedParams(img.raw) ?? [];
 
   // Detect leading alignment word, skip it for S/W reading
   const ALIGNMENTS = new Set(["left", "center", "right"]);

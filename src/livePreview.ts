@@ -24,6 +24,7 @@ import { logger } from "./logger";
 const log = logger.channel("livePreview");
 import { clampFlexGrow, clampScale } from "./parameterValidator";
 import { isSingleImageManual, formatSingleImageLine, normalizeSingleImageParams } from "./singleImageParams";
+import { stripEmbedParams, parseEmbedParams } from "./embedRaw";
 import { createDragGhost } from "./rowRenderer";
 
 /**
@@ -174,16 +175,15 @@ function convertOrphanedMultiSinglesToBare(
     if (lineNum < 1 || lineNum > doc.lines) continue;
     const lineObj = doc.line(lineNum);
     const raw = lineObj.text;
-    const m = raw.match(/\|([^\]]*)\]\]/);
-    if (!m) continue; // already bare
-    const parts = m[1].split("|");
+    const parts = parseEmbedParams(raw);
+    if (!parts) continue; // already bare
     const ALIGNMENTS = new Set(["left", "center", "right"]);
     let offset = 0;
     if (ALIGNMENTS.has(parts[0])) offset = 1;
     const first = parseInt(parts[offset], 10);
     // Clean single `|S|W` or `|alignment|S|W` (S ∈ {0,1}) → leave untouched.
     if (parts.length > offset + 1 && (first === 0 || first === 1)) continue;
-    const bare = raw.replace(/\|[^\]]*(?=\]\])/, "");
+    const bare = stripEmbedParams(raw);
     if (bare !== raw) {
       changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: bare });
     }
@@ -214,9 +214,8 @@ function measureItemWidths(view: EditorView, rowLineStart: number): number[] | n
  * `![[a.webp|740|48]]` → 0.48; `![[a.webp|740]]` / `![[a.webp]]` → null.
  */
 function parseScaleFromRaw(raw: string): number | null {
-  const paramsMatch = raw.match(/\|([^\]]*)\]\]/);
-  if (!paramsMatch) return null;
-  const parts = paramsMatch[1].split("|");
+  const parts = parseEmbedParams(raw);
+  if (!parts) return null;
   if (parts.length < 2) return null;
   const v = parseInt(parts[parts.length - 1], 10);
   return isFinite(v) && v > 0 ? v / 100 : null;
@@ -229,7 +228,7 @@ function parseScaleFromRaw(raw: string): number | null {
 /** Strip everything between the first | and ]] so widget equality ignores
  * width/dimension metadata — only the image file name matters for identity. */
 export function normalizeRaw(raw: string): string {
-  return raw.replace(/\|[^\]]*(?=\]\])/, "");
+  return stripEmbedParams(raw);
 }
 
 /** Write flex-grow values back to markdown as ![[file|width]].
@@ -607,7 +606,7 @@ class StaticImageRowWidget extends WidgetType {
       if (line0 < 0 || line0 >= doc.lines) return;
       const lineObj = doc.line(line0 + 1);
       const raw = lineObj.text;
-      const newText = raw.replace(/\|[^\]]*(?=\]\])/, "");
+      const newText = stripEmbedParams(raw);
       if (newText !== raw) {
         changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
       }
@@ -821,7 +820,7 @@ class StaticImageRowWidget extends WidgetType {
 export function updateImageLineWidth(raw: string, flexGrow: number, scale?: number | null, alignment?: "left" | "center" | "right"): string {
   const widthValue = Math.round(flexGrow * 100);
   // Strip everything between file extension and ]] (handles |width, |WxH, |width|WxH)
-  let out = raw.replace(/\|[^\]]*(?=\]\])/, "");
+  let out = stripEmbedParams(raw);
   // Build the new parameter string
   const params: string[] = [];
   if (alignment) {

@@ -6,6 +6,7 @@ import { logger } from "./logger";
 const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "./parameterValidator";
 import { isSingleImageManual, singleImageScaleFor, formatSingleImageLine } from "./singleImageParams";
+import { parseEmbedParams } from "./embedRaw";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { DividerController, DividerHost } from "./dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "./resizeHandleController";
@@ -1297,8 +1298,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         }
       } else {
         // Multi-image: detect incomplete params by counting | components
-        const m = img.raw.match(/\|([^\]]*)\]\]/);
-        const parts = m ? m[1].split("|").filter(p => p !== "") : [];
+        const parts = (parseEmbedParams(img.raw) ?? []).filter(p => p !== "");
         // Expected: alignment + flexGrow + scale = 3 parts (or 2 without alignment)
         const hasAlign = parts.length > 0 && /^(left|center|right)$/.test(parts[0]);
         const expectedParts = hasAlign ? 3 : 2;
