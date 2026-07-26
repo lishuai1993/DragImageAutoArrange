@@ -72,4 +72,23 @@ describe("runRestoreLoop primitive (P4-B)", () => {
     await tick();
     expect(frames).toBe(1); // halted guard blocked the scheduled frame
   });
+
+  it("async onFrame (returns a Promise) drives the loop and halts", async () => {
+    let id: number | null = null;
+    let frames = 0;
+    runRestoreLoop({
+      getId: () => id,
+      setId: (v) => { id = v; },
+      firstFrameSync: true,
+      onFrame: (): Promise<FrameOutcome> =>
+        Promise.resolve(frames++ < 1 ? "continue" : "stop"),
+    });
+    // first frame's synchronous prefix ran; scheduling is on a microtask
+    await Promise.resolve();
+    expect(frames).toBe(1);
+    expect(id).not.toBe(null); // next frame scheduled
+    await tick();
+    expect(frames).toBe(2);
+    expect(id).toBe(null);     // halted, slot cleared
+  });
 });
