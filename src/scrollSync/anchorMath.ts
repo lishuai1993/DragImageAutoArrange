@@ -172,3 +172,31 @@ export function ledgerTotalHeight(sections: LedgerSection[]): number {
   }
   return y;
 }
+
+// ── Scroller ↔ document-space conversions ──────────────────────────────
+// Thin, named wrappers over the pixel/ratio arithmetic that was previously
+// inlined at ~10 call sites in scrollAnchor.ts. Keeping them here makes the
+// coordinate model explicit and unit-testable; the DOM side only supplies the
+// measured numbers (rect tops, scrollTop/scrollHeight/clientHeight).
+
+/** Document-space Y (pixels from content top) for an element, given the
+ *  element's viewport-space top, the scroller's viewport-space top, and the
+ *  scroller's current scrollTop. This is the RM preview coordinate model:
+ *  `elTop - scrollerTop + scrollTop`. */
+export function clientTopToDocY(elTop: number, scrollerTop: number, scrollTop: number): number {
+  return elTop - scrollerTop + scrollTop;
+}
+
+/** Fraction (0..1) of the scroll range currently scrolled. Returns 0 when there
+ *  is no scrollable range (scrollHeight <= clientHeight). Callers guard the
+ *  degenerate clientHeight===0 case separately (they return -1 there). */
+export function scrollTopToPct(scrollTop: number, scrollHeight: number, clientHeight: number): number {
+  const maxScroll = scrollHeight - clientHeight;
+  return maxScroll > 0 ? scrollTop / maxScroll : 0;
+}
+
+/** scrollTop that reproduces a scroll fraction (0..1). Inverse of
+ *  scrollTopToPct within the scrollable range. */
+export function pctToScrollTop(pct: number, scrollHeight: number, clientHeight: number): number {
+  return pct * (scrollHeight - clientHeight);
+}

@@ -4,6 +4,7 @@ import {
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
   nearestIndexBy, ledgerYForLine, ledgerLineForY, ledgerTotalHeight,
   sectionIndexEstimateY, extrapolateLedgerY, LedgerSection,
+  clientTopToDocY, scrollTopToPct, pctToScrollTop,
 } from '../src/scrollSync/anchorMath';
 
 describe('clamp01', () => {
@@ -338,5 +339,53 @@ describe('extrapolateLedgerY', () => {
     // line at lastLineEnd: offset=0, not beyond → caller should use ledgerYForLine
     const y = extrapolateLedgerY(secs, 104, 135, 5000);
     expect(y).toBe(-1);
+  });
+});
+
+describe('clientTopToDocY', () => {
+  it('converts an element viewport-top into a document-space Y', () => {
+    // element 250px down the viewport, scroller top at 100px, scrolled 400px
+    // → docY = 250 - 100 + 400 = 550
+    expect(clientTopToDocY(250, 100, 400)).toBe(550);
+  });
+  it('returns the raw scrollTop when the element sits at the scroller top', () => {
+    expect(clientTopToDocY(100, 100, 400)).toBe(400);
+  });
+  it('handles an element above the scroller top (negative offset)', () => {
+    expect(clientTopToDocY(80, 100, 400)).toBe(380);
+  });
+  it('is unaffected by sign of scrollTop', () => {
+    expect(clientTopToDocY(250, 100, 0)).toBe(150);
+  });
+});
+
+describe('scrollTopToPct', () => {
+  it('maps scrollTop to a 0..1 fraction of the scroll range', () => {
+    // range = 1000 - 400 = 600; scrollTop 300 → 0.5
+    expect(scrollTopToPct(300, 1000, 400)).toBe(0.5);
+    expect(scrollTopToPct(0, 1000, 400)).toBe(0);
+    expect(scrollTopToPct(600, 1000, 400)).toBe(1);
+  });
+  it('returns 0 when there is no scrollable range', () => {
+    expect(scrollTopToPct(0, 400, 400)).toBe(0);   // scrollHeight == clientHeight
+    expect(scrollTopToPct(50, 300, 400)).toBe(0);  // clientHeight > scrollHeight
+  });
+});
+
+describe('pctToScrollTop', () => {
+  it('is the inverse of scrollTopToPct within the range', () => {
+    expect(pctToScrollTop(0.5, 1000, 400)).toBe(300);
+    expect(pctToScrollTop(0, 1000, 400)).toBe(0);
+    expect(pctToScrollTop(1, 1000, 400)).toBe(600);
+  });
+  it('round-trips with scrollTopToPct', () => {
+    const scrollHeight = 2500, clientHeight = 700;
+    for (const st of [0, 250, 900, 1800]) {
+      const pct = scrollTopToPct(st, scrollHeight, clientHeight);
+      expect(pctToScrollTop(pct, scrollHeight, clientHeight)).toBeCloseTo(st, 6);
+    }
+  });
+  it('yields 0 when there is no scroll range', () => {
+    expect(pctToScrollTop(0.5, 400, 400)).toBe(0);
   });
 });

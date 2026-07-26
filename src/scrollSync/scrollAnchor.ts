@@ -15,6 +15,7 @@ import {
   clamp01, intraRowRatio, gapRatioFromGeom,
   imageRowTargetY, gapJunction, gapTargetY, textTargetY,
   nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY, LedgerSection,
+  clientTopToDocY, scrollTopToPct, pctToScrollTop,
 } from "./anchorMath";
 import { assertNever } from "../utils";
 import { normalizeAnchorText } from "./textAnchor";
@@ -196,15 +197,13 @@ export function computeScrollPct(app: App): number {
   if (mode === "source") {
     const sd = view.editor?.cm?.scrollDOM;
     if (!sd || sd.clientHeight === 0) return -1;
-    const maxScroll = sd.scrollHeight - sd.clientHeight;
-    return maxScroll > 0 ? sd.scrollTop / maxScroll : 0;
+    return scrollTopToPct(sd.scrollTop, sd.scrollHeight, sd.clientHeight);
   }
 
   if (mode === "preview") {
     const previewEl = getRMPreviewEl(app) as HTMLElement;
     if (!previewEl || previewEl.clientHeight === 0) return -1;
-    const maxScroll = previewEl.scrollHeight - previewEl.clientHeight;
-    return maxScroll > 0 ? previewEl.scrollTop / maxScroll : 0;
+    return scrollTopToPct(previewEl.scrollTop, previewEl.scrollHeight, previewEl.clientHeight);
   }
 
   return -1;
@@ -451,7 +450,7 @@ function captureAnchorRM(app: App, filePath: string): ViewportAnchor | null {
     if (block.closest("pre, code, table")) continue;
     const text = normalizeAnchorText(block.textContent ?? "");
     if (text.length < MIN_ANCHOR_TEXT_LEN) continue;
-    const blockTopDoc = rect.top - previewRect.top + previewEl.scrollTop;
+    const blockTopDoc = clientTopToDocY(rect.top, previewRect.top, previewEl.scrollTop);
     const { before, after } = nearestImgRowsRM(previewEl, imgIndex, previewRect, blockTopDoc);
     // Build 3-block context from nearest text-bearing neighbors (Phase 4).
     const prevTail = bi > 0
@@ -500,7 +499,7 @@ function nearestImgRowsRM(
       ) as HTMLElement | null;
       if (!embed) continue;
       const eRect = embed.getBoundingClientRect();
-      const eTop = eRect.top - previewRect.top + previewEl.scrollTop;
+      const eTop = clientTopToDocY(eRect.top, previewRect.top, previewEl.scrollTop);
       if (eTop < blockTopDoc) before = r.index;
       else if (after === 0) after = r.index;
     }
@@ -516,7 +515,7 @@ function rmRowBounds(
   let top = Infinity, bottom = -Infinity;
   for (const re of rowEmbeds) {
     const r = re.getBoundingClientRect();
-    const t = r.top - previewRect.top + previewEl.scrollTop;
+    const t = clientTopToDocY(r.top, previewRect.top, previewEl.scrollTop);
     const b = t + r.height;
     if (t < top) top = t;
     if (b > bottom) bottom = b;
@@ -539,7 +538,7 @@ function captureImageRowRM(
     if (!lineStr) continue;
     const line = asLine1(parseInt(lineStr, 10));
     const rect = embed.getBoundingClientRect();
-    const embedTop = rect.top - previewRect.top + previewEl.scrollTop;
+    const embedTop = clientTopToDocY(rect.top, previewRect.top, previewEl.scrollTop);
     const embedCenter = embedTop + rect.height / 2;
     const dist = Math.abs(viewportCenterY - embedCenter);
     if (dist < bestDist) {
@@ -763,7 +762,7 @@ function restoreImageRowInRM(
   let rowTop = Infinity, rowBottom = -Infinity;
   for (const re of rowEmbeds) {
     const r = re.getBoundingClientRect();
-    const t = r.top - previewRect.top + previewEl.scrollTop;
+    const t = clientTopToDocY(r.top, previewRect.top, previewEl.scrollTop);
     const b = t + r.height;
     if (t < rowTop) rowTop = t;
     if (b > rowBottom) rowBottom = b;
@@ -1332,7 +1331,7 @@ function restoreTextInRM(
 
     // Disambiguate by the strongest prior available (mirrors findBestTextLine).
     if (!chosen) {
-    const tops = matches.map(m => m.getBoundingClientRect().top - previewRect.top + previewEl.scrollTop);
+    const tops = matches.map(m => clientTopToDocY(m.getBoundingClientRect().top, previewRect.top, previewEl.scrollTop));
 
     // 0) Position-ratio prior — measured scrollTop/scrollHeight, not affected by
     //    RM section density unevenness, more reliable than the ledger estimate.
@@ -1355,7 +1354,7 @@ function restoreTextInRM(
           ) as HTMLElement | null;
           if (embed) {
             const eRect = embed.getBoundingClientRect();
-            expectedDocY = eRect.top - previewRect.top + previewEl.scrollTop;
+            expectedDocY = clientTopToDocY(eRect.top, previewRect.top, previewEl.scrollTop);
           }
         }
       }
@@ -1391,7 +1390,7 @@ function restoreTextInRM(
 
   if (chosen) {
     const rect = chosen.getBoundingClientRect();
-    const blockTop = rect.top - previewRect.top + previewEl.scrollTop;
+    const blockTop = clientTopToDocY(rect.top, previewRect.top, previewEl.scrollTop);
 
     // Only park at ledger when the DOM rect is clearly un-laid-out (transient
     // rect of zero). Otherwise trust the browser's measured position — it is
@@ -1444,7 +1443,7 @@ function restoreTextInRM(
       ) as HTMLElement | null;
       if (embed) {
         const eRect = embed.getBoundingClientRect();
-        const eTop = eRect.top - previewRect.top + previewEl.scrollTop;
+        const eTop = clientTopToDocY(eRect.top, previewRect.top, previewEl.scrollTop);
         const targetY = anchor.nearestImgBefore > 0
           ? Math.max(0, eTop + eRect.height - anchor.anchorOffset)
           : Math.max(0, eTop - previewEl.clientHeight + anchor.anchorOffset);
@@ -1647,7 +1646,7 @@ export function restoreScrollPct(app: App): boolean {
     if (sd && sd.scrollHeight > sd.clientHeight) {
       docH = sd.scrollHeight;
       viewportH = sd.clientHeight;
-      targetY = pct * (docH - viewportH);
+      targetY = pctToScrollTop(pct, docH, viewportH);
       sd.scrollTop = targetY;
       actualY = sd.scrollTop;
     }
@@ -1656,7 +1655,7 @@ export function restoreScrollPct(app: App): boolean {
     if (previewEl && previewEl.scrollHeight > previewEl.clientHeight) {
       docH = previewEl.scrollHeight;
       viewportH = previewEl.clientHeight;
-      targetY = pct * (previewEl.scrollHeight - viewportH);
+      targetY = pctToScrollTop(pct, previewEl.scrollHeight, viewportH);
       previewEl.scrollTop = targetY;
       actualY = previewEl.scrollTop;
     }
