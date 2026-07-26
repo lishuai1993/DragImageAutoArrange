@@ -22,5 +22,5 @@ export {
 } from "./anchorModeSwitch";
 export {
   setImageRowIndex, invalidateImageRowIndex, setImageLineRe,
-  setLastFallbackPct, setRMRenderedFile, getFallbackPct,
+  setLastFallbackPct, getFallbackPct,
 } from "./anchorStore";

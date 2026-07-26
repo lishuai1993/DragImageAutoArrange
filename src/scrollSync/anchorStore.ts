@@ -167,13 +167,6 @@ export function setLastDocH(docH: number): void {
 
 // ── Misc state ──────────────────────────────────────────────────────
 
-// File whose RM has completed initial post-processor render.
-let _rmRenderedFile = "";
-
-export function setRMRenderedFile(path: string): void {
-  _rmRenderedFile = path;
-}
-
 // Single source of truth for "is this line an image row?". Defaults to the
 // full built-in extension set; readingMode overrides it via setImageLineRe so
 // a user's custom imageExtensions is honored identically everywhere.

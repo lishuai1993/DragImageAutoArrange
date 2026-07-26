@@ -10,7 +10,7 @@ import {
   setImageRowIndex, setImageLineRe,
   getScrollAnchor, getFallbackPct,
   setLastAnchor, setLastFallbackPct,
-  setRMRenderedFile, getRMDeferredRestoreId, cancelRMDeferredRestore,
+  getRMDeferredRestoreId, cancelRMDeferredRestore,
   ensureRMScrollTracking,
   restoreContentAnchor, restoreScrollPct,
   captureContentAnchor, computeScrollPct,
@@ -276,7 +276,6 @@ export function createReadingModeProcessor(
       const pct = computeScrollPct(app);
       if (pct >= 0) setLastFallbackPct(pct);
       ensureRMScrollTracking(app);
-      setRMRenderedFile(ctx.sourcePath);
       driveViewportTransition(app, "rm-after-restore");
     };
     if (wrapPromises.length > 0) {
