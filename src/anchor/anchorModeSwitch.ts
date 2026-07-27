@@ -53,6 +53,8 @@ import {
   cancelRMHoldChain,
   getScrollAnchor,
   cancelRMDeferredRestore,
+  getEditorDirty,
+  setEditorDirty,
 } from "./anchorStore";
 
 const log = logger.channel("scrollAnchor");
@@ -335,7 +337,13 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
   state._lpEarlyRestoreDone = false; // reset for this new transition
   state._rmEarlyRestoreDone = false;
   const src = fromMode === "preview" ? getRMLastAnchor() : getLPLastAnchor();
-  if (!(src.file === file && src.anchor)) return; // nothing to restore early
+  if (!(src.file === file && src.anchor)) {
+    log.info("VIEWPORT early-restore skip", {
+      reason: "no-anchor", file, fromMode, toMode,
+      hasAnchor: !!src.anchor, anchorFile: src.file,
+    });
+    return;
+  }
   const seedAnchor = src.anchor;
   const seedPct = getLastFallbackPct();
 
@@ -351,6 +359,10 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
   // ── Structural improvement C: hard exit after consecutive degraded frames ──
   let degradedFrames = 0;
   const DEGRADED_EXIT = 5;
+  let firstReadyFrame = true;
+  // B-4: capture diagnostic context at poll-start so the giveup log can report
+  // what state led to the failure, even after variables go out of scope.
+  let _failureDiag: Record<string, any> = {};
 
   const exitGuardIfNeeded = () => {
     if (guardActive) { exitRestoreGuard(); guardActive = false; }
@@ -359,14 +371,70 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
   const poll = () => {
     state._earlyRestoreId = null;
     const view = app.workspace.activeLeaf?.view as any;
-    if ((view?.getMode?.() ?? "") !== toMode) { state._rmEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
-    if ((view?.file?.path ?? "") !== file) { state._rmEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
+    if ((view?.getMode?.() ?? "") !== toMode) {
+      state._rmEarlyRestoreDone = true; exitGuardIfNeeded();
+      log.info("VIEWPORT early-restore abort", { reason: "mode-changed", frame: EARLY_RESTORE_MAX_FRAMES - frames });
+      return;
+    }
+    if ((view?.file?.path ?? "") !== file) {
+      state._rmEarlyRestoreDone = true; exitGuardIfNeeded();
+      log.info("VIEWPORT early-restore abort", { reason: "file-changed", frame: EARLY_RESTORE_MAX_FRAMES - frames });
+      return;
+    }
     const sc = incomingScrollerOf(view, toMode);
     if (!sc || sc.clientHeight === 0) {
       if (--frames > 0) { state._earlyRestoreId = requestAnimationFrame(poll); }
-      else { state._rmEarlyRestoreDone = true; }
+      else {
+        state._rmEarlyRestoreDone = true;
+        log.info("VIEWPORT early-restore giveup", {
+          reason: "scroller-never-ready", maxFrames: EARLY_RESTORE_MAX_FRAMES,
+          file, toMode,
+        });
+      }
       return;
     }
+
+    // ── B-4: Coarse pre-position on first ready frame ──────────────────
+    // On the very first frame where the RM scroller has height, apply the
+    // fallback percentage as a coarse scroll position BEFORE the precise
+    // text-match restore. This prevents the browser from painting scrollTop≈0
+    // (document head) while the cold RM renderer is still building the target
+    // section's DOM. The subsequent precise restore corrects the remaining
+    // offset, which is typically small and invisible.
+    if (firstReadyFrame) {
+      firstReadyFrame = false;
+      const coarsePct = getFallbackPct();
+      const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+      const before = previewEl?.scrollTop ?? -1;
+      const docH = previewEl?.scrollHeight ?? -1;
+      const clientH = previewEl?.clientHeight ?? -1;
+      _failureDiag = {
+        coarsePct: coarsePct >= 0 ? Math.round(coarsePct * 100) : -1,
+        scrollTopBefore: Math.round(before),
+        docH, clientH,
+      };
+      if (toMode === "preview" && coarsePct >= 0 && docH > clientH) {
+        const landed = restoreScrollPct(app);
+        const after = previewEl?.scrollTop ?? -1;
+        _failureDiag.scrollTopAfterCoarse = Math.round(after);
+        _failureDiag.coarseLanded = landed;
+        log.info("VIEWPORT early-restore coarse-jump", {
+          frame: EARLY_RESTORE_MAX_FRAMES - frames,
+          pct: Math.round(coarsePct * 100),
+          scrollTopBefore: Math.round(before),
+          scrollTopAfter: Math.round(after),
+          landed,
+          docH, clientH,
+        });
+      } else {
+        log.info("VIEWPORT early-restore coarse-jump skip", {
+          reason: coarsePct < 0 ? "no-pct" : docH <= clientH ? "no-scroll-space" : "not-preview",
+          pct: coarsePct >= 0 ? Math.round(coarsePct * 100) : -1,
+          docH, clientH,
+        });
+      }
+    }
+
     // Suppress scroll events during early restore so the forced write (and any
     // stale scroller auto-restore) cannot pollute the incoming mode's anchor slot.
     if (!guardActive) {
@@ -384,6 +452,19 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
       if (degradedFrames >= DEGRADED_EXIT) {
         state._rmEarlyRestoreDone = true;
         exitGuardIfNeeded();
+        const imgIdx = getImageRowIndex(file);
+        log.info("VIEWPORT early-restore giveup", {
+          reason: "degraded-exit",
+          degradedFrames,
+          maxFrames: EARLY_RESTORE_MAX_FRAMES,
+          frame: EARLY_RESTORE_MAX_FRAMES - frames,
+          anchorKind: seedAnchor.kind,
+          anchorFrag: seedAnchor.kind === "text" ? seedAnchor.anchorText.slice(0, 30) : "",
+          seedPct: seedPct >= 0 ? Math.round(seedPct * 100) : -1,
+          imgIdxRows: imgIdx?.length ?? 0,
+          nativeTried,
+          ..._failureDiag,
+        });
         return;
       }
     } else {
@@ -415,13 +496,30 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
       nativeTried = true;
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
-        if (--frames > 0) { state._earlyRestoreId = requestAnimationFrame(poll); }
+        if (--frames > 0) {
+          log.debug("VIEWPORT early-restore native-retry", {
+            frame: EARLY_RESTORE_MAX_FRAMES - frames,
+            line,
+            remainingFrames: frames,
+          });
+          state._earlyRestoreId = requestAnimationFrame(poll);
+        }
         else { state._rmEarlyRestoreDone = true; exitGuardIfNeeded(); }
         return;
       }
     }
     state._rmEarlyRestoreDone = true;
     exitGuardIfNeeded();
+    const finalScrollTop = sc?.scrollTop ?? -1;
+    log.info("VIEWPORT early-restore done", {
+      outcome: ok ? "precise" : "degraded",
+      frame: EARLY_RESTORE_MAX_FRAMES - frames,
+      anchorKind: seedAnchor.kind,
+      anchorFrag: seedAnchor.kind === "text" ? seedAnchor.anchorText.slice(0, 30) : "",
+      finalScrollTop: Math.round(finalScrollTop),
+      nativeTried,
+      ..._failureDiag,
+    });
     if (toMode === "preview") scheduleRMHold(app, file, seedAnchor, seedPct, RM_EARLY_HOLD_FRAMES);
   };
   state._earlyRestoreId = requestAnimationFrame(poll);
@@ -435,7 +533,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
   const proto = MarkdownView.prototype as any;
   const original = proto.setState as (state: any, result: any) => Promise<void>;
 
-  proto.setState = function (this: any, state: any, result: any): Promise<void> {
+  proto.setState = async function (this: any, state: any, result: any): Promise<void> {
     let isSwitch = false, fromMode = "", toMode = "", file = "";
     try {
       fromMode = this?.getMode?.() ?? "";
@@ -492,17 +590,57 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
           });
         } catch { /* diagnostic must never throw */ }
       });
-    } catch { /* diagnostic must never throw */ }
+	    } catch { /* diagnostic must never throw */ }
 
-    const ret = original.call(this, state, result);
+    // ── DIRTY-FLAG step 2b: pre-save before setState ──────────────────
+    // When the editor has unsaved changes, Obsidian's setState saves
+    // asynchronously (~50ms), causing scheduleEarlyRestore's first rAF to
+    // fire before the mode actually switches. Pre-saving here makes setState
+    // synchronous so the await below returns with the correct mode already set.
+    if (isSwitch && fromMode === "source" && toMode === "preview" && file) {
+      try {
+        const isDirty = getEditorDirty();
+
+        if (isDirty) {
+          const _preSaveStart = performance.now();
+          log.info("DIRTY-FLAG pre-save triggered", { file });
+          await (this as any).save();
+          log.info("DIRTY-FLAG pre-save completed", {
+            file,
+            ms: Math.round(performance.now() - _preSaveStart),
+          });
+        } else {
+          log.debug("DIRTY-FLAG skip (clean)", { file });
+        }
+
+        setEditorDirty(false);
+      } catch (e) {
+        log.warn("DIRTY-FLAG pre-save failed, falling through", {
+          file,
+          error: String(e),
+        });
+        setEditorDirty(false);
+        // Fall through: let setState handle the save internally.
+        // Early restore will abort (known race), but the mode switch won't break.
+      }
+    }
+
+    // ── 2a: await setState completion ─────────────────────────────────
+    // Await the original setState so post-switch logic always sees the
+    // correct mode. Pre-save (above) ensures this is synchronous for
+    // LP→RM switches that were dirty.
+    const _ssStart = performance.now();
+    await original.call(this, state, result);
+    log.debug("SWITCH setState-async-done", {
+      t: Math.round(performance.now()),
+      ms: Math.round(performance.now() - _ssStart),
+      from: fromMode || "?", to: toMode || "?", file, isSwitch,
+    });
+
     if (isSwitch) {
       if (toMode === "source") {
         // RM→LP: CM is non-virtualized, scrollDOM is ready when setState resolves.
-        // Use .then() microtask to skip the rAF wait (up to 16ms) and restore
-        // before the height-map reconstruction tail grows (24→354ms with images).
-        ret.then(() => {
-          try { scheduleEarlyRestoreLP(app, fromMode, file); } catch { /* never break setState */ }
-        });
+        try { scheduleEarlyRestoreLP(app, fromMode, file); } catch { /* never break setState */ }
       } else {
         // LP→RM: RM preview is virtualized, keep rAF polling.
         try { scheduleEarlyRestore(app, fromMode, toMode, file); } catch { /* never break setState */ }
@@ -521,23 +659,20 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
       // stored anchor whose scrollTop was already trashed to 0 by
       // concurrent DOM disruption (e.g. post-processor widget destroy).
       if (saved > 0 || rmAnchor) {
-        ret.then(() => {
-          requestAnimationFrame(() => {
-            const sc2 = incomingScrollerOf(this, "preview");
-            if (sc2 && sc2.scrollTop === 0 && sc2.scrollHeight > sc2.clientHeight) {
-              if (saved > 0) {
-                sc2.scrollTop = saved;
-              } else if (rmAnchor) {
-                setActiveAnchor(rmAnchor);
-                restoreContentAnchor(app);
-              }
-              log.debug("SWITCH spurious-reset defended", { saved, hadAnchor: !!rmAnchor });
+        requestAnimationFrame(() => {
+          const sc2 = incomingScrollerOf(this, "preview");
+          if (sc2 && sc2.scrollTop === 0 && sc2.scrollHeight > sc2.clientHeight) {
+            if (saved > 0) {
+              sc2.scrollTop = saved;
+            } else if (rmAnchor) {
+              setActiveAnchor(rmAnchor);
+              restoreContentAnchor(app);
             }
-          });
+            log.debug("SWITCH spurious-reset defended", { saved, hadAnchor: !!rmAnchor });
+          }
         });
       }
     }
-    return ret;
   };
 
   return () => { proto.setState = original; };

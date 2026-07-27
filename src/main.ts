@@ -14,6 +14,7 @@ import {
   recordRMSwitch, scheduleIdleWarmup,
 } from "./scrollSync/warmupScheduler";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./imageRender/livePreview";
+import { setEditorDirty } from "./anchor/anchorStore";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { showImageAlignmentMenu } from "./interaction/alignmentContextMenu";
@@ -168,12 +169,26 @@ export default class DragImageAutoArrangePlugin
 
     // Two-tier idle warmup + image-row index invalidation on editor change.
     // Coarse (1s idle): line-delta patch on snapshot. Fine (5s idle): full re-warmup.
+    // B-4: only invalidate the image-row index when the line count actually changes.
+    // Parameter-only edits (image resize, alignment toggle) keep the same line count
+    // and the same image-row structure, so the index stays valid for mode-switch
+    // scroll restoration (image-row-based disambiguation + nearestImg priors).
+    const _lastEditorLineCount = new Map<string, number>();
     this.registerEvent(
       this.app.workspace.on("editor-change", (editor, info) => {
         const path = (info as any)?.file?.path;
         if (!path) return;
-        invalidateImageRowIndex(path);
-        scheduleIdleWarmup(this.app, path, editor.lineCount(), editor.getCursor().line);
+        setEditorDirty(true);
+        const newLineCount = editor.lineCount();
+        const oldLineCount = _lastEditorLineCount.get(path);
+        if (oldLineCount !== newLineCount) {
+          invalidateImageRowIndex(path);
+          _lastEditorLineCount.set(path, newLineCount);
+          log.debug("B-4 image-row index invalidated", { path, oldLineCount, newLineCount });
+        } else {
+          log.debug("B-4 image-row index preserved (line count unchanged)", { path, lineCount: newLineCount });
+        }
+        scheduleIdleWarmup(this.app, path, newLineCount, editor.getCursor().line);
       })
     );
 

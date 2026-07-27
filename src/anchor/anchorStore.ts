@@ -165,6 +165,22 @@ export function setLastDocH(docH: number): void {
   _lastDocH = docH;
 }
 
+// ── Editor dirty flag ──────────────────────────────────────────────
+// Obsidian syncs `this.data` with the CM editor on every change, so we
+// can't detect unsaved edits by comparing `this.data` with `editor.getValue()`.
+// Instead, maintain our own flag from the editor-change event and clear it
+// after pre-save or on mode switch.
+
+let _editorDirty = false;
+
+export function getEditorDirty(): boolean {
+  return _editorDirty;
+}
+
+export function setEditorDirty(dirty: boolean): void {
+  _editorDirty = dirty;
+}
+
 // ── Misc state ──────────────────────────────────────────────────────
 
 // Single source of truth for "is this line an image row?". Defaults to the
@@ -263,7 +279,7 @@ export const RM_EMBED_WAIT_MS = 500;     // P4-C2: per-cycle budget to await the
                                          // the real MutationObserver signal instead of a frame count.
 export const RM_HOLD_TIMEOUT_MS = 2000;
 export const RM_HOLD_CALM_FRAMES = 6; // consecutive no-correction frames = settled
-export const EARLY_RESTORE_MAX_FRAMES = 6;
+export const EARLY_RESTORE_MAX_FRAMES = 25; // B-4: 6→25 — give cold RM render + post-processor time to build target DOM after content edits
 export const RM_EARLY_HOLD_FRAMES = 4;
 
 // ── State-touching helpers (used by the feature modules) ──
