@@ -250,3 +250,35 @@
     display: none !important;
   }
 }
+
+/* Settings "Reset all to current setting" buttons — one-click feedback.
+   Normal state is a CTA (accent) button via button.setCta() in settings.ts;
+   this permanent class carries the transition so both the press (class added)
+   and the release (class removed) animate smoothly. The pressed state flashes
+   a semantic green to signal success. */
+.drag-img-reset-btn {
+  transition: transform 0.1s ease, background-color 0.1s ease, color 0.1s ease;
+}
+
+.drag-img-reset-btn.drag-img-btn-pressed {
+  background: var(--color-green) !important;
+  color: #fff !important;
+  transform: scale(0.96);
+  opacity: 1 !important;
+}
+
+/* Settings tab: long descriptions span the full card width below the label
+   row instead of wrapping inside the narrow left info column. reflowDescriptions
+   (settings.ts) re-parents each .setting-item-description onto the setting-item
+   root; flex-wrap + flex-basis:100% lay it out as its own full-width line,
+   flush against the card edges. */
+.drag-img-settings .setting-item {
+  flex-wrap: wrap;
+}
+
+.drag-img-settings .setting-item-description {
+  flex-basis: 100%;
+  max-width: 100%;
+  flex-shrink: 0;
+  margin-top: 2px;
+}

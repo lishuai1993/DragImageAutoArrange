@@ -52,11 +52,9 @@ export function releasePostProcessingMarks(): void {
 
 export function createReadingModeProcessor(
   app: App,
-  getOptions: () => ImageRowOptions,
-  enabled: () => boolean
+  getOptions: () => ImageRowOptions
 ) {
   return async (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-    if (!enabled()) return;
     // L1: short-circuit sections already fully rendered. wrapAsFlexRow produces a
     // [data-diaa-group] wrapper (rmFlexRow.ts) for >=2-image rows;
     // applyStandaloneAlignment produces a [data-diaa-standalone] wrapper for single
@@ -93,7 +91,6 @@ export function createReadingModeProcessor(
       totalInternalEmbeds: allInternalEmbeds.length,
       freshEmbeds: freshEmbeds.length,
       imageEmbeds: imageEmbeds.length,
-      enabled: enabled(),
     });
 
     if (imageEmbeds.length === 0) { return; }

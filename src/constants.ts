@@ -23,7 +23,6 @@ export type Alignment = "left" | "center" | "right";
 export type SingleImageSizeMode = "natural" | "fixed";
 
 export const DEFAULT_SETTINGS = {
-  enabled: true,
   defaultRowHeight: 200,
   maxImagesPerRow: 10,
   gapSize: 4,

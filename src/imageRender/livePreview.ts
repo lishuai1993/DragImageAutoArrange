@@ -916,19 +916,13 @@ export function resetImageAlignmentFlags(
 function buildDecorations(
   state: EditorView["state"],
   getOptions: () => ImageRowOptions,
-  getSettings: () => DragImageSettings,
-  isEnabled: () => boolean
+  getSettings: () => DragImageSettings
 ): DecorationSet {
   try {
     // Capture stack to identify the call chain triggering a rebuild.
     // Filter to the first few frames after buildDecorations itself.
     const stack = new Error().stack?.split("\n").slice(2, 8).join("\n") || "";
     log.debug("buildDecorations invoked", { timestamp: Date.now(), stack });
-
-    if (!isEnabled()) {
-      log.debug("LivePreview decorations skipped (disabled)");
-      return Decoration.none;
-    }
 
     // Skip in source mode: editorLivePreviewField is only present/true in Live Preview
     if (!state.field(editorLivePreviewField, false)) {
@@ -954,7 +948,6 @@ function buildDecorations(
 
     log.debug("LivePreview buildDecorations", {
       groupCount: groups.length,
-      enabled: isEnabled(),
       docLength: doc.length,
       docLines: state.doc.lines,
       groups: groups.map(g => ({
@@ -1060,8 +1053,7 @@ export const layoutVersionField = StateField.define<number>({
 
 export function createLivePreviewPlugin(
   getOptions: () => ImageRowOptions,
-  getSettings: () => DragImageSettings,
-  isEnabled: () => boolean
+  getSettings: () => DragImageSettings
 ) {
   // Track Live Preview state so we can rebuild decorations on mode switch
   let wasLivePreview = false;
@@ -1070,7 +1062,7 @@ export function createLivePreviewPlugin(
     create(state) {
       wasLivePreview = !!state.field(editorLivePreviewField, false);
       log.debug("LivePreview StateField create", { wasLivePreview });
-      return buildDecorations(state, getOptions, getSettings, isEnabled);
+      return buildDecorations(state, getOptions, getSettings);
     },
     update(_oldDecos, tr) {
       const isLivePreview = !!tr.state.field(editorLivePreviewField, false);
@@ -1085,7 +1077,7 @@ export function createLivePreviewPlugin(
           timestamp: Date.now(),
         });
         wasLivePreview = isLivePreview;
-        return buildDecorations(tr.state, getOptions, getSettings, isEnabled);
+        return buildDecorations(tr.state, getOptions, getSettings);
       }
       return _oldDecos;
     },
@@ -1107,8 +1099,7 @@ export function createLivePreviewPlugin(
  *      via custom MIME, handled at drop to prevent Obsidian copy)
  */
 export function createStandaloneDropPlugin(
-  getSettings: () => DragImageSettings,
-  isEnabled: () => boolean
+  getSettings: () => DragImageSettings
 ) {
   return ViewPlugin.fromClass(
     class {
@@ -1327,8 +1318,6 @@ export function createStandaloneDropPlugin(
             hasDiaaSource: e.dataTransfer?.types.includes("application/diaa-source"),
             textPlain: textPlain.substring(0, 60),
           });
-
-          if (!isEnabled()) return;
 
           // ── Flex row → standalone / blank line ──
           if (textPlain.startsWith("diaa-row:")) {

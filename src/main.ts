@@ -26,7 +26,6 @@ export default class DragImageAutoArrangePlugin
   implements IDragImagePlugin
 {
   settings: DragImageSettings = {
-    enabled: false,
     defaultRowHeight: 200,
     maxImagesPerRow: 10,
     gapSize: 4,
@@ -100,7 +99,6 @@ export default class DragImageAutoArrangePlugin
       log.info("Preserved multi-image sizes restored from previous session");
     }
     log.info("Settings loaded", {
-      enabled: this.settings.enabled,
       maxImagesPerRow: this.settings.maxImagesPerRow,
       defaultRowHeight: this.settings.defaultRowHeight,
       gapSize: this.settings.gapSize,
@@ -118,8 +116,7 @@ export default class DragImageAutoArrangePlugin
     this.registerMarkdownPostProcessor(
       createReadingModeProcessor(
         this.app,
-        () => this.buildImageRowOptions(),
-        () => this.settings.enabled
+        () => this.buildImageRowOptions()
       )
     );
     log.info("Reading Mode processor registered");
@@ -201,8 +198,7 @@ export default class DragImageAutoArrangePlugin
     this.registerEditorExtension(
       createLivePreviewPlugin(
         () => this.buildImageRowOptions(),
-        () => this.settings,
-        () => this.settings.enabled
+        () => this.settings
       )
     );
     log.info("Live Preview extension registered");
@@ -210,8 +206,7 @@ export default class DragImageAutoArrangePlugin
     // Standalone line drop handler (flex row → standalone)
     this.registerEditorExtension(
       createStandaloneDropPlugin(
-        () => this.settings,
-        () => this.settings.enabled
+        () => this.settings
       )
     );
     log.info("Standalone drop plugin registered");
@@ -226,24 +221,6 @@ export default class DragImageAutoArrangePlugin
           view.previewMode.rerender(true);
         } else {
           _editor.refresh();
-        }
-      },
-    });
-
-    // Command: toggle auto-arrange
-    this.addCommand({
-      id: "toggle-image-arrange",
-      name: "Toggle image auto-arrange (on/off)",
-      callback: async () => {
-        this.settings.enabled = !this.settings.enabled;
-        log.info("Command: toggle-image-arrange", {
-          newValue: this.settings.enabled,
-        });
-        await this.saveSettings();
-        const leaf = this.app.workspace.activeLeaf;
-        if (leaf) {
-          const state = leaf.getViewState();
-          await leaf.setViewState({ type: state.type, state: state.state });
         }
       },
     });

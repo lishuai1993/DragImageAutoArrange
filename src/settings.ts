@@ -1,10 +1,9 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, ButtonComponent, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
 
 export interface DragImageSettings {
-  enabled: boolean;
   defaultRowHeight: number;
   maxImagesPerRow: number;
   gapSize: number;
@@ -35,7 +34,11 @@ export async function loadSettings(plugin: { loadData(): Promise<any> }): Promis
   const data = await plugin.loadData();
   // Support both new format ({ settings, preservedSizes }) and old format (settings directly)
   const settings = data?.settings ?? data;
-  return Object.assign({}, DEFAULT_SETTINGS, settings ?? {});
+  const merged = Object.assign({}, DEFAULT_SETTINGS, settings ?? {});
+  // Drop the pre-refactor `enabled` key so a stale saved `false` can't linger
+  // in settings data — enable/disable is now exclusively the Obsidian plugin-list toggle.
+  delete (merged as Record<string, unknown>).enabled;
+  return merged;
 }
 
 export class DragImageSettingTab extends PluginSettingTab {
@@ -49,20 +52,10 @@ export class DragImageSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    // Scope the full-width-description reflow styles to this settings tab only.
+    containerEl.addClass("drag-img-settings");
 
     containerEl.createEl("h2", { text: "Drag Image Auto Arrange" });
-
-    new Setting(containerEl)
-      .setName("Enable plugin")
-      .setDesc("Toggle the image auto-arrange feature on or off.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enabled)
-          .onChange(async (value) => {
-            this.plugin.settings.enabled = value;
-            await this.plugin.saveSettings();
-          })
-      );
 
     new Setting(containerEl)
       .setName("Default row height")
@@ -200,7 +193,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // ── Image Alignment (grouped) ──────────────────────────────
 
-    containerEl.createEl("h3", { text: "图片对齐" });
+    containerEl.createEl("h3", { text: "图片统一对齐设置" });
 
     const alignGroup = containerEl.createDiv();
     alignGroup.style.paddingLeft = "16px";
@@ -234,16 +227,19 @@ export class DragImageSettingTab extends PluginSettingTab {
       .setDesc(
         "One-shot: clear every image's per-image alignment override and revert to the global setting above."
       )
-      .addButton((button) =>
-        button
+      .addButton((button) => {
+        button.buttonEl.classList.add("drag-img-reset-btn");
+        return button
           .setButtonText("Reset all to current setting")
+          .setCta()
           .onClick(() => {
             this.plugin.resetAllImageAlignments();
             alignDropdown.setValue(
               this.plugin.settings.alignment
             );
-          })
-      );
+            this.flashResetFeedback(button);
+          });
+      });
 
     new Setting(alignGroup)
       .setName("Enable reading mode context menu")
@@ -261,7 +257,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // ── Single Image Display (grouped) ──────────────────────────
 
-    containerEl.createEl("h3", { text: "单图显示" });
+    containerEl.createEl("h3", { text: "单图行图片尺寸设置" });
 
     const singleImageGroup = containerEl.createDiv();
     singleImageGroup.style.paddingLeft = "16px";
@@ -329,9 +325,11 @@ export class DragImageSettingTab extends PluginSettingTab {
       .setDesc(
         "One-shot: clear every single image's manual size override and re-apply the current mode."
       )
-      .addButton((button) =>
-        button
+      .addButton((button) => {
+        button.buttonEl.classList.add("drag-img-reset-btn");
+        return button
           .setButtonText("Reset all to current setting")
+          .setCta()
           .onClick(() => {
             this.plugin.resetAllSingleImages();
             // Sync dropdown + width input in-place to reflect the reset
@@ -344,8 +342,9 @@ export class DragImageSettingTab extends PluginSettingTab {
             setWidthDisabled(
               this.plugin.settings.singleImageSizeMode === "natural"
             );
-          })
-      );
+            this.flashResetFeedback(button);
+          });
+      });
 
     new Setting(containerEl)
       .setName("Image extensions")
@@ -358,5 +357,46 @@ export class DragImageSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    // Move every description element out of the left info column and onto its
+    // own full-width line, so long descriptions no longer wrap inside a narrow
+    // column beside the control. Re-run per display() since the DOM is rebuilt.
+    this.reflowDescriptions();
+  }
+
+  /**
+   * Re-parent each setting's description element from setting-item-info to the
+   * setting-item root. The .drag-img-settings .setting-item flex-wrap + the
+   * full-width flex-basis in styles.css then lay it out as a block that spans
+   * the whole card, left-aligned with the label and right-aligned with the
+   * card edge (below the control).
+   */
+  private reflowDescriptions(): void {
+    this.containerEl.querySelectorAll<HTMLElement>(".setting-item").forEach((item) => {
+      const desc = item.querySelector<HTMLElement>(".setting-item-description");
+      if (desc) item.appendChild(desc);
+    });
+  }
+
+  /**
+   * One-click feedback for the "Reset all..." buttons: paint the accent color,
+   * shrink momentarily, swap the label to "已重置", then restore everything.
+   * Rapid double-clicks are ignored (the button is disabled for the 1.5s window).
+   */
+  private flashResetFeedback(button: ButtonComponent): void {
+    const el = button.buttonEl;
+    if (el.classList.contains("drag-img-btn-pressed")) return;
+    const originalText = el.textContent ?? "Reset all to current setting";
+    // Pin the width so the shorter "已重置" label doesn't shrink the button.
+    el.style.minWidth = `${el.offsetWidth}px`;
+    button.setDisabled(true);
+    button.setButtonText("已重置");
+    el.classList.add("drag-img-btn-pressed");
+    setTimeout(() => {
+      button.setDisabled(false);
+      button.setButtonText(originalText);
+      el.classList.remove("drag-img-btn-pressed");
+      el.style.minWidth = "";
+    }, 1500);
   }
 }

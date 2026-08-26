@@ -62,7 +62,19 @@
       "Read(//Users/lishuai/Downloads/文档/**)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(sed -n '1362p' /Users/lishuai/work/custom/obsidian-DragImageAutoArrange/src/scrollSync/scrollAnchor.ts)",
-      "Bash(sed -n '1363p' /Users/lishuai/work/custom/obsidian-DragImageAutoArrange/src/scrollSync/scrollAnchor.ts)"
+      "Bash(sed -n '1363p' /Users/lishuai/work/custom/obsidian-DragImageAutoArrange/src/scrollSync/scrollAnchor.ts)",
+      "WebFetch(domain:www.workbuddy.link)",
+      "WebFetch(domain:workbuddy.link)",
+      "Bash(mv \"插件开发复盘.md\" \"早期开发复盘与经验教训.md\")",
+      "Bash(mv \"飞书云文档拖拽多图并列功能.md\" \"需求起源_飞书多图并排.md\")",
+      "Bash(mv \"代码架构重构_从单文件到模块化_7月26-27日.md\" \"src目录架构重组与模块拆分_7月26-27日.md\")",
+      "Bash(mv \"对话历史_7月19-20日.md\" \"原始记录_对话历史_7月19-20日.md\")",
+      "Bash(mkdir -p \"01_项目总览\")",
+      "Bash(mv \"01-项目开发历程与阶段总结.md\" \"01_项目总览/\")",
+      "Bash(mv \"02-功能清单详解.md\" \"01_项目总览/\")",
+      "Bash(mv \"03-架构分析与改进方案.md\" \"01_项目总览/\")",
+      "Bash(mv \"需求起源_飞书多图并排.md\" \"02_多图并排核心功能/\")",
+      "Bash(mv \"多图并排Flex布局原理.md\" \"02_多图并排核心功能/\")"
     ]
   }
 }
