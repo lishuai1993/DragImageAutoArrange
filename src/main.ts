@@ -17,7 +17,9 @@ import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, r
 import { setEditorDirty } from "./anchor/anchorStore";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
-import { showImageAlignmentMenu } from "./interaction/alignmentContextMenu";
+import { openUnifiedImageMenu } from "./pixelPerfect/unifiedContextMenu";
+import { createPixelPerfectFacade, type PixelPerfectFacade } from "./pixelPerfect/pixelPerfectHost";
+import { findMarkdownViewForElement } from "./vendor/pixelPerfectImage/utils/utils";
 import { logger } from "./logger";
 const log = logger.channel("main");
 
@@ -43,6 +45,9 @@ export default class DragImageAutoArrangePlugin
     enableReadingModeContextMenu: true,
   };
 
+  /** Merged Pixel Perfect Image runtime (PP settings + services + menu builder). */
+  private pixelPerfect: PixelPerfectFacade | null = null;
+
   async onload(): Promise<void> {
     // Init file logger (hardcoded path for debugging)
     await logger.init(
@@ -61,23 +66,22 @@ export default class DragImageAutoArrangePlugin
       "warmupScheduler",
     ]);
 
-    // ── Per-image alignment context menu ──────────────────────────────
+    // ── Unified image context menu (DIA + Pixel Perfect Image) ────────
     // Registered at document level in capture phase so it runs BEFORE any
-    // other plugin's contextmenu handler (including those on CodeMirror
-    // or editor wrappers that would otherwise intercept the event).
+    // other plugin's contextmenu handler. Routes every image inside a markdown
+    // note to the unified menu; everything else keeps Obsidian's native menu.
     document.addEventListener("contextmenu", (e) => {
       const target = e.target as HTMLElement;
       if (!target?.tagName) return;
 
-      // Find the nearest DIAA-managed <img> — either the target itself
-      // or an ancestor img that has the __diaa_onAlign callback stored.
-      const img = (target.tagName === "IMG" && (target as any).__diaa_onAlign)
-        ? target as HTMLImageElement
-        : target.closest?.("img") as HTMLImageElement | null;
+      const img = (target.tagName === "IMG" ? target : target.closest?.("img")) as
+        | HTMLImageElement
+        | null;
+      if (!img || !this.pixelPerfect) return;
+      // Only notes we can write into — canvas/other surfaces keep the native menu.
+      if (!findMarkdownViewForElement(this.app, img)) return;
 
-      if (!img || !(img as any).__diaa_onAlign) return;
-
-      // When RM context menu is disabled, silently pass through in Reading Mode
+      // Reading Mode read-only gate: when disabled, let Obsidian's own menu show.
       if (!this.settings.enableReadingModeContextMenu && img.closest(".markdown-preview-view")) {
         return;
       }
@@ -85,10 +89,7 @@ export default class DragImageAutoArrangePlugin
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-
-      const alignment = (img as any).__diaa_alignment as "left" | "center" | "right" | undefined;
-      const onAlign = (img as any).__diaa_onAlign as (a: "left" | "center" | "right" | undefined) => void;
-      showImageAlignmentMenu(e, alignment, onAlign);
+      void openUnifiedImageMenu(e, img, { app: this.app, facade: this.pixelPerfect });
     }, true);
 
     this.settings = await loadSettings(this);
@@ -226,6 +227,14 @@ export default class DragImageAutoArrangePlugin
     });
 
     log.info("Plugin loaded successfully");
+
+    // ── Merge Pixel Perfect Image into the unified context menu ──────
+    // Loads PP settings into the DIA data namespace and wires PP services
+    // (ImageService / FileService / MenuService) against our in-process host.
+    this.pixelPerfect = await createPixelPerfectFacade(this);
+    log.info("Pixel Perfect Image feature set merged", {
+      customResizeSizes: this.pixelPerfect.host.settings.customResizeSizes,
+    });
   }
 
   async onunload(): Promise<void> {
@@ -234,10 +243,12 @@ export default class DragImageAutoArrangePlugin
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData({
-      settings: this.settings,
-      preservedSizes: exportPreservedSizes(),
-    });
+    // Merge instead of replacing so the PP settings namespace
+    // (pixelPerfectImage) written by the pixelPerfect host is never dropped.
+    const data = (await this.loadData()) ?? {};
+    data.settings = this.settings;
+    data.preservedSizes = exportPreservedSizes();
+    await this.saveData(data);
     // Notify both Live Preview and Reading Mode views so they rebuild with fresh options
     this.app.workspace.iterateAllLeaves((leaf) => {
       // Live Preview / Source mode: dispatch settingsChanged annotation to rebuild decorations

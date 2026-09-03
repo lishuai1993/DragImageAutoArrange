@@ -74,7 +74,21 @@
       "Bash(mv \"02-功能清单详解.md\" \"01_项目总览/\")",
       "Bash(mv \"03-架构分析与改进方案.md\" \"01_项目总览/\")",
       "Bash(mv \"需求起源_飞书多图并排.md\" \"02_多图并排核心功能/\")",
-      "Bash(mv \"多图并排Flex布局原理.md\" \"02_多图并排核心功能/\")"
+      "Bash(mv \"多图并排Flex布局原理.md\" \"02_多图并排核心功能/\")",
+      "Bash(find /Users/lishuai/lishuai/知识库/笔记管理/工作管理/.obsidian/plugins/pixel-perfect-image -type f -not -path */node_modules/* -not -path */.git/*)",
+      "Read(//private/tmp/pp-src/**)",
+      "Read(//private/tmp/**)",
+      "Bash(rm -rf pp-src)",
+      "Bash(mkdir pp-src *)",
+      "Bash(curl -sL --max-time 90 -o pp.tar.gz https://github.com/johansan/pixel-perfect-image/archive/refs/heads/main.tar.gz)",
+      "Bash(tar -xzf pp.tar.gz -C pp-src --strip-components=1)",
+      "Bash(gh auth *)",
+      "Bash(curl -sL --max-time 120 -o pp.tar.gz https://github.com/johansan/pixel-perfect-image/archive/refs/heads/main.tar.gz)",
+      "Bash(find /Users/lishuai/lishuai/知识库/笔记管理/工作管理/.obsidian/plugins/obsidian-image-toolkit -type f -not -path */node_modules/*)",
+      "Bash(mkdir -p src/vendor)",
+      "Bash(cp -R /tmp/pp-src/src src/vendor/pixelPerfectImage)",
+      "Bash(perl -0pi -e \"s/\\\\bmenu: Menu\\\\b/menu: MenuLike/g\" ui/MenuService.ts)",
+      "Bash(perl -0pi -e \"s/import type \\\\{ PixelPerfectImageHost \\\\} from '..\\\\/PixelPerfectImageHost';/import type { MenuLike } from '.\\\\/MenuLike';\\\\nimport type { PixelPerfectImageHost } from '..\\\\/PixelPerfectImageHost';/\" ui/MenuService.ts)"
     ]
   }
 }
