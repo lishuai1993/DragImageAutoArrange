@@ -204,3 +204,47 @@ export class DomMenu implements MenuLike {
         this.rootEl.style.top = `${Math.max(8, top)}px`;
     }
 }
+
+/**
+ * Wire a caret'd parent row to a hover submenu (Obsidian's native Menu API has
+ * no submenu support, so we emulate it). Manages the enter/leave delay timers,
+ * a click toggle fallback, and lets the shared close registry reap the submenu
+ * when the parent menu closes. `buildSub` is called lazily on first open; each
+ * open creates a fresh submenu so its checked state reflects current data.
+ */
+export function attachHoverSubmenu(parentRow: HTMLElement, buildSub: () => DomMenu, delayMs = 250): void {
+  let sub: DomMenu | null = null;
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearHide = (): void => {
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+  };
+  const hideSub = (): void => {
+    clearHide();
+    sub?.close();
+    sub = null;
+  };
+  const showSub = (): void => {
+    clearHide();
+    if (sub) return;
+    sub = buildSub();
+    sub.rootEl.addEventListener('mouseenter', clearHide);
+    sub.rootEl.addEventListener('mouseleave', () => {
+      hideTimer = setTimeout(hideSub, delayMs);
+    });
+    sub.showBeside(parentRow.getBoundingClientRect());
+  };
+
+  parentRow.addEventListener('mouseenter', showSub);
+  parentRow.addEventListener('mouseleave', () => {
+    hideTimer = setTimeout(hideSub, delayMs);
+  });
+  parentRow.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (sub) hideSub();
+    else showSub();
+  });
+}

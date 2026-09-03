@@ -1,6 +1,6 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode } from "../constants";
 import { ImageGroup, ImageEmbed, ImageMeta } from "../imageParse/imageDetector";
-import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth } from "../imageLayout/layoutEngine";
+import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
 import { resolveImageSrc, alignmentToCSS } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
@@ -273,6 +273,68 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.hasExplicitWidth = true;
     this.persistCallback?.();
   }
+
+  /**
+   * Context-menu "resize to X% of natural pixel width" for the image at index.
+   * Single rows become manual-width (`S=1`, `W = natural*pct`).  Multi-member
+   * rows rebalance the whole row's flex weights so the target image's laid-out
+   * pixel width approaches `natural*pct` at the current container width, while
+   * the other members scale proportionally to fill the remainder — the same
+   * relative/weighted semantics a divider drag produces.  No-op until the image
+   * is loaded (natural dimensions unknown).
+   */
+  resizeToNaturalPercent(index: number, pct: number): void {
+    if (!(pct > 0)) return;
+    const natural = this.loadedMetas.get(index)?.naturalWidth
+      ?? this.imageEls[index]?.naturalWidth
+      ?? 0;
+    if (!(natural > 0)) return;
+
+    const target = Math.round((natural * pct) / 100);
+    if (this.group.images.length === 1) {
+      this.setSingleImageWidth(target);
+      return;
+    }
+
+    const n = this.group.images.length;
+    if (index < 0 || index >= n) return;
+    const itemWidths = this.itemEls.map((el) => el.getBoundingClientRect().width);
+    const avail = itemWidths.reduce((s, w) => s + w, 0);
+    if (!(avail > 0)) return; // row not laid out yet
+
+    // A member can at most claim the available width minus room for the others
+    // (each flex item keeps a minimum column). Overshoot is pushed back here.
+    const minColumn = 50;
+    const capped = Math.max(minColumn, Math.min(target, avail - (n - 1) * minColumn));
+    const othersSum = avail - itemWidths[index];
+    const othersScale = othersSum > 0 && avail - capped > 0 ? (avail - capped) / othersSum : 1;
+
+    const widthsPx: number[] = [];
+    for (let i = 0; i < n; i++) {
+      widthsPx.push(i === index ? capped : Math.max(1, Math.round(itemWidths[i] * othersScale)));
+    }
+    const grows = computeFlexGrowsFromWidths(widthsPx);
+    for (let i = 0; i < n; i++) {
+      const g = grows[i] ?? 1;
+      this.group.images[i].flexGrow = g;
+      this.group.images[i].hasExplicitWidth = true;
+      const el = this.itemEls[i];
+      if (el) el.style.flexGrow = String(g);
+    }
+    // Re-run the flex band height for the new weights (mirrors the divider-drag
+    // path), then persist the vector through the renderer's normal chain.
+    this.recalculateRowHeight();
+    this.persistCallback?.();
+  }
+
+  /** Return a manual-width single row to setting-driven (`S=1 → S=0`). */
+  resetSingleManualWidth(): void {
+    if (this.group.images.length !== 1) return;
+    const img = this.group.images[0];
+    img.scale = singleImageScaleFor(false);
+    this.persistCallback?.();
+  }
+
   getDividerEls(): HTMLElement[] {
     return this.dividerEls;
   }
@@ -729,6 +791,21 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       (img as any).__diaa_alignment = newAlign;
       this.applyAlignmentToAll();
       this.persistCallback?.();
+    };
+
+    // Context-menu resize surface (Live Preview only — Reading Mode has no
+    // resize persist channel, so those images never expose these markers).
+    // Natural width stays live so the unified menu can read it after load.
+    (img as any).__diaa_resizeEnabled = this.options.enableResize;
+    (img as any).__diaa_naturalWidth = () =>
+      this.loadedMetas.get(index)?.naturalWidth ?? img.naturalWidth ?? 0;
+    (img as any).__diaa_manualSingle = () =>
+      this.group.images.length === 1 && isSingleImageManual(this.group.images[0].scale);
+    (img as any).__diaa_onResize = (pct: number) => {
+      this.resizeToNaturalPercent(index, pct);
+    };
+    (img as any).__diaa_resetSingleManual = () => {
+      this.resetSingleManualWidth();
     };
 
     // Watch for Obsidian asynchronously modifying the img element.

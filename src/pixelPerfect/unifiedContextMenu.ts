@@ -1,12 +1,13 @@
 import { FileSystemAdapter, Notice, Platform, type App, type TFile } from 'obsidian';
 import { strings } from '../vendor/pixelPerfectImage/i18n';
+import { parseResizeSize } from '../vendor/pixelPerfectImage/ui/settings';
 import {
     findMarkdownViewForElement,
     getBestHttpImageSource,
     getImageSourceCandidates,
     isRemoteImage
 } from '../vendor/pixelPerfectImage/utils/utils';
-import { DomMenu, closeAllMenus, createMenuRowEl } from './menuUi';
+import { DomMenu, closeAllMenus, createMenuRowEl, attachHoverSubmenu } from './menuUi';
 import type { PixelPerfectFacade } from './pixelPerfectHost';
 
 type AlignValue = 'left' | 'center' | 'right';
@@ -49,6 +50,23 @@ function diaaAlignment(img: HTMLImageElement): { alignment: AlignValue | undefin
     return { alignment, onAlign };
 }
 
+/** True when the DIA Live Preview renderer attached a resize surface to img. */
+function diaResizeEnabled(img: HTMLImageElement): boolean {
+    return (img as any).__diaa_resizeEnabled === true && typeof (img as any).__diaa_onResize === 'function';
+}
+
+/** Natural pixel width of a DIA-managed image, read live (0 when unknown). */
+function diaNaturalWidth(img: HTMLImageElement): number {
+    const fn = (img as any).__diaa_naturalWidth;
+    if (typeof fn === 'function') return Number(fn()) || 0;
+    return img.naturalWidth || 0;
+}
+
+function diaIsManualSingle(img: HTMLImageElement): boolean {
+    const fn = (img as any).__diaa_manualSingle;
+    return typeof fn === 'function' ? Boolean(fn()) : false;
+}
+
 /**
  * "Align image ▸" hover submenu (native look via DOM, since Obsidian's Menu
  * API has no submenu support). Writes go through the callback the renderer
@@ -62,24 +80,8 @@ function addAlignSubmenu(menu: DomMenu, img: HTMLImageElement): void {
     const parentRow = createMenuRowEl('Align image', 'align-left', true);
     menu.appendRowEl(parentRow);
 
-    let sub: DomMenu | null = null;
-    let hideTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const clearHide = (): void => {
-        if (hideTimer !== null) {
-            clearTimeout(hideTimer);
-            hideTimer = null;
-        }
-    };
-    const hideSub = (): void => {
-        clearHide();
-        sub?.close();
-        sub = null;
-    };
-    const showSub = (): void => {
-        clearHide();
-        if (sub) return;
-        sub = new DomMenu();
+    attachHoverSubmenu(parentRow, () => {
+        const sub = new DomMenu();
         const options: Array<{ label: string; value: AlignValue | undefined }> = [
             { label: 'Left', value: 'left' },
             { label: 'Center', value: 'center' },
@@ -100,21 +102,7 @@ function addAlignSubmenu(menu: DomMenu, img: HTMLImageElement): void {
             item.setTitle('Reset to default');
             item.onClick(() => onAlign(undefined));
         });
-        sub.rootEl.addEventListener('mouseenter', clearHide);
-        sub.rootEl.addEventListener('mouseleave', () => {
-            hideTimer = setTimeout(hideSub, 250);
-        });
-        sub.showBeside(parentRow.getBoundingClientRect());
-    };
-
-    parentRow.addEventListener('mouseenter', showSub);
-    parentRow.addEventListener('mouseleave', () => {
-        hideTimer = setTimeout(hideSub, 250);
-    });
-    parentRow.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (sub) hideSub();
-        else showSub();
+        return sub;
     });
 }
 
@@ -132,22 +120,105 @@ function addCopyImage(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageE
     );
 }
 
-function addCopyLocalPath(menu: DomMenu, app: App, facade: PixelPerfectFacade, imgFile: TFile): void {
+/**
+ * "Copy path ▸" hover submenu for local (DIA-managed) images: Obsidian URL,
+ * vault-relative path, and absolute filesystem path. The Obsidian URL is built
+ * by hand because Obsidian exposes no `getObsidianUrl` API.
+ */
+function addCopyPathSubmenu(menu: DomMenu, app: App, facade: PixelPerfectFacade, imgFile: TFile): void {
+    const parentRow = createMenuRowEl(strings.menu.copyLocalPath, 'link', true);
+    menu.appendRowEl(parentRow);
+
+    attachHoverSubmenu(parentRow, () => {
+        const sub = new DomMenu();
+        const vaultEncoded = encodeURIComponent(app.vault.getName());
+        const fileEncoded = encodeURIComponent(imgFile.path);
+
+        facade.menuService.addMenuItem(
+            sub,
+            'Obsidian URL',
+            'lucide-globe',
+            async () => {
+                await navigator.clipboard.writeText(`obsidian://open?vault=${vaultEncoded}&file=${fileEncoded}`);
+                new Notice(strings.notices.imageUrlCopied);
+            },
+            strings.notices.failedToCopyUrl
+        );
+        facade.menuService.addMenuItem(
+            sub,
+            '基于库的相对路径',
+            'lucide-file-text',
+            async () => {
+                await navigator.clipboard.writeText(imgFile.path);
+                new Notice(strings.notices.filePathCopied);
+            },
+            strings.notices.failedToCopyPath
+        );
+        facade.menuService.addMenuItem(
+            sub,
+            '绝对路径',
+            'lucide-hard-drive',
+            async () => {
+                const adapter = app.vault.adapter;
+                if (!(adapter instanceof FileSystemAdapter)) {
+                    new Notice(strings.notices.cannotCopyPath);
+                    return;
+                }
+                await navigator.clipboard.writeText(adapter.getFullPath(imgFile.path));
+                new Notice(strings.notices.filePathCopied);
+            },
+            strings.notices.failedToCopyPath
+        );
+        return sub;
+    });
+}
+
+/**
+ * Add the PP "resize to X%" presets (from the shared `customResizeSizes`
+ * setting) for a DIA-managed image. Only percentage entries make sense on DIA
+ * flex rows — an absolute px entry has no meaning for a weighted member — so px
+ * entries are skipped. Writes route through the renderer's `__diaa_onResize`,
+ * which handles single-image (`S=1` pixel width) and multi-member (flex-weight
+ * rebalance) semantics. Returns true when any row was added.
+ */
+function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement): boolean {
+    if (!diaResizeEnabled(img)) return false;
+    const natural = diaNaturalWidth(img);
+    const sizes = facade.host.settings.customResizeSizes;
+    let added = false;
+
+    for (const sizeStr of sizes) {
+        const parsed = parseResizeSize(sizeStr);
+        if (!parsed || parsed.unit !== '%') continue;
+        const rectW = img.getBoundingClientRect().width;
+        const shownPct = natural > 0 && rectW > 0 ? Math.round((rectW / natural) * 100) : null;
+        const disabled = natural <= 0 || (shownPct !== null && shownPct === parsed.amount);
+        if (!added) {
+            menu.addSeparator();
+            added = true;
+        }
+        facade.menuService.addMenuItem(
+            menu,
+            strings.menu.resizeTo.replace('{size}', sizeStr),
+            parsed.amount === 100 ? 'image' : 'percent',
+            async () => (img as any).__diaa_onResize(parsed.amount),
+            strings.notices.failedToResizeTo.replace('{size}', sizeStr),
+            disabled
+        );
+    }
+    return added;
+}
+
+/** "Remove custom size": flip a manual single-image row back to setting-driven. */
+function addDiaRemoveCustomSize(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement): void {
+    if (typeof (img as any).__diaa_resetSingleManual !== 'function') return;
+    if (!diaIsManualSingle(img)) return;
     facade.menuService.addMenuItem(
         menu,
-        strings.menu.copyLocalPath,
-        'link',
-        async () => {
-            const adapter = app.vault.adapter;
-            if (!(adapter instanceof FileSystemAdapter)) {
-                new Notice(strings.notices.cannotCopyPath);
-                return;
-            }
-            const fullPath = adapter.getFullPath(imgFile.path);
-            await navigator.clipboard.writeText(fullPath);
-            new Notice(strings.notices.filePathCopied);
-        },
-        strings.notices.failedToCopyPath
+        strings.menu.removeCustomSize,
+        'reset',
+        async () => (img as any).__diaa_resetSingleManual(),
+        strings.notices.failedToRemoveSize
     );
 }
 
@@ -230,7 +301,9 @@ export async function openUnifiedImageMenu(
             const svg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
             if (managed) {
                 if (!svg) addCopyImage(menu, facade, img);
-                addCopyLocalPath(menu, app, facade, resolved.imgFile);
+                addCopyPathSubmenu(menu, app, facade, resolved.imgFile);
+                addDiaManagedResizeSizes(menu, facade, img);
+                addDiaRemoveCustomSize(menu, facade, img);
             } else {
                 await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth);
             }
