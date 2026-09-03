@@ -9,7 +9,7 @@
  * where the third image in a resized row appeared not to respond to
  * alignment setting changes.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('obsidian', () => ({
   Menu: vi.fn().mockImplementation(() => ({
@@ -21,6 +21,7 @@ vi.mock('obsidian', () => ({
 
 import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRender/imageRowWidget';
 import { ImageGroup, ImageEmbed } from '../src/imageParse/imageDetector';
+import { setPendingTransform, clearPendingTransform, listPendingTransforms } from '../src/imageTransform/transformStore';
 
 // ── Test helpers ─────────────────────────────────────────────────────
 
@@ -444,5 +445,84 @@ describe('ImageRowWidget.updateAlignment (in-place)', () => {
       expect((item as HTMLElement).style.display).toBe('flex');
       expect((item as HTMLElement).style.justifyContent).toBe('center');
     }
+  });
+});
+
+describe('ImageRowWidget re-applies pending orientation preview across rebuild', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    for (const entry of listPendingTransforms()) clearPendingTransform(entry.imagePath);
+    document.body.innerHTML = '';
+  });
+
+  function makeOptsWithResolver(): ImageRowOptions {
+    return {
+      ...makeOptions('left'),
+      getImageVaultPath: (fileName: string) =>
+        fileName === 'a.png' || fileName === 'b.png' ? `assets/${fileName}` : null,
+    };
+  }
+
+  function buildLoaded(
+    files: Array<{ name: string; line: number; grow: number }>,
+    dims: Array<{ w: number; h: number }>,
+    opts: ImageRowOptions,
+    lineStart = 17,
+  ): { el: HTMLElement; widget: ImageRowWidget } {
+    const group = makeGroup(files.map((f) => makeImage(f.name, f.line, f.grow)), lineStart);
+    const widget = new ImageRowWidget(group, opts);
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, dims);
+    return { el, widget };
+  }
+
+  it('replays a pending quarter-turn onto a rebuilt single-image row', () => {
+    setPendingTransform('assets/a.png', 'notes/note.md', { turns: 1, mirror: false });
+    const { el } = buildLoaded(
+      [{ name: 'a.png', line: 5, grow: 1 }],
+      [{ w: 500, h: 654 }],
+      makeOptsWithResolver()
+    );
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(img.style.transform).toBe('rotate(90deg)');
+  });
+
+  it('replays pending orientations onto every rebuilt multi-image member', () => {
+    setPendingTransform('assets/a.png', 'notes/note.md', { turns: 3, mirror: false });
+    setPendingTransform('assets/b.png', 'notes/note.md', { mirror: true, turns: 0 });
+    const { el } = buildLoaded(
+      [
+        { name: 'a.png', line: 17, grow: 1 },
+        { name: 'b.png', line: 18, grow: 4 },
+      ],
+      [
+        { w: 500, h: 654 },
+        { w: 800, h: 1200 },
+      ],
+      makeOptsWithResolver()
+    );
+    const imgs = el.querySelectorAll('img');
+    expect(imgs.length).toBe(2);
+    expect((imgs[0] as HTMLImageElement).style.transform).toBe('rotate(270deg)');
+    expect((imgs[1] as HTMLImageElement).style.transform).toBe('scaleX(-1)');
+  });
+
+  it('leaves rebuilt images untransformed once the pending state is cleared', () => {
+    setPendingTransform('assets/a.png', 'notes/note.md', { turns: 1, mirror: false });
+    // Simulate the note-departure flush clearing the store, then a fresh rebuild.
+    for (const entry of listPendingTransforms()) clearPendingTransform(entry.imagePath);
+    const { el } = buildLoaded(
+      [{ name: 'a.png', line: 5, grow: 1 }],
+      [{ w: 500, h: 654 }],
+      makeOptsWithResolver(),
+      18
+    );
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(img.style.transform).toBe('');
   });
 });

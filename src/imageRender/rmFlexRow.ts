@@ -9,6 +9,7 @@ const log = logger.channel("rmFlexRow");
 import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
+import { attachDiaImageMarkers } from "./imageMarkers";
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
 export function getFileNameFromEmbed(embed: HTMLElement): string {
@@ -321,6 +322,14 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           if (fn) storePendingAlignment(sourcePath, fn, effectiveAlign);
         }
       };
+      // Read-only resize surface so RM renders the size rows greyed-out.
+      attachDiaImageMarkers(img, {
+        resizeEnabled: options.enableResize,
+        naturalWidth: () => img.naturalWidth || 0,
+        manualSingle: () => false,
+        onResize: null,
+        resetSingleManual: null,
+      });
     }
     row.appendChild(embed);
   }

@@ -8,6 +8,9 @@ import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/
 import { isSingleImageManual, singleImageScaleFor, formatSingleImageLine } from "../imageParse/singleImageParams";
 import { parseEmbedParams } from "../imageParse/embedRaw";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
+import { attachDiaImageMarkers } from "./imageMarkers";
+import { getPendingState, pendingTransformCount } from "../imageTransform/transformStore";
+import { applyOrientationPreview } from "../imageTransform/transformPreview";
 import { DividerController, DividerHost } from "../interaction/dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "../interaction/resizeHandleController";
 import { DragReorderController, DragReorderHost } from "../interaction/dragReorderController";
@@ -112,6 +115,9 @@ export interface ImageRowOptions {
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
   sourcePath: string;
+  /** Resolve a markdown embed name to its vault file path (or null). Used to
+   *  replay a pending rotate/flip orientation on rebuilt widget <img> nodes. */
+  getImageVaultPath?: (fileName: string) => string | null;
 }
 
 /**
@@ -142,6 +148,8 @@ export function sanitizeOptions(options: ImageRowOptions): ImageRowOptions {
     ),
     getResourcePath: typeof o.getResourcePath === "function" ? o.getResourcePath : (fileName: string) => fileName,
     sourcePath: typeof o.sourcePath === "string" ? o.sourcePath : "",
+    getImageVaultPath:
+      typeof o.getImageVaultPath === "function" ? o.getImageVaultPath : () => null,
   };
 }
 
@@ -793,20 +801,19 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       this.persistCallback?.();
     };
 
-    // Context-menu resize surface (Live Preview only — Reading Mode has no
-    // resize persist channel, so those images never expose these markers).
-    // Natural width stays live so the unified menu can read it after load.
-    (img as any).__diaa_resizeEnabled = this.options.enableResize;
-    (img as any).__diaa_naturalWidth = () =>
-      this.loadedMetas.get(index)?.naturalWidth ?? img.naturalWidth ?? 0;
-    (img as any).__diaa_manualSingle = () =>
-      this.group.images.length === 1 && isSingleImageManual(this.group.images[0].scale);
-    (img as any).__diaa_onResize = (pct: number) => {
-      this.resizeToNaturalPercent(index, pct);
-    };
-    (img as any).__diaa_resetSingleManual = () => {
-      this.resetSingleManualWidth();
-    };
+    // Context-menu resize surface. Natural width stays live so the unified menu
+    // can read it after load. Live Preview drives real persistence through the
+    // widget methods; Reading Mode attaches a read-only surface via the shared
+    // helper so its rows render greyed out.
+    attachDiaImageMarkers(img, {
+      resizeEnabled: this.options.enableResize,
+      naturalWidth: () =>
+        this.loadedMetas.get(index)?.naturalWidth ?? img.naturalWidth ?? 0,
+      manualSingle: () =>
+        this.group.images.length === 1 && isSingleImageManual(this.group.images[0].scale),
+      onResize: (pct) => this.resizeToNaturalPercent(index, pct),
+      resetSingleManual: () => this.resetSingleManualWidth(),
+    });
 
     // Watch for Obsidian asynchronously modifying the img element.
     // Obsidian adds alignment CSS classes AND may set inline styles
@@ -1330,6 +1337,33 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     } catch (e) {
       log.error("ImageRowWidget applyLayout error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
       this.applyUniformFallback();
+    } finally {
+      // Every layout pass ends by re-applying any in-session rotate/flip
+      // orientation. Drag single↔multi conversions and alignment edits rebuild
+      // the <img> DOM node, which drops the CSS transform the unified context
+      // menu applied — but the pending orientation survives in transformStore
+      // until the owning note closes and is written to disk. Replaying it here
+      // (after the forced reflow above, so client dims are current for the
+      // quarter-turn fit-scale) keeps the preview intact across the rebuild.
+      this.syncTransformPreviews();
+    }
+  }
+
+  /**
+   * Re-apply pending rotate/flip orientations from transformStore onto the
+   * current <img> elements. No-op while nothing is pending, so the cheap guard
+   * (a counter read) spares a per-image vault-path lookup + store query on the
+   * common layout path.
+   */
+  private syncTransformPreviews(): void {
+    if (pendingTransformCount() === 0) return;
+    const resolvePath = this.options.getImageVaultPath;
+    if (!resolvePath) return;
+    for (let i = 0; i < this.imageEls.length; i++) {
+      const vaultPath = resolvePath(this.group.images[i].fileName);
+      if (!vaultPath) continue;
+      const state = getPendingState(vaultPath);
+      if (state) applyOrientationPreview(this.imageEls[i], state);
     }
   }
 

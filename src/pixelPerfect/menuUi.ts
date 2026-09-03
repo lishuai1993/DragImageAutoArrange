@@ -12,9 +12,67 @@ import type { MenuLike, MenuLikeItem } from '../vendor/pixelPerfectImage/ui/Menu
 let openMenus: DomMenu[] = [];
 let outsideCleanup: (() => void) | null = null;
 
+// ── Hover-submenu host state ────────────────────────────────────────────────
+// A caret'd parent row and its open submenu form one hover region. At most one
+// such submenu is open per menu tree; the host fields record whose it is. When
+// the pointer slides between adjacent caret parents, the arriving parent takes
+// the submenu over (open-new-then-drop-old in one event batch) so the note
+// underneath never flashes through a "both closed" gap. The bridge timer only
+// covers a pointer pausing in the menu's own gutter while no parent takes over.
+const caretParents = new WeakSet<HTMLElement>();
+const delegatedMenus = new WeakSet<HTMLElement>();
+let hoverParent: HTMLElement | null = null;
+let hoverClose: (() => void) | null = null;
+let bridgeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearBridgeTimer(): void {
+    if (bridgeTimer !== null) {
+        clearTimeout(bridgeTimer);
+        bridgeTimer = null;
+    }
+}
+
+/** Close the open hover submenu (if any) and clear its host state. */
+function dismissHoverSub(): void {
+    clearBridgeTimer();
+    const close = hoverClose;
+    hoverParent = null;
+    hoverClose = null;
+    close?.();
+}
+
+/** Wait briefly for an adjacent caret parent to take over; else close. */
+function scheduleBridgeClose(delayMs: number): void {
+    clearBridgeTimer();
+    bridgeTimer = setTimeout(() => {
+        bridgeTimer = null;
+        dismissHoverSub();
+    }, delayMs);
+}
+
+/** Landing on a plain (non-caret) row drops the current submenu at once. */
+function onParentMenuHover(ev: MouseEvent): void {
+    if (!hoverParent) return;
+    const t = ev.target;
+    if (!(t instanceof Element)) return;
+    if (hoverParent.contains(t)) return;
+    const rowEl = t.closest('.diaa-menu-item');
+    if (!rowEl || caretParents.has(rowEl as HTMLElement)) return;
+    dismissHoverSub();
+}
+
+function ensureHoverDelegate(menu: HTMLElement): void {
+    if (delegatedMenus.has(menu)) return;
+    delegatedMenus.add(menu);
+    menu.addEventListener('mouseover', onParentMenuHover);
+}
+
 export function closeAllMenus(): void {
     outsideCleanup?.();
     outsideCleanup = null;
+    hoverParent = null;
+    hoverClose = null;
+    clearBridgeTimer();
     for (const menu of openMenus) menu.rootEl.remove();
     openMenus = [];
 }
@@ -207,44 +265,75 @@ export class DomMenu implements MenuLike {
 
 /**
  * Wire a caret'd parent row to a hover submenu (Obsidian's native Menu API has
- * no submenu support, so we emulate it). Manages the enter/leave delay timers,
- * a click toggle fallback, and lets the shared close registry reap the submenu
- * when the parent menu closes. `buildSub` is called lazily on first open; each
- * open creates a fresh submenu so its checked state reflects current data.
+ * no submenu support, so we emulate it). Moving between adjacent caret parents
+ * hands the open submenu from one to the next in the same event batch (open the
+ * arriving parent's submenu, then drop the previous one), so the note beneath
+ * never flashes. A short bridge timer only covers a pointer pausing in the
+ * menu's own gutter; leaving the top-level menu — or landing on a plain
+ * (non-caret) row — closes the submenu at once. `buildSub` is called lazily on
+ * first open; each open builds a fresh submenu so its checked state is current.
  */
-export function attachHoverSubmenu(parentRow: HTMLElement, buildSub: () => DomMenu, delayMs = 250): void {
-  let sub: DomMenu | null = null;
-  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+export function attachHoverSubmenu(
+    parentRow: HTMLElement,
+    buildSub: () => DomMenu,
+    bridgeDelayMs = 100
+): void {
+    const parentMenu = parentRow.closest('.diaa-menu') as HTMLElement | null;
+    caretParents.add(parentRow);
+    if (parentMenu) ensureHoverDelegate(parentMenu);
 
-  const clearHide = (): void => {
-    if (hideTimer !== null) {
-      clearTimeout(hideTimer);
-      hideTimer = null;
-    }
-  };
-  const hideSub = (): void => {
-    clearHide();
-    sub?.close();
-    sub = null;
-  };
-  const showSub = (): void => {
-    clearHide();
-    if (sub) return;
-    sub = buildSub();
-    sub.rootEl.addEventListener('mouseenter', clearHide);
-    sub.rootEl.addEventListener('mouseleave', () => {
-      hideTimer = setTimeout(hideSub, delayMs);
+    let sub: DomMenu | null = null;
+
+    const closeOwnSub = (): void => {
+        if (sub) {
+            sub.close();
+            sub = null;
+        }
+    };
+    const inOwnRegion = (node: Node | null): boolean => {
+        if (!node) return false;
+        if (parentRow.contains(node)) return true;
+        if (sub && sub.rootEl.contains(node)) return true;
+        return false;
+    };
+    const handleLeave = (ev: MouseEvent): void => {
+        if (hoverParent !== parentRow) return; // already dismissed / taken over
+        const next = ev.relatedTarget;
+        if (next instanceof Node && inOwnRegion(next)) {
+            clearBridgeTimer(); // crossing into our own submenu or back onto the row
+            return;
+        }
+        if (!(next instanceof Element)) {
+            dismissHoverSub(); // left to the window
+            return;
+        }
+        const nextMenu = next.closest('.diaa-menu');
+        if (parentMenu === null || nextMenu !== parentMenu) {
+            dismissHoverSub(); // left the top-level menu entirely
+            return;
+        }
+        // Still inside the top-level menu (an adjacent caret parent, a plain
+        // row, or the 1px gutter between rows): give the next parent a beat to
+        // take over before we drop the current submenu.
+        scheduleBridgeClose(bridgeDelayMs);
+    };
+    const showSub = (): void => {
+        if (hoverParent && hoverParent !== parentRow) dismissHoverSub();
+        clearBridgeTimer();
+        if (sub) return;
+        sub = buildSub();
+        sub.rootEl.addEventListener('mouseenter', clearBridgeTimer);
+        sub.rootEl.addEventListener('mouseleave', handleLeave);
+        sub.showBeside(parentRow.getBoundingClientRect());
+        hoverParent = parentRow;
+        hoverClose = closeOwnSub;
+    };
+
+    parentRow.addEventListener('mouseenter', showSub);
+    parentRow.addEventListener('mouseleave', handleLeave);
+    parentRow.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (hoverParent === parentRow && sub) dismissHoverSub();
+        else showSub();
     });
-    sub.showBeside(parentRow.getBoundingClientRect());
-  };
-
-  parentRow.addEventListener('mouseenter', showSub);
-  parentRow.addEventListener('mouseleave', () => {
-    hideTimer = setTimeout(hideSub, delayMs);
-  });
-  parentRow.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    if (sub) hideSub();
-    else showSub();
-  });
 }

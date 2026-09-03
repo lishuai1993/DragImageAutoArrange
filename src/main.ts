@@ -1,4 +1,4 @@
-import { Plugin, MarkdownView } from "obsidian";
+import { Plugin, MarkdownView, TFile } from "obsidian";
 import {
   DragImageSettings,
   DragImageSettingTab,
@@ -21,7 +21,66 @@ import { openUnifiedImageMenu } from "./pixelPerfect/unifiedContextMenu";
 import { createPixelPerfectFacade, type PixelPerfectFacade } from "./pixelPerfect/pixelPerfectHost";
 import { findMarkdownViewForElement } from "./vendor/pixelPerfectImage/utils/utils";
 import { logger } from "./logger";
+import {
+  listPendingTransforms,
+  clearPendingTransform,
+} from "./imageTransform/transformStore";
+import { writeOrientationToFile } from "./imageTransform/transformWriter";
 const log = logger.channel("main");
+
+/** Vault paths of every markdown note currently open in a workspace leaf. */
+function openMarkdownNotePaths(app: any): Set<string> {
+  const paths = new Set<string>();
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    const path = leaf.view?.file?.path;
+    if (typeof path === "string" && path) paths.add(path);
+  }
+  return paths;
+}
+
+/** Serialize flush runs so overlapping layout events can't double-write a file. */
+let _flushChain: Promise<void> = Promise.resolve();
+
+/**
+ * Bake the pending rotate/flip orientation of every image whose owning note has
+ * just been closed (or no longer exists). Obsidian has no per-leaf close event,
+ * so we diff the open-markdown-note set on layout-change / file-open instead —
+ * an LP↔RM switch keeps the same note path open and never mis-triggers. A failed
+ * write (deleted source, decode error) clears the entry so a closed note can't
+ * leave a phantom transform retrying on every layout event.
+ */
+async function runDepartedFlush(app: any): Promise<void> {
+  const openNotes = openMarkdownNotePaths(app);
+  for (const entry of listPendingTransforms()) {
+    if (openNotes.has(entry.notePath)) continue;
+    const abstract = app.vault.getAbstractFileByPath(entry.imagePath);
+    if (abstract instanceof TFile) {
+      await writeOrientationToFile(app, abstract, entry.state);
+    } else {
+      log.warn("transform flush: source image gone", { imagePath: entry.imagePath });
+    }
+    clearPendingTransform(entry.imagePath);
+  }
+}
+
+function flushDepartedTransforms(app: any): Promise<void> {
+  _flushChain = _flushChain.then(() => runDepartedFlush(app));
+  return _flushChain;
+}
+
+/** Bake every pending orientation — called on plugin unload. */
+async function flushAllTransforms(app: any): Promise<void> {
+  _flushChain = _flushChain.then(async () => {
+    for (const entry of listPendingTransforms()) {
+      const abstract = app.vault.getAbstractFileByPath(entry.imagePath);
+      if (abstract instanceof TFile) {
+        await writeOrientationToFile(app, abstract, entry.state);
+      }
+      clearPendingTransform(entry.imagePath);
+    }
+  });
+  return _flushChain;
+}
 
 export default class DragImageAutoArrangePlugin
   extends Plugin
@@ -64,6 +123,8 @@ export default class DragImageAutoArrangePlugin
       "scrollAnchor",
       "warmupProbe",
       "warmupScheduler",
+      "transformStore",
+      "transformWriter",
     ]);
 
     // ── Unified image context menu (DIA + Pixel Perfect Image) ────────
@@ -136,6 +197,21 @@ export default class DragImageAutoArrangePlugin
     // native scroll position. Keeps Step-3.1 logging for verification. Removed
     // on unload.
     this.register(installEarlyModeSwitchRestore(this.app));
+
+    // ── P3 rotate/flip persistence ───────────────────────────────────
+    // A rotation/flip is only a CSS preview until the note that applied it is
+    // closed; these listeners bake the pending orientation into the image file
+    // when the owning note departs. The full set also flushes on unload.
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => {
+        void flushDepartedTransforms(this.app);
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        void flushDepartedTransforms(this.app);
+      })
+    );
 
     // ── Global warmup scheduler ──────────────────────────────────────
     registerWarmupRunner(runWarmup);
@@ -239,6 +315,9 @@ export default class DragImageAutoArrangePlugin
 
   async onunload(): Promise<void> {
     log.info("Plugin unloading");
+    // Bake any orientation still pending so a note closed without a layout event
+    // (window teardown, plugin disable) doesn't lose the user's rotation.
+    await flushAllTransforms(this.app);
     await logger.dispose();
   }
 
@@ -326,6 +405,14 @@ export default class DragImageAutoArrangePlugin
           log.debug("Image not found in vault", { fileName, sourcePath });
         }
         return url;
+      },
+      // Map an embed name to its vault file path so the widget can replay a
+      // pending rotate/flip orientation from transformStore on a rebuilt <img>.
+      // Same resolution as resolveImagePath (PP's store key is the file path).
+      getImageVaultPath: (fileName: string) => {
+        const decoded = decodeURIComponent(fileName);
+        const file = this.app.metadataCache.getFirstLinkpathDest(decoded, sourcePath);
+        return file?.path ?? null;
       },
       sourcePath,
     };

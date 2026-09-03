@@ -9,12 +9,28 @@ import {
 } from '../vendor/pixelPerfectImage/utils/utils';
 import { DomMenu, closeAllMenus, createMenuRowEl, attachHoverSubmenu } from './menuUi';
 import type { PixelPerfectFacade } from './pixelPerfectHost';
+import {
+  composeOrientation,
+  IDENTITY_STATE,
+  isIdentityOrientation,
+  type TransformOp,
+} from '../imageTransform/orientation';
+import {
+  getPendingState,
+  setPendingTransform,
+  clearPendingTransform,
+} from '../imageTransform/transformStore';
+import {
+  applyOrientationPreview,
+  clearOrientationPreview,
+} from '../imageTransform/transformPreview';
 
 type AlignValue = 'left' | 'center' | 'right';
 
 /**
- * Merge seam for the rotate / flip group (P3). Receives everything a transform
- * needs; leaves the middle section empty until that milestone lands.
+ * Target for the rotate / flip group (P3): the <img> that receives the CSS
+ * preview, its resolved vault file (persistence path + format gating) and the
+ * active markdown note (whose close triggers the single disk write).
  */
 interface TransformTarget {
     img: HTMLImageElement;
@@ -65,6 +81,16 @@ function diaNaturalWidth(img: HTMLImageElement): number {
 function diaIsManualSingle(img: HTMLImageElement): boolean {
     const fn = (img as any).__diaa_manualSingle;
     return typeof fn === 'function' ? Boolean(fn()) : false;
+}
+
+/**
+ * Formats the rotate/flip disk write cannot preserve: svg (vector), gif and avif
+ * (canvas re-encode would silently fall back to PNG). Those rows render greyed.
+ */
+function isTransformFormatUnsupported(file: TFile): boolean {
+    return file.extension.toLowerCase() === 'svg'
+        || file.extension.toLowerCase() === 'gif'
+        || file.extension.toLowerCase() === 'avif';
 }
 
 /**
@@ -181,7 +207,7 @@ function addCopyPathSubmenu(menu: DomMenu, app: App, facade: PixelPerfectFacade,
  * which handles single-image (`S=1` pixel width) and multi-member (flex-weight
  * rebalance) semantics. Returns true when any row was added.
  */
-function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement): boolean {
+function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): boolean {
     if (!diaResizeEnabled(img)) return false;
     const natural = diaNaturalWidth(img);
     const sizes = facade.host.settings.customResizeSizes;
@@ -192,7 +218,7 @@ function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img
         if (!parsed || parsed.unit !== '%') continue;
         const rectW = img.getBoundingClientRect().width;
         const shownPct = natural > 0 && rectW > 0 ? Math.round((rectW / natural) * 100) : null;
-        const disabled = natural <= 0 || (shownPct !== null && shownPct === parsed.amount);
+        const disabled = modeDisabled || natural <= 0 || (shownPct !== null && shownPct === parsed.amount);
         if (!added) {
             menu.addSeparator();
             added = true;
@@ -210,7 +236,7 @@ function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img
 }
 
 /** "Remove custom size": flip a manual single-image row back to setting-driven. */
-function addDiaRemoveCustomSize(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement): void {
+function addDiaRemoveCustomSize(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): void {
     if (typeof (img as any).__diaa_resetSingleManual !== 'function') return;
     if (!diaIsManualSingle(img)) return;
     facade.menuService.addMenuItem(
@@ -218,7 +244,8 @@ function addDiaRemoveCustomSize(menu: DomMenu, facade: PixelPerfectFacade, img: 
         strings.menu.removeCustomSize,
         'reset',
         async () => (img as any).__diaa_resetSingleManual(),
-        strings.notices.failedToRemoveSize
+        strings.notices.failedToRemoveSize,
+        modeDisabled
     );
 }
 
@@ -235,11 +262,76 @@ function addCopyUrl(menu: DomMenu, facade: PixelPerfectFacade, url: string): voi
     );
 }
 
-/** Middle section — rotate / flip are added here in P3. Returns true when rows were added. */
-function addTransformGroup(_menu: DomMenu, _target: TransformTarget): boolean {
-    // P3: left/right rotate + horizontal/vertical flip (CSS preview in-session,
-    // single cumulative disk overwrite on tab close).
-    return false;
+/** The five rotate/flip operations offered in the transform submenu. */
+const TRANSFORM_ACTIONS: Array<{ label: string; op: TransformOp }> = [
+    { label: '向左旋转 90°', op: 'rotate90ccw' },
+    { label: '向右旋转 90°', op: 'rotate90cw' },
+    { label: '旋转 180°', op: 'rotate180' },
+    { label: '水平翻转', op: 'flipHorizontal' },
+    { label: '垂直翻转', op: 'flipVertical' },
+];
+
+function applyTransformOp(
+    img: HTMLImageElement,
+    imagePath: string,
+    notePath: string,
+    op: TransformOp
+): void {
+    const current = getPendingState(imagePath) ?? IDENTITY_STATE;
+    const next = composeOrientation(current, op);
+    setPendingTransform(imagePath, notePath, next);
+    applyOrientationPreview(img, next);
+}
+
+function resetTransform(img: HTMLImageElement, imagePath: string): void {
+    clearPendingTransform(imagePath);
+    clearOrientationPreview(img);
+}
+
+/**
+ * Middle group — rotate / flip (P3). Renders a "旋转 / 翻转 ▸" hover submenu that
+ * composes each click onto the image's in-session orientation (CSS preview) and
+ * records it for the single cumulative disk write when the note closes. When
+ * `disabled` (Reading Mode, or an svg/gif/avif that cannot be re-encoded) the
+ * whole group renders greyed-out. Returns true when a row was appended.
+ */
+function addTransformGroup(
+    menu: DomMenu,
+    target: TransformTarget,
+    disabled: boolean
+): boolean {
+    const imgFile = target.resolved?.imgFile ?? null;
+    const imagePath = imgFile?.path ?? '';
+    const notePath = target.activeFile?.path ?? '';
+    if (!imgFile || !imagePath) return false;
+
+    const parentRow = createMenuRowEl('旋转 / 翻转', 'rotate-cw', true);
+    menu.appendRowEl(parentRow);
+    if (disabled) {
+        parentRow.classList.add('diaa-menu-item-disabled');
+        return true;
+    }
+
+    const img = target.img;
+    attachHoverSubmenu(parentRow, () => {
+        const sub = new DomMenu();
+        for (const action of TRANSFORM_ACTIONS) {
+            sub.addItem(item => {
+                item.setTitle(action.label);
+                item.onClick(() => applyTransformOp(img, imagePath, notePath, action.op));
+            });
+        }
+        const state = getPendingState(imagePath) ?? IDENTITY_STATE;
+        if (!isIdentityOrientation(state)) {
+            sub.addSeparator();
+            sub.addItem(item => {
+                item.setTitle('重置旋转');
+                item.onClick(() => resetTransform(img, imagePath));
+            });
+        }
+        return sub;
+    });
+    return true;
 }
 
 /**
@@ -259,6 +351,9 @@ export async function openUnifiedImageMenu(
     closeAllMenus();
     const mdView = findMarkdownViewForElement(app, img);
     const activeFile = mdView?.file ?? null;
+    const isReadingMode =
+        mdView?.getMode() === 'preview' ||
+        Boolean(img.closest('.markdown-preview-view'));
     const remote = isRemoteImage(img);
     const managed = isDiaManaged(img);
 
@@ -271,7 +366,7 @@ export async function openUnifiedImageMenu(
         if (!isSvgSource(img)) addCopyImage(menu, facade, img);
         addCopyUrl(menu, facade, url);
         menu.addSeparator();
-        await facade.menuService.addRemoteResizeMenuItems(menu, img, activeFile, url);
+        await facade.menuService.addRemoteResizeMenuItems(menu, img, activeFile, url, isReadingMode);
     } else {
         const resolved = activeFile
             ? await facade.host.fileService.getImageFileWithErrorHandling(img, false, activeFile)
@@ -280,32 +375,41 @@ export async function openUnifiedImageMenu(
             ? facade.host.imageService.getCurrentImageWidth(resolved.activeFile, resolved.imgFile)
             : null;
 
-        // Top: DIA alignment + (optionally) filename/dimensions info.
-        if (managed) addAlignSubmenu(menu, img);
+        // Top: filename/dimensions info first, then the DIA per-image alignment
+        // and rotate/flip actions clustered beneath it (alignment sits directly
+        // above the rotate/flip group).
         if (resolved && facade.host.settings.showFileInfo) {
             await facade.menuService.addDimensionsMenuItem(menu, img, resolved, currentWidth);
         }
+        if (managed) addAlignSubmenu(menu, img);
         const hasTop = managed || (resolved !== null && facade.host.settings.showFileInfo);
 
-        // Middle: rotate / flip (P3). Empty for now, so it adds no separator yet.
+        // Middle: rotate / flip (P3). Editing is Live-Preview/Source only, so the
+        // group renders greyed-out in Reading Mode and for formats (svg/gif/avif)
+        // that cannot be re-encoded when the note closes.
+        const transformDisabled =
+            isReadingMode || (resolved !== null && isTransformFormatUnsupported(resolved.imgFile));
         let transformAdded = false;
         if (resolved) {
-            transformAdded = addTransformGroup(menu, { img, resolved, activeFile });
+            transformAdded = addTransformGroup(
+                menu,
+                { img, resolved, activeFile },
+                transformDisabled
+            );
         }
 
-        // Bottom: PP actions — copy image/path always; PP size items only on
-        // native (non-DIA) embeds (their |param format is PP's). DIA flex rows
-        // get their own flex-route resize in P4, so no size items here yet.
+        // Bottom: PP actions — copy image/path always; size items only meaningful
+        // when an editor can persist them, so they grey out in Reading Mode too.
         if (resolved) {
             if (hasTop || transformAdded) menu.addSeparator();
             const svg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
             if (managed) {
                 if (!svg) addCopyImage(menu, facade, img);
                 addCopyPathSubmenu(menu, app, facade, resolved.imgFile);
-                addDiaManagedResizeSizes(menu, facade, img);
-                addDiaRemoveCustomSize(menu, facade, img);
+                addDiaManagedResizeSizes(menu, facade, img, isReadingMode);
+                addDiaRemoveCustomSize(menu, facade, img, isReadingMode);
             } else {
-                await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth);
+                await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth, isReadingMode);
             }
             if (!Platform.isMobile) {
                 facade.menuService.addFileOperationMenuItems(menu, resolved.imgFile);

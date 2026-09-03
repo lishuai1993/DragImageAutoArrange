@@ -6,6 +6,8 @@ import { matchEmbedsToParsed } from "../imageParse/matchEmbeds";
 import { logger } from "../logger";
 const log = logger.channel("readingMode");
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
+import { attachDiaImageMarkers } from "./imageMarkers";
+import { isSingleImageManual } from "../imageParse/singleImageParams";
 import {
   setImageRowIndex, setImageLineRe,
   getScrollAnchor, getFallbackPct,
@@ -250,6 +252,17 @@ export function createReadingModeProcessor(
               if (fn) storePendingAlignment(ctx.sourcePath, fn, effectiveAlign);
             }
           };
+          // Read-only resize surface so RM renders the size rows greyed-out.
+          attachDiaImageMarkers(img, {
+            resizeEnabled: options.enableResize,
+            naturalWidth: () => img.naturalWidth || 0,
+            manualSingle: () => {
+              const scaleAttr = embed.getAttribute("data-diaa-scale");
+              return scaleAttr !== null ? isSingleImageManual(parseFloat(scaleAttr)) : false;
+            },
+            onResize: null,
+            resetSingleManual: null,
+          });
         }
       }
     }

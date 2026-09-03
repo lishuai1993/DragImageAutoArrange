@@ -68,7 +68,7 @@ export class MenuService {
         return findLastObsidianImageSizeParam(parts)?.width ?? null;
     }
 
-    async addRemoteResizeMenuItems(menu: MenuLike, img: HTMLImageElement, activeFile: TFile, imageUrl: string): Promise<void> {
+    async addRemoteResizeMenuItems(menu: MenuLike, img: HTMLImageElement, activeFile: TFile, imageUrl: string, disableResize = false): Promise<void> {
         const isSvg = this.isSvgBySrc(img);
         const customWidth = this.parseWidthFromImageAlt(img) ?? this.plugin.imageService.getCurrentExternalImageWidth(activeFile, imageUrl);
 
@@ -88,7 +88,7 @@ export class MenuService {
                 const unit = parsed.unit;
                 const label = strings.menu.resizeTo.replace('{size}', sizeStr);
                 const isPercentage = unit === '%';
-                const disabled = isPercentage ? (isSvg && actualWidth === null ? true : currentScale === value) : customWidth === value;
+                const disabled = disableResize || (isPercentage ? (isSvg && actualWidth === null ? true : currentScale === value) : customWidth === value);
 
                 let icon = 'image';
                 if (isPercentage) {
@@ -117,7 +117,8 @@ export class MenuService {
                     await this.plugin.imageService.removeExternalImageWidth(activeFile, imageUrl);
                     new Notice(strings.notices.customSizeRemoved);
                 },
-                strings.notices.failedToRemoveSize
+                strings.notices.failedToRemoveSize,
+                disableResize
             );
         }
     }
@@ -419,7 +420,8 @@ export class MenuService {
         menu: MenuLike,
         img: HTMLImageElement,
         resolvedImage?: { activeFile: TFile; imgFile: TFile } | null,
-        currentWidth?: number | null
+        currentWidth?: number | null,
+        disableResize = false
     ): Promise<void> {
         // Get current scale and file info
         const result = resolvedImage !== undefined ? resolvedImage : null;
@@ -492,7 +494,7 @@ export class MenuService {
                 const unit = parsed.unit;
                 const label = strings.menu.resizeTo.replace('{size}', sizeStr);
                 const isPercentage = unit === '%';
-                const disabled = isPercentage ? (isSvg && actualWidth === null ? true : currentScale === value) : customWidth === value;
+                const disabled = disableResize || (isPercentage ? (isSvg && actualWidth === null ? true : currentScale === value) : customWidth === value);
 
                 // Choose icon based on unit type and value
                 let icon = 'image';
@@ -528,7 +530,8 @@ export class MenuService {
                     await this.plugin.imageService.removeImageWidth(imgFile, result.activeFile);
                     new Notice(strings.notices.customSizeRemoved);
                 },
-                strings.notices.failedToRemoveSize
+                strings.notices.failedToRemoveSize,
+                disableResize
             );
         }
     }

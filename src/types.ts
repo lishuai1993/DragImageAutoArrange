@@ -20,6 +20,9 @@ export interface ImageRowOptions {
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
   sourcePath: string;
+  /** Resolve a markdown embed name to its vault file path (or null). Used to
+   *  replay a pending rotate/flip orientation on rebuilt widget <img> nodes. */
+  getImageVaultPath?: (fileName: string) => string | null;
 }
 
 export interface MultiImageSizeData {
