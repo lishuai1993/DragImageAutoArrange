@@ -1,13 +1,13 @@
 import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
 import { buildImageLineRe } from "../constants";
 import { ImageRowOptions } from "../types";
-import { ImageEmbed, parseImageLine } from "../imageParse/imageDetector";
+import { detectRowGroups } from "../imageParse/imageDetector";
+import type { RowImage } from "../imageParse/rowParams";
 import { matchEmbedsToParsed } from "../imageParse/matchEmbeds";
 import { logger } from "../logger";
 const log = logger.channel("readingMode");
 import { storePendingAlignment, AlignValue } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
-import { isSingleImageManual } from "../imageParse/singleImageParams";
 import {
   setImageRowIndex, setImageLineRe,
   getScrollAnchor, getFallbackPct,
@@ -105,7 +105,7 @@ export function createReadingModeProcessor(
     const groupedEmbeds = new Set<HTMLElement>(groups.flat());
 
     // --- Step 0: Parse markdown to recover scale values ---
-    let parsedImages: ImageEmbed[] = [];
+    let parsedImages: RowImage[] = [];
     try {
       const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
       if (file instanceof TFile) {
@@ -117,10 +117,12 @@ export function createReadingModeProcessor(
         // identically (single source of truth — see setImageLineRe).
         setImageLineRe(re);
         const lines = content.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const parsed = parseImageLine(lines[i], i, re);
-          if (parsed) parsedImages.push(parsed);
-        }
+        // Classify consecutive image lines into typed rows (detectRowGroups) and
+        // flatten to one RowImage per source image line, in source order — the
+        // exact membership a per-line embed-regex scan would produce, but
+        // under the unified single/multi display model.
+        const rows = detectRowGroups(content, options.maxImagesPerRow, options.imageExtensions);
+        for (const group of rows) parsedImages.push(...group.images);
         setImageRowIndex(ctx.sourcePath, buildImageRowIndex(lines, re));
         log.debug("ReadingMode parsed markdown", {
           filePath: file.path,
@@ -130,10 +132,8 @@ export function createReadingModeProcessor(
             line: p.line,
             fileName: p.fileName,
             alignment: p.alignment,
-            hasExplicitWidth: p.hasExplicitWidth,
-            explicitWidth: p.explicitWidth,
-            flexGrow: p.flexGrow,
-            scale: p.scale,
+            hasSizing: p.hasSizing,
+            display: p.display,
             rawSnippet: p.raw.trim().slice(0, 80),
           })),
         });
@@ -155,7 +155,7 @@ export function createReadingModeProcessor(
     // us scope candidates to the section and zip them to the section's embeds
     // in source order — independent of whether `el` is attached to the document.
     const sectionInfo = ctx.getSectionInfo(el);
-    const candidates: ImageEmbed[] = sectionInfo
+    const candidates: RowImage[] = sectionInfo
       ? parsedImages.filter(
           (p) => p.line >= sectionInfo.lineStart && p.line <= sectionInfo.lineEnd
         )
@@ -198,17 +198,27 @@ export function createReadingModeProcessor(
         parsedFn: parsed.fileName,
         set: {
           alignment: parsed.alignment ?? "(default)",
-          flexGrow: parsed.hasExplicitWidth ? parsed.flexGrow : "(none)",
-          scale: parsed.scale ?? "(none)",
+          kind: parsed.display.kind,
+          grow: parsed.display.kind === "multi" && parsed.hasSizing
+            ? String(parsed.display.share)
+            : "(none)",
+          scale: parsed.display.kind === "multi" && parsed.display.fill != null
+            ? String(parsed.display.fill)
+            : "(none)",
         },
       });
-      if (parsed.hasExplicitWidth) {
-        embed.setAttribute("data-diaa-flexgrow", String(parsed.flexGrow));
-        flexGrowSetCount++;
-      }
-      if (parsed.scale != null) {
-        embed.setAttribute("data-diaa-scale", String(parsed.scale));
-        matchCount++;
+      if (parsed.display.kind === "multi") {
+        // Multi-row members carry grow/fill in |share码|fill码|; a single row's
+        // |S|W belongs to no flex group here, so it emits no grow/fill attrs
+        // (nothing in RM reads them for standalone rows).
+        if (parsed.hasSizing) {
+          embed.setAttribute("data-diaa-flexgrow", String(parsed.display.share));
+          flexGrowSetCount++;
+        }
+        if (parsed.display.fill != null) {
+          embed.setAttribute("data-diaa-scale", String(parsed.display.fill));
+          matchCount++;
+        }
       }
       if (parsed.alignment) {
         embed.setAttribute("data-diaa-alignment", parsed.alignment);
@@ -232,7 +242,8 @@ export function createReadingModeProcessor(
     });
 
     // Apply alignment to standalone single images
-    for (const embed of imageEmbeds) {
+    for (let i = 0; i < imageEmbeds.length; i++) {
+      const embed = imageEmbeds[i];
       if (!groupedEmbeds.has(embed)) {
         applyStandaloneAlignment(embed, options.alignment);
         const img = embed.querySelector<HTMLImageElement>("img");
@@ -253,13 +264,15 @@ export function createReadingModeProcessor(
             }
           };
           // Read-only resize surface so RM renders the size rows greyed-out.
+          // manualSingle comes straight from the typed parse (matches[i] is the
+          // RowImage this embed matched), not from re-reading a data-diaa-scale
+          // attr — single rows carry no scale slot under the unified model.
+          const parsed = matches[i];
           attachDiaImageMarkers(img, {
             resizeEnabled: options.enableResize,
             naturalWidth: () => img.naturalWidth || 0,
-            manualSingle: () => {
-              const scaleAttr = embed.getAttribute("data-diaa-scale");
-              return scaleAttr !== null ? isSingleImageManual(parseFloat(scaleAttr)) : false;
-            },
+            manualSingle: () =>
+              parsed != null && parsed.display.kind === "single-manual",
             onResize: null,
             resetSingleManual: null,
           });

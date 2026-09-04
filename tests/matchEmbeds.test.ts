@@ -1,19 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { matchEmbedsToParsed } from '../src/imageParse/matchEmbeds';
-import { ImageEmbed } from '../src/imageParse/imageDetector';
 
-// Minimal ImageEmbed factory — only the fields matching cares about matter.
-function emb(fileName: string, line: number, extra: Partial<ImageEmbed> = {}): ImageEmbed {
-  return {
-    line,
-    raw: `![[${fileName}]]`,
-    fileName,
-    explicitWidth: null,
-    hasExplicitWidth: false,
-    flexGrow: 1,
-    scale: null,
-    ...extra,
-  };
+// Minimal parsed-embed factory — matching only ever reads fileName, everything
+// else is passed through untouched on the matched record.  Shape mirrors the
+// fields the asserts below inspect (a RowImage in production carries more).
+interface Embed {
+  fileName: string;
+  line: number;
+  alignment?: 'left' | 'center' | 'right';
+  hasExplicitWidth?: boolean;
+  flexGrow?: number;
+  scale?: number | null;
+}
+function emb(fileName: string, line: number, extra: Partial<Embed> = {}): Embed {
+  return { fileName, line, ...extra };
 }
 
 describe('matchEmbedsToParsed', () => {

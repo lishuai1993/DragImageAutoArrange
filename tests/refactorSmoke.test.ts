@@ -29,7 +29,6 @@ import * as warmupProbe from "../src/scrollSync/warmupProbe";
 import * as warmupScheduler from "../src/scrollSync/warmupScheduler";
 import * as rmAlignStore from "../src/imageRender/rmAlignStore";
 import * as matchEmbeds from "../src/imageParse/matchEmbeds";
-import * as singleImageParams from "../src/imageParse/singleImageParams";
 import * as embedRaw from "../src/imageParse/embedRaw";
 import * as settings from "../src/settings";
 import * as constants from "../src/constants";
@@ -40,7 +39,7 @@ type Mod = Record<string, unknown>;
 const MODULES: Record<string, Mod> = {
   livePreview, rmFlexRow, readingMode, scrollAnchor, imageRowWidget,
   layoutEngine, anchorMath, domLocators, anchorRestoreSession, anchorSignals, warmupProbe, warmupScheduler, rmAlignStore,
-  matchEmbeds, singleImageParams, settings, constants, utils,
+  matchEmbeds, settings, constants, utils,
 };
 
 describe("refactor surface smoke", () => {

@@ -14,8 +14,10 @@ import {
   Annotation,
 } from "@codemirror/state";
 import { editorLivePreviewField } from "obsidian";
-import { detectImageGroups } from "../imageParse/imageDetector";
-import type { ImageGroup, ImageEmbed } from "../imageParse/imageDetector";
+import { detectRowGroups } from "../imageParse/imageDetector";
+import type { RowGroup } from "../imageParse/imageDetector";
+import { write as writeRowImage } from "../imageParse/rowParams";
+import type { RowImage, Alignment } from "../imageParse/rowParams";
 import { ImageRowWidget, ImageRowOptions, getSidebarWidths } from "./imageRowWidget";
 import { DragImageSettings } from "../settings";
 import { CLASSES } from "../constants";
@@ -23,7 +25,6 @@ import { computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
 import { logger } from "../logger";
 const log = logger.channel("livePreview");
 import { clampFlexGrow, clampScale } from "../imageLayout/parameterValidator";
-import { isSingleImageManual, formatSingleImageLine, normalizeSingleImageParams } from "../imageParse/singleImageParams";
 import { stripEmbedParams, parseEmbedParams } from "../imageParse/embedRaw";
 import { createDragGhost } from "./rowRenderer";
 
@@ -38,7 +39,7 @@ import { createDragGhost } from "./rowRenderer";
 function findStandaloneImageLine(
   view: EditorView,
   obsidianUri: string,
-  targetGroup: ImageGroup
+  targetGroup: RowGroup
 ): number | null {
   try {
     // Decode the file parameter from obsidian://open?vault=...&file=<encodedPath>
@@ -89,7 +90,7 @@ function findStandaloneImageLine(
 function resolveSourceLine(
   view: EditorView,
   dataTransfer: string,
-  targetGroup: ImageGroup
+  targetGroup: RowGroup
 ): number | null {
   const rowMatch = dataTransfer.match(/^diaa-row:(\d+):(\d+)$/);
   if (rowMatch) {
@@ -167,10 +168,10 @@ function convertOrphanedMultiSinglesToBare(
   extensions: string
 ): void {
   const doc = view.state.doc;
-  const groups = detectImageGroups(doc.toString(), maxImagesPerRow, extensions);
+  const groups = detectRowGroups(doc.toString(), maxImagesPerRow, extensions);
   const changes: Array<{ from: number; to: number; insert: string }> = [];
   for (const g of groups) {
-    if (g.images.length !== 1) continue;
+    if (g.kind !== "single") continue;
     const lineNum = g.images[0].line + 1;
     if (lineNum < 1 || lineNum > doc.lines) continue;
     const lineObj = doc.line(lineNum);
@@ -236,26 +237,36 @@ export function normalizeRaw(raw: string): string {
  *  via setTimeout (from destroy, where view.dispatch is illegal). */
 function applyFlexGrowChanges(
   view: EditorView,
-  images: ImageEmbed[],
+  images: RowImage[],
   grows: number[],
   scales?: (number | null)[],
   defaultAlignment?: "left" | "center" | "right"
 ): void {
   const changes: Array<{ from: number; to: number; insert: string }> = [];
   for (let i = 0; i < grows.length && i < images.length; i++) {
-    const scale = scales ? scales[i] : undefined;
-    const alignment = images[i].alignment ?? defaultAlignment;
-    const newLine = updateImageLineWidth(images[i].raw, grows[i], scale, alignment);
-    if (newLine === images[i].raw) continue;
+    const img = images[i];
+    if (img.display.kind !== "multi") continue;
+    const fill = scales ? scales[i] : img.display.fill;
+    const edited: RowImage = {
+      ...img,
+      alignment: img.alignment ?? defaultAlignment,
+      display: {
+        kind: "multi",
+        share: clampFlexGrow(grows[i]),
+        fill: fill != null ? clampScale(fill) : null,
+      },
+    };
+    const newLine = writeRowImage(edited);
+    if (newLine === img.raw) continue;
 
-    const line = images[i].line + 1; // 1-indexed
+    const line = img.line + 1; // 1-indexed
     if (line < 1 || line > view.state.doc.lines) continue;
     const lineObj = view.state.doc.line(line);
     // Anti-resurrection: a deferred persist may fire after a structural move
     // (moveLine) relocated this image. If the cached line no longer references
     // the same file, skip it — otherwise we'd rewrite a now-blank/different line
     // and resurrect the moved embed at its old position.
-    if (!lineObj.text.includes(images[i].fileName)) continue;
+    if (!lineObj.text.includes(img.fileName)) continue;
     changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
   }
 
@@ -266,14 +277,27 @@ function applyFlexGrowChanges(
   view.dispatch({ changes });
 }
 
+/** A RowImage's flex-grammar share, as the destroy/flush persist compare reads
+ *  it.  Multi members carry their live share in display.share; single rows never
+ *  persist through the flex-grow path (they write |S|W via persistSingleImage),
+ *  so their grow is just the flex divisor 1. */
+function modelGrow(img: RowImage): number {
+  return img.display.kind === "multi" ? img.display.share : 1;
+}
+
+/** A RowImage's live fill ratio (null = default), the multi-row scale analogue. */
+function modelFill(img: RowImage): number | null {
+  return img.display.kind === "multi" ? img.display.fill : null;
+}
+
 class StaticImageRowWidget extends WidgetType {
-  private group: ImageGroup;
+  private group: RowGroup;
   private options: ImageRowOptions;
   private innerWidget: ImageRowWidget | null = null;
   private editorView: EditorView | null = null;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(group: ImageGroup, options: ImageRowOptions) {
+  constructor(group: RowGroup, options: ImageRowOptions) {
     super();
     this.group = group;
     this.options = options;
@@ -301,10 +325,13 @@ class StaticImageRowWidget extends WidgetType {
     if (this.options.enableDividers !== other.options.enableDividers) return false;
     if (this.options.singleImageSizeMode !== other.options.singleImageSizeMode) return false;
     if (this.options.singleImageWidth !== other.options.singleImageWidth) return false;
-    // Single-image manual flag (S) is stripped by normalizeRaw, so compare it
-    // explicitly — flipping S=1→0 (override reset) must force a rebuild.
+    // Single-image manual flag (S) is stripped by normalizeRaw, so compare the
+    // typed display kind explicitly — flipping S=1→0 (override reset) or a
+    // manual↔follow transition must force a rebuild.  A single row's display is
+    // exactly {single-follow | single-manual}, so kind inequality is the manual
+    // flag inequality.
     if (a.images.length === 1 && b.images.length === 1) {
-      if (isSingleImageManual(a.images[0].scale) !== isSingleImageManual(b.images[0].scale)) return false;
+      if (a.images[0].display.kind !== b.images[0].display.kind) return false;
     }
     for (let i = 0; i < a.images.length; i++) {
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
@@ -385,7 +412,11 @@ class StaticImageRowWidget extends WidgetType {
           return;
         }
         const grows = this.innerWidget!.getCurrentFlexGrows().map((g) => clampFlexGrow(g));
-        const scales = images.map((img) => img.scale != null ? clampScale(img.scale) : null);
+        const scales = images.map((img) =>
+          img.display.kind === "multi" && img.display.fill != null
+            ? clampScale(img.display.fill)
+            : null
+        );
         log.debug("BALANCE StaticImageRowWidget onPersist", {
           grows,
           scales,
@@ -595,7 +626,7 @@ class StaticImageRowWidget extends WidgetType {
       const scale = dropScale ? null : parseScaleFromRaw(raw);
       const alignMatch = raw.match(/\|(left|center|right)\|/);
       const alignment = (alignMatch ? alignMatch[1] : this.options.alignment) as "left" | "center" | "right";
-      const newText = updateImageLineWidth(raw, grow, scale, alignment);
+      const newText = buildMultiLine(raw, grow, scale, alignment);
       if (newText !== raw) {
         changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
       }
@@ -738,12 +769,12 @@ class StaticImageRowWidget extends WidgetType {
       const images = this.group.images;
       const grows = this.innerWidget.getCurrentFlexGrows();
       const hasFlexChanges = grows.some((g, i) => {
-        return Math.abs(g - images[i].flexGrow) > 0.005;
+        return Math.abs(g - modelGrow(images[i])) > 0.005;
       });
       if (hasFlexChanges || this.innerWidget._scaleDirtyImages.size > 0) {
         // Always include scales so they're preserved in markdown when
         // flexGrow changes (e.g. divider drag) without a scale change.
-        const scales = images.map((img) => img.scale);
+        const scales = images.map(modelFill);
         // Try synchronous dispatch first; fall back to setTimeout if the
         // view is already in a state where dispatch is illegal.
         try {
@@ -766,10 +797,10 @@ class StaticImageRowWidget extends WidgetType {
     const images = this.group.images;
     const grows = this.innerWidget.getCurrentFlexGrows();
     const hasFlexChanges = grows.some((g, i) => {
-      return Math.abs(g - images[i].flexGrow) > 0.005;
+      return Math.abs(g - modelGrow(images[i])) > 0.005;
     });
     if (!hasFlexChanges && this.innerWidget._scaleDirtyImages.size === 0) return;
-    const scales = images.map(img => img.scale);
+    const scales = images.map(modelFill);
     try {
       applyFlexGrowChanges(this.editorView, images, grows, scales, this.options.alignment);
     } catch {
@@ -790,16 +821,20 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   /**
-   * Persist a single-image row as `![[file|W|S]]`.  W = pixel width
-   * (flexGrow × 100), S = 0/1 manual flag (from the stored scale slot).
-   * Reads the current line text fresh and skips a no-op edit.
+   * Persist a single-image row as `![[file|W|S]]`.  The typed display decides
+   * S: manual rows write `|1|W` from display.widthPx; follow rows write `|0|W`
+   * with the pixel width the widget last materialised (getSingleWidthPx), since
+   * a single-follow carries no width in the model.  Serialisation delegates to
+   * rowParams.write() over the model, so no parallel single-line formatter stays.
    */
   private persistSingleImage(): void {
     if (!this.editorView) return;
     const img = this.group.images[0];
     if (!img) return;
-    const widthPx = Math.max(1, Math.round(img.flexGrow * 100));
-    const sFlag: 0 | 1 = isSingleImageManual(img.scale) ? 1 : 0;
+    const widthPx = img.display.kind === "single-manual"
+      ? img.display.widthPx
+      : (this.innerWidget?.getSingleWidthPx() ?? 1);
+    const manual = img.display.kind === "single-manual";
     const lineNum = img.line + 1; // 1-indexed
     const doc = this.editorView.state.doc;
     if (lineNum < 1 || lineNum > doc.lines) return;
@@ -807,39 +842,39 @@ class StaticImageRowWidget extends WidgetType {
     // Anti-resurrection: skip if a structural move relocated this image and the
     // cached line no longer references it.
     if (!lineObj.text.includes(img.fileName)) return;
-    const newText = formatSingleImageLine(lineObj.text, widthPx, sFlag, img.alignment ?? this.options.alignment);
+    const align = img.alignment ?? this.options.alignment;
+    const newText = writeRowImage(
+      { ...img, alignment: align },
+      manual ? {} : { followWidthPx: widthPx }
+    );
     if (newText === lineObj.text) return;
     this.editorView.dispatch({
       changes: { from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText },
     });
-    log.debug("Single-image persist", { line: img.line, widthPx, sFlag, alignment: img.alignment ?? this.options.alignment });
+    log.debug("Single-image persist", {
+      line: img.line, widthPx, sFlag: manual ? 1 : 0, alignment: align,
+    });
   }
 }
 
-/** Replace or remove the |width and |scale parameters in an image embed line. */
-export function updateImageLineWidth(raw: string, flexGrow: number, scale?: number | null, alignment?: "left" | "center" | "right"): string {
-  const widthValue = Math.round(flexGrow * 100);
-  // Strip everything between file extension and ]] (handles |width, |WxH, |width|WxH)
-  let out = stripEmbedParams(raw);
-  // Build the new parameter string
-  const params: string[] = [];
-  if (alignment) {
-    params.push(alignment);
-  }
-  if (widthValue !== 100) {
-    params.push(String(widthValue));
-  }
-  // Clamp to 1 — auto-backfill may compute slightly >1 from sub-pixel rendering
-  const safeScale = (scale != null && scale > 0) ? Math.min(1, scale) : null;
-  if (safeScale != null) {
-    const scaleValue = Math.round(safeScale * 100);
-    if (scaleValue > 0 && scaleValue <= 100) {
-      if (!params.some(p => /^\d+$/.test(p))) params.push("100"); // need a placeholder for flexGrow when scale is present
-      params.push(String(scaleValue));
-    }
-  }
-  if (params.length === 0) return out; // no params → omit |
-  return out.replace(/\]\]/, `|${params.join("|")}]]`);
+/** Serialise a flex-grow + scale + alignment onto a raw multi-row embed line.
+ *  Cross-row merge rewrites lines read straight from the doc (not through a
+ *  RowGroup), so the model is synthesised for write().  Replaces the deleted
+ *  updateImageLineWidth (its multi grammar now lives solely in rowParams.write). */
+function buildMultiLine(
+  raw: string,
+  grow: number,
+  scale: number | null,
+  alignment: Alignment | undefined
+): string {
+  return writeRowImage({
+    line: 0,
+    raw,
+    fileName: "",
+    alignment,
+    hasSizing: true,
+    display: { kind: "multi", share: grow, fill: scale },
+  });
 }
 
 /**
@@ -854,18 +889,20 @@ export function resetSingleImageManualFlags(
   extensions: string
 ): void {
   const doc = view.state.doc;
-  const groups = detectImageGroups(doc.toString(), maxImagesPerRow, extensions);
+  const groups = detectRowGroups(doc.toString(), maxImagesPerRow, extensions);
   const changes: Array<{ from: number; to: number; insert: string }> = [];
   for (const g of groups) {
-    if (g.images.length !== 1) continue;
-    normalizeSingleImageParams(g);
+    if (g.kind !== "single") continue;
     const img = g.images[0];
-    if (!isSingleImageManual(img.scale)) continue;
+    if (img.display.kind !== "single-manual") continue;
     const lineNum = img.line + 1;
     if (lineNum < 1 || lineNum > doc.lines) continue;
     const lineObj = doc.line(lineNum);
-    const W = img.explicitWidth ?? Math.round(img.flexGrow * 100);
-    const newText = formatSingleImageLine(lineObj.text, W, 0, img.alignment);
+    // Follow rows keep the manual pixel width (now setting-driven) as their seed.
+    const newText = writeRowImage(
+      { ...img, display: { kind: "single-follow" }, hasSizing: true },
+      { followWidthPx: img.display.widthPx }
+    );
     if (newText !== lineObj.text) {
       changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText });
     }
@@ -887,7 +924,7 @@ export function resetImageAlignmentFlags(
   defaultAlignment: "left" | "center" | "right"
 ): void {
   const doc = view.state.doc;
-  const groups = detectImageGroups(doc.toString(), maxImagesPerRow, extensions);
+  const groups = detectRowGroups(doc.toString(), maxImagesPerRow, extensions);
   const changes: Array<{ from: number; to: number; insert: string }> = [];
   for (const g of groups) {
     for (const img of g.images) {
@@ -938,13 +975,13 @@ function buildDecorations(
 
     const options = baseOptions;
 
-    const groups = detectImageGroups(
+    const groups = detectRowGroups(
       doc,
       settings.maxImagesPerRow,
       settings.imageExtensions
     );
-    // Re-map single-image `|S|W` params to the internal flexGrow/scale convention.
-    for (const g of groups) normalizeSingleImageParams(g);
+    // detectRowGroups types every row up front: multi members parse |W|S and
+    // single rows parse their own |S|W grammar, so no post-hoc remap pass needed.
 
     log.debug("LivePreview buildDecorations", {
       groupCount: groups.length,

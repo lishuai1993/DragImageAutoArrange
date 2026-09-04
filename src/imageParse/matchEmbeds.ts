@@ -1,13 +1,12 @@
-import { ImageEmbed } from "./imageDetector";
-
 // ── Embed ↔ parsed-param matching (pure, unit-tested) ────────────────
 // Kept free of DOM/Obsidian dependencies so CI can guard the invariants
 // that readingMode.ts relies on. Callers pass plain filenames + parsed
-// records; this module owns the matching policy and its integrity check.
+// records (any object carrying a fileName — today RowImage); this module owns
+// the matching policy and its integrity check, touching nothing but fileName.
 
-export interface MatchResult {
+export interface MatchResult<T extends { fileName: string }> {
   /** Aligned 1:1 with the input embedFileNames array. null = no match. */
-  matches: (ImageEmbed | null)[];
+  matches: (T | null)[];
   /** Count of embeds whose known filename disagrees with the assigned parse. */
   mismatches: number;
   /** True when section-scoped matching failed its integrity check and the
@@ -18,9 +17,9 @@ export interface MatchResult {
 /** Count embeds whose (non-empty) filename disagrees with their assigned
  *  parse. Null filenames are unverifiable (img src not yet readable) and are
  *  never counted as a mismatch. */
-function countMismatches(
+function countMismatches<T extends { fileName: string }>(
   embedFileNames: (string | null)[],
-  matches: (ImageEmbed | null)[]
+  matches: (T | null)[]
 ): number {
   let n = 0;
   for (let i = 0; i < embedFileNames.length; i++) {
@@ -36,11 +35,11 @@ function countMismatches(
  *  - Known filename: seek forward from the cursor for the next candidate with
  *    that filename (position disambiguates duplicates, source order preserved).
  *  - Unknown filename (null): take the candidate at the positional cursor. */
-function matchWithin(
+function matchWithin<T extends { fileName: string }>(
   embedFileNames: (string | null)[],
-  candidates: ImageEmbed[]
-): (ImageEmbed | null)[] {
-  const out: (ImageEmbed | null)[] = [];
+  candidates: T[]
+): (T | null)[] {
+  const out: (T | null)[] = [];
   let cursor = 0;
   for (const fn of embedFileNames) {
     if (fn) {
@@ -62,11 +61,11 @@ function matchWithin(
 
 /** Filename-only global match, ignoring source line/position — the degrade
  *  path when section-scoped matching fails its integrity check. */
-function matchByFilenameOnly(
+function matchByFilenameOnly<T extends { fileName: string }>(
   embedFileNames: (string | null)[],
-  allParsed: ImageEmbed[]
-): (ImageEmbed | null)[] {
-  const out: (ImageEmbed | null)[] = [];
+  allParsed: T[]
+): (T | null)[] {
+  const out: (T | null)[] = [];
   let cursor = 0;
   for (const fn of embedFileNames) {
     if (!fn) {
@@ -91,11 +90,11 @@ function matchByFilenameOnly(
  *  scoped to this section's source line range). If an integrity check detects
  *  any filename mismatch, it degrades to a filename-only global match against
  *  `allParsed` and flags `usedFallback` so the caller can surface a warning. */
-export function matchEmbedsToParsed(
+export function matchEmbedsToParsed<T extends { fileName: string }>(
   embedFileNames: (string | null)[],
-  candidates: ImageEmbed[],
-  allParsed: ImageEmbed[]
-): MatchResult {
+  candidates: T[],
+  allParsed: T[]
+): MatchResult<T> {
   const primary = matchWithin(embedFileNames, candidates);
   const mismatches = countMismatches(embedFileNames, primary);
   if (mismatches === 0) {

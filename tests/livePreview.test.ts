@@ -22,7 +22,7 @@ vi.mock('@codemirror/view', () => ({
   EditorView: {},
 }));
 
-import { normalizeRaw, updateImageLineWidth } from '../src/imageRender/livePreview';
+import { normalizeRaw } from '../src/imageRender/livePreview';
 
 // ── normalizeRaw ──
 describe('normalizeRaw', () => {
@@ -56,32 +56,5 @@ describe('normalizeRaw', () => {
     const result = normalizeRaw('![[file|name.png|200]]');
     // The first | before ]] is at "name.png", stripping to "![[file]]"
     expect(result).toBe('![[file]]');
-  });
-});
-
-// ── updateImageLineWidth ──
-describe('updateImageLineWidth', () => {
-  it('removes width when flexGrow is 1.0 (default)', () => {
-    expect(updateImageLineWidth('![[img.png|200]]', 1.0)).toBe('![[img.png]]');
-  });
-
-  it('adds width for non-default flexGrow', () => {
-    expect(updateImageLineWidth('![[img.png]]', 2.5)).toBe('![[img.png|250]]');
-  });
-
-  it('replaces existing width with new flexGrow', () => {
-    expect(updateImageLineWidth('![[img.png|200]]', 3.0)).toBe('![[img.png|300]]');
-  });
-
-  it('keeps line unchanged for default flexGrow on line without width', () => {
-    expect(updateImageLineWidth('![[img.png]]', 1.0)).toBe('![[img.png]]');
-  });
-
-  it('replaces dimensions param with width only', () => {
-    expect(updateImageLineWidth('![[img.png|800x600]]', 1.5)).toBe('![[img.png|150]]');
-  });
-
-  it('strips param for flexGrow exactly 1.0', () => {
-    expect(updateImageLineWidth('![[img.png|150]]', 1.0)).toBe('![[img.png]]');
   });
 });

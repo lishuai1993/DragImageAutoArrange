@@ -1,11 +1,11 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode } from "../constants";
-import { ImageGroup, ImageEmbed, ImageMeta } from "../imageParse/imageDetector";
+import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
+import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
 import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
 import { resolveImageSrc, alignmentToCSS } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
-import { isSingleImageManual, singleImageScaleFor, formatSingleImageLine } from "../imageParse/singleImageParams";
 import { parseEmbedParams } from "../imageParse/embedRaw";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { attachDiaImageMarkers } from "./imageMarkers";
@@ -183,7 +183,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private edgeLeft: HTMLElement | null = null;
   private edgeRight: HTMLElement | null = null;
 
-  private group: ImageGroup;
+  private group: RowGroup;
   private options: ImageRowOptions;
   private reorderCallback: ReorderCallback | null = null;
   private resizeCallback: ResizeCallback | null = null;
@@ -195,6 +195,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private loadedMetas: Map<number, ImageMeta> = new Map();
   private rowHeight: number;
   private flexGrows: number[] = [];
+  /** A single (non-manual) row's last materialised pixel width, kept because the
+   *  single-follow model carries no width (it follows the setting) yet the
+   *  persisted `|0|W` still needs the derived width that layoutSingleImage chose. */
+  private singleWidthPx = 0;
   onLayoutChange: (() => void) | null = null;
   /** Per-image indices whose scale ratios have been updated and need persistence. */
   _scaleDirtyImages: Set<number> = new Set();
@@ -203,7 +207,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private resizeController: ResizeHandleController;
   private dragReorderController: DragReorderController;
 
-  constructor(group: ImageGroup, options: ImageRowOptions) {
+  constructor(group: RowGroup, options: ImageRowOptions) {
     this.group = group;
     this.options = sanitizeOptions(options);
     this.rowHeight = this.options.defaultRowHeight;
@@ -241,6 +245,31 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   getSnapSensitivity(): number {
     return this.options.snapSensitivity;
   }
+  getSingleWidthPx(): number {
+    const d = this.group.images[0]?.display;
+    return d && d.kind === "single-manual" ? d.widthPx : this.singleWidthPx;
+  }
+  /** This group is a single-image row (model declares the kind). */
+  private isSingleRow(): boolean {
+    return this.group.kind === "single";
+  }
+  /** The manual flag of a single row, by type not sentinel. */
+  private isSingleManual(): boolean {
+    const d = this.group.images[0]?.display;
+    return this.isSingleRow() && d?.kind === "single-manual";
+  }
+  /** A member's live flex share: multi rows carry it in display.share; a single
+   *  manual row maps its pixel width back to the flex-grammar value (W/100) the
+   *  DOM used to seed. */
+  private shareOf(img: RowImage): number {
+    return img.display.kind === "multi"
+      ? img.display.share
+      : (img.display.kind === "single-manual" ? img.display.widthPx / 100 : 1);
+  }
+  /** A member's fill ratio (null = default).  Single rows have no fill. */
+  private fillOf(img: RowImage): number | null {
+    return img.display.kind === "multi" ? img.display.fill : null;
+  }
   getImageCount(): number {
     return this.group.images.length;
   }
@@ -266,19 +295,21 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.persistCallback?.();
   }
   setImageScale(index: number, scale: number): void {
-    this.group.images[index].scale = clampScale(scale);
+    const img = this.group.images[index];
+    if (img && img.display.kind === "multi") img.display.fill = clampScale(scale);
     this._scaleDirtyImages.add(index);
   }
   /**
-   * Persist a single image's manually-resized width as `|W|1` (S=1 = manual).
-   * Width lives on the data model (item CSS flex-grow is clobbered by "0 0 auto").
+   * Persist a single image's manually-resized width as `|1|W` (S=1 = manual).
+   * Width lives on the display model (item CSS flex-grow is clobbered by "0 0 auto").
    */
   setSingleImageWidth(widthPx: number): void {
     const img = this.group.images[0];
     if (!img) return;
-    img.flexGrow = Math.max(0.1, widthPx / 100);
-    img.scale = singleImageScaleFor(true);
-    img.hasExplicitWidth = true;
+    const w = Math.max(1, Math.round(widthPx));
+    img.display = { kind: "single-manual", widthPx: w };
+    img.hasSizing = true;
+    this.singleWidthPx = w;
     this.persistCallback?.();
   }
 
@@ -299,7 +330,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (!(natural > 0)) return;
 
     const target = Math.round((natural * pct) / 100);
-    if (this.group.images.length === 1) {
+    if (this.isSingleRow()) {
       this.setSingleImageWidth(target);
       return;
     }
@@ -324,8 +355,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const grows = computeFlexGrowsFromWidths(widthsPx);
     for (let i = 0; i < n; i++) {
       const g = grows[i] ?? 1;
-      this.group.images[i].flexGrow = g;
-      this.group.images[i].hasExplicitWidth = true;
+      const img = this.group.images[i];
+      if (img.display.kind === "multi") img.display.share = g;
+      img.hasSizing = true;
       const el = this.itemEls[i];
       if (el) el.style.flexGrow = String(g);
     }
@@ -337,9 +369,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
   /** Return a manual-width single row to setting-driven (`S=1 → S=0`). */
   resetSingleManualWidth(): void {
-    if (this.group.images.length !== 1) return;
+    if (!this.isSingleRow()) return;
     const img = this.group.images[0];
-    img.scale = singleImageScaleFor(false);
+    img.display = { kind: "single-follow" };
     this.persistCallback?.();
   }
 
@@ -370,8 +402,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
   getCurrentFlexGrows(): number[] {
     // Single images store width in the data model (item flex-grow is "0 0 auto").
-    if (this.group.images.length === 1) {
-      return [this.group.images[0].flexGrow];
+    if (this.isSingleRow()) {
+      return [this.getSingleWidthPx() / 100];
     }
     return this.itemEls.map((el) => parseFloat(el.style.flexGrow || "1"));
   }
@@ -428,7 +460,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // positions the sole item (which has flex:0 0 auto), so per-image
       // alignment must be used.  Multi-image rows fill the container via
       // flex-grow; the global setting is a sensible fallback there.
-      const singleAlign = this.group.images.length === 1 ? this.group.images[0]?.alignment : undefined;
+      const singleAlign = this.isSingleRow() ? this.group.images[0]?.alignment : undefined;
       const containerAlign = singleAlign ?? this.options.alignment;
       const globalCSS = alignmentToCSS(containerAlign);
       this.container.style.setProperty("justify-content", globalCSS.justifyContent, "important");
@@ -605,7 +637,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Set single-image base sizing immediately so it never appears at a wrong
     // size before the image loads and applyLayout computes the real width.
-    if (images.length === 1) {
+    if (this.isSingleRow()) {
       this.imageEls[0].style.width = "auto";
       this.imageEls[0].style.height = `${this.options.defaultRowHeight}px`;
       // Cap width to the container so a cached (wide-editor) height restored on
@@ -724,11 +756,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     return this.container;
   }
 
-  private buildImageItem(image: ImageEmbed, index: number): HTMLElement {
+  private buildImageItem(image: RowImage, index: number): HTMLElement {
     const item = document.createElement("div");
     item.className = CLASSES.imageItem;
-    item.style.flex = `${image.flexGrow} 1 0%`;
-    item.style.flexGrow = `${image.flexGrow}`;
+    const seedGrow = this.shareOf(image);
+    item.style.flex = `${seedGrow} 1 0%`;
+    item.style.flexGrow = `${seedGrow}`;
     item.style.position = "relative";
     item.style.overflow = "hidden";
     item.style.minWidth = "50px";
@@ -809,8 +842,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       resizeEnabled: this.options.enableResize,
       naturalWidth: () =>
         this.loadedMetas.get(index)?.naturalWidth ?? img.naturalWidth ?? 0,
-      manualSingle: () =>
-        this.group.images.length === 1 && isSingleImageManual(this.group.images[0].scale),
+      manualSingle: () => this.isSingleManual(),
       onResize: (pct) => this.resizeToNaturalPercent(index, pct),
       resetSingleManual: () => this.resetSingleManualWidth(),
     });
@@ -1082,7 +1114,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const meta = this.loadedMetas.get(0);
     if (!meta || meta.naturalWidth <= 0 || meta.naturalHeight <= 0) return this.rowHeight;
     const aspect = meta.naturalWidth / meta.naturalHeight;
-    const manual = isSingleImageManual(img.scale);
+    const manual = this.isSingleManual();
 
     // Intended width — deliberately NOT clamped to the (possibly transient)
     // container width. Persisting this instead of the clamped render width keeps
@@ -1091,7 +1123,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // (the scroll flicker).
     let intendedWidth: number;
     if (manual) {
-      intendedWidth = Math.max(1, Math.round(img.flexGrow * 100));
+      intendedWidth = img.display.kind === "single-manual" ? img.display.widthPx : 1;
     } else if (this.options.singleImageSizeMode === "fixed") {
       intendedWidth = Math.max(SINGLE_IMAGE_MIN_WIDTH, Math.round(this.options.singleImageWidth));
     } else {
@@ -1126,11 +1158,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Update the data model and materialize `|S|W` into markdown when it drifts.
     // Persist the container-independent intended width so it stays stable.
-    const sFlag: 0 | 1 = manual ? 1 : 0;
-    img.flexGrow = Math.max(0.1, intendedWidth / 100);
-    img.scale = singleImageScaleFor(manual);
-    img.hasExplicitWidth = true;
-    const target = formatSingleImageLine(img.raw, intendedWidth, sFlag, img.alignment ?? this.options.alignment);
+    this.singleWidthPx = intendedWidth;
+    img.display = manual
+      ? { kind: "single-manual", widthPx: intendedWidth }
+      : { kind: "single-follow" };
+    img.hasSizing = true;
+    const align = img.alignment ?? this.options.alignment;
+    const target = writeRowImage({ ...img, alignment: align }, { followWidthPx: intendedWidth });
     if (target !== img.raw) {
       img.raw = target;
       requestAnimationFrame(() => this.persistCallback?.());
@@ -1163,7 +1197,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
 
     const allLoaded = metas.every((m) => m.naturalWidth > 0);
-    log.debug("ImageRowWidget applyLayout", { allLoaded, hasExplicitWidth: this.group.images.some((img) => img.hasExplicitWidth), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
+    log.debug("ImageRowWidget applyLayout", { allLoaded, hasSizing: this.group.images.some((img) => img.hasSizing), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
 
     if (allLoaded) {
       // ── Restore preserved multi-image dimensions first (before any
@@ -1185,8 +1219,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           // recalculateRowHeight is authoritative.  Preserved pixel sizes
           // may be stale (e.g. saved by an older plugin version), so skip
           // them and let the scale-based layout recompute correct heights.
-          const hasScale = this.group.images.some(img => img.scale != null);
-          if (!hasScale) {
+          const hasFill = this.group.images.some(img => this.fillOf(img) != null);
+          if (!hasFill) {
           // Apply saved inline style values directly — no recomputation
           // Use item height as the authoritative height for both item and
           // image to prevent mismatch (item.style.height may have been
@@ -1199,7 +1233,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           for (let i = 0; i < this.itemEls.length && i < preserved.items.length; i++) {
             this.itemEls[i].style.flexGrow = preserved.items[i].flexGrow;
             this.itemEls[i].style.height = preserved.items[i].styleH;
-            this.group.images[i].flexGrow = parseFloat(preserved.items[i].flexGrow) || 1;
+            const g = parseFloat(preserved.items[i].flexGrow) || 1;
+            const m = this.group.images[i];
+            if (m.display.kind === "multi") m.display.share = g;
           }
           this.container.style.height = preserved.containerStyleH;
           this.rowHeight = parseFloat(preserved.containerStyleH) || this.options.defaultRowHeight;
@@ -1228,7 +1264,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
       // When flex-grows were loaded from markdown |width, use the current
       // distribution to calculate max height (avoids overwriting user adjustments).
-      if (this.group.images.some((img) => img.hasExplicitWidth)) {
+      if (this.group.images.some((img) => img.hasSizing)) {
         this.recalculateRowHeight();
         if (this.backfillMissingParams()) {
           // Incomplete params were cleared — re-run to auto-fill flexGrow
@@ -1245,12 +1281,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         return;
       }
       // ── Single-image row ──
-      if (this.group.images.length === 1 && this.imageEls[0] && this.itemEls[0]) {
+      if (this.isSingleRow() && this.imageEls[0] && this.itemEls[0]) {
         const imageH = this.layoutSingleImage(containerWidth);
         log.debug("ImageRowWidget layout applied (single)", {
           containerWidth, imageH,
           alignment: this.options.alignment,
-          manual: isSingleImageManual(this.group.images[0].scale),
+          manual: this.isSingleManual(),
         });
         if (this.container.style.height !== preLayoutContainerH) {
           this.onLayoutChange?.();
@@ -1278,13 +1314,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.options.gap);
       for (let i = 0; i < this.itemEls.length && i < grows.length; i++) {
         this.itemEls[i].style.flexGrow = String(grows[i]);
-        this.group.images[i].flexGrow = grows[i];
+        const gImg = this.group.images[i];
+        if (gImg.display.kind === "multi") gImg.display.share = grows[i];
       }
       // Auto-backfill: images without explicit |width, |scale, or |alignment
       // in markdown get their computed params persisted.
-      if (this.group.images.some((img) => !img.hasExplicitWidth || img.scale == null || img.alignment == null)) {
+      if (this.group.images.some((img) => {
+        const fill = img.display.kind === "multi" ? img.display.fill : null;
+        return !img.hasSizing || fill == null || img.alignment == null;
+      })) {
         for (let i = 0; i < this.group.images.length; i++) {
-          this.group.images[i].hasExplicitWidth = true;
+          this.group.images[i].hasSizing = true;
           this._scaleDirtyImages.add(i);
           if (this.group.images[i].alignment == null) {
             this.group.images[i].alignment = this.options.alignment;
@@ -1294,11 +1334,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         // Compute scale ratios after layout settles (RAF so DOM is painted).
         requestAnimationFrame(() => {
           for (let i = 0; i < this.group.images.length; i++) {
-            if (this.group.images[i].scale != null) continue;
+            const mi = this.group.images[i];
+            if (mi.display.kind !== "multi" || mi.display.fill != null) continue;
             const cr = this.getImageContentRect(i);
             const ir = this.itemEls[i]?.getBoundingClientRect();
             if (cr && cr.width > 0 && ir && ir.width > 0) {
-              this.group.images[i].scale = clampScale(cr.width / ir.width);
+              mi.display.fill = clampScale(cr.width / ir.width);
             }
           }
           this.persistCallback?.();
@@ -1393,21 +1434,16 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       }
 
       if (n === 1) {
-        // Single-image: S flag → default auto (S=0)
-        if (img.scale == null) {
-          img.scale = singleImageScaleFor(false);
-          changed = true;
+        // Single-image: S flag → setting-driven follow. layoutSingleImage
+        // materialises the |S|W tail and derived width; nothing left to measure.
+        if (img.display.kind !== "single-manual") {
+          if (img.display.kind !== "single-follow") img.display = { kind: "single-follow" };
+          if (!img.hasSizing) {
+            img.hasSizing = true;
+            changed = true;
+          }
         }
-        // Single-image: W → from rendered width or fallback
-        if (!img.hasExplicitWidth && this.imageEls[i]) {
-          const elW = this.imageEls[i].getBoundingClientRect().width;
-          const w = (elW && elW > 0) ? Math.round(elW) : this.options.singleImageWidth;
-          img.explicitWidth = w;
-          img.hasExplicitWidth = true;
-          img.flexGrow = Math.max(0.1, w / 100);
-          changed = true;
-        }
-      } else {
+      } else if (img.display.kind === "multi") {
         // Multi-image: detect incomplete params by counting | components
         const parts = (parseEmbedParams(img.raw) ?? []).filter(p => p !== "");
         // Expected: alignment + flexGrow + scale = 3 parts (or 2 without alignment)
@@ -1416,31 +1452,30 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         const incomplete = parts.length < expectedParts;
 
         if (incomplete) {
-          // Params are incomplete — the single numeric was double-assigned by
-          // parseImageLine, so the parsed flexGrow/scale are unreliable.
-          // Clear both and let recalculateRowHeight auto-fill from natural AR.
-          img.hasExplicitWidth = false;
-          img.explicitWidth = null;
-          img.scale = null;
-          img.flexGrow = 1;
+          // Params are incomplete — one numeric cannot unambiguously encode both
+          // share and fill, so the parsed values are unreliable.  Clear both and
+          // let recalculateRowHeight auto-fill from natural aspect ratios.
+          img.display.share = 1;
+          img.display.fill = null;
+          img.hasSizing = false;
           needRelayout = true;
           changed = true;
         } else {
           // Multi-image: flexGrow → from rendered itemEls
-          if (!img.hasExplicitWidth && this.itemEls[i]) {
-            const fg = parseFloat(this.itemEls[i].style.flexGrow || String(img.flexGrow));
-            img.flexGrow = clampFlexGrow(fg);
-            img.hasExplicitWidth = true;
+          if (!img.hasSizing && this.itemEls[i]) {
+            const fg = parseFloat(this.itemEls[i].style.flexGrow || String(img.display.share));
+            img.display.share = clampFlexGrow(fg);
+            img.hasSizing = true;
             changed = true;
           }
           // Multi-image: scale → from rendered content rect
-          if (img.scale == null && this.itemEls[i]) {
+          if (img.display.fill == null && this.itemEls[i]) {
             const cr = this.getImageContentRect(i);
             const ir = this.itemEls[i].getBoundingClientRect();
             if (cr && ir && cr.width > 0 && ir.width > 0) {
-              img.scale = clampScale(cr.width / ir.width);
+              img.display.fill = clampScale(cr.width / ir.width);
             } else {
-              img.scale = 1;
+              img.display.fill = 1;
             }
             changed = true;
           }
@@ -1564,13 +1599,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Compute a proportional flexGrow from natural aspect ratio so the image
     // renders at the same height as the rest of the row.
     if (n > 1) {
-      const someExplicit = this.group.images.some(img => img.hasExplicitWidth);
-      const someMissing = this.group.images.some(img => !img.hasExplicitWidth);
+      const someExplicit = this.group.images.some(img => img.hasSizing);
+      const someMissing = this.group.images.some(img => !img.hasSizing);
       if (someExplicit && someMissing && clamped > 0) {
         let explicitSum = 0;
         let missingArSum = 0;
         for (let i = 0; i < n; i++) {
-          if (this.group.images[i].hasExplicitWidth) {
+          if (this.group.images[i].hasSizing) {
             explicitSum += grows[i];
           } else {
             const m = metas[i];
@@ -1582,12 +1617,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         if (denom > 0 && missingArSum > 0) {
           const k = clamped * explicitSum / denom;
           for (let i = 0; i < n; i++) {
-            if (!this.group.images[i].hasExplicitWidth) {
+            if (!this.group.images[i].hasSizing) {
               const ar = metas[i].naturalWidth / metas[i].naturalHeight;
               grows[i] = k * ar;
               this.itemEls[i].style.flexGrow = String(grows[i]);
               this.itemEls[i].style.flex = `${grows[i]} 1 0%`;
-              this.group.images[i].flexGrow = grows[i];
+              const mi = this.group.images[i];
+              if (mi.display.kind === "multi") mi.display.share = grows[i];
             }
           }
           log.debug("ImageRowWidget autoFillMissingFlexGrow", {
@@ -1600,19 +1636,20 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         }
       }
       // Auto-backfill: persist newly-computed flexGrows and scales.
-      if (someMissing || this.group.images.some(img => img.scale == null)) {
+      if (someMissing || this.group.images.some(img => this.fillOf(img) == null)) {
         for (let i = 0; i < n; i++) {
-          this.group.images[i].hasExplicitWidth = true;
+          this.group.images[i].hasSizing = true;
           this._scaleDirtyImages.add(i);
         }
         // Compute scale ratios after layout settles.
         requestAnimationFrame(() => {
           for (let i = 0; i < n; i++) {
-            if (this.group.images[i].scale != null) continue;
+            const mi = this.group.images[i];
+            if (mi.display.kind !== "multi" || mi.display.fill != null) continue;
             const cr = this.getImageContentRect(i);
             const ir = this.itemEls[i]?.getBoundingClientRect();
             if (cr && cr.width > 0 && ir && ir.width > 0) {
-              this.group.images[i].scale = cr.width / ir.width;
+              mi.display.fill = clampScale(cr.width / ir.width);
             }
           }
           this.persistCallback?.();
@@ -1633,11 +1670,11 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         if (ih > maxH) maxH = ih;
       }
       if (maxH > 0) this.container.style.height = `${maxH}px`;
-    } else if (n > 1 && this.group.images.some((img) => img.scale != null)) {
-      // Restore per-image heights from scale ratios persisted in markdown.
-      // scale = imageContentWidth / itemWidth, a dimensionless ratio that
+    } else if (n > 1 && this.group.images.some((img) => this.fillOf(img) != null)) {
+      // Restore per-image heights from fill ratios persisted in markdown.
+      // fill = imageContentWidth / itemWidth, a dimensionless ratio that
       // survives container-width changes across sessions.
-      const scales = this.group.images.map((img) => img.scale);
+      const scales = this.group.images.map((img) => this.fillOf(img));
       const { heights, maxH } = computeScaleBasedHeights(
         grows, metas, scales, containerWidth, this.options.gap, this.options.defaultRowHeight
       );
@@ -1649,7 +1686,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       }
       this.container.style.height = `${maxH}px`;
       log.debug("ImageRowWidget scale-based heights restored", {
-        scales: this.group.images.map((img) => Math.round((img.scale ?? 0) * 100)),
+        scales: this.group.images.map((img) => Math.round((this.fillOf(img) ?? 0) * 100)),
         heights: this.imageEls.map((el) => el.style.height),
         containerH: `${maxH}px`,
       });
@@ -1740,7 +1777,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           objectPosition: computed.objectPosition,
         },
         natural: { w: img.naturalWidth, h: img.naturalHeight },
-        scale: this.group.images[i]?.scale ?? null,
+        fill: this.group.images[i] ? this.fillOf(this.group.images[i]) : null,
       };
     });
     log.info("RENDER_COMPARE " + mode, {
@@ -1787,16 +1824,18 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     rightItem.style.flexGrow = String(right);
 
     // Sync in-memory state before persisting
-    this.group.images[leftIndex].flexGrow = clampFlexGrow(left);
-    this.group.images[leftIndex + 1].flexGrow = clampFlexGrow(right);
+    const leftImg = this.group.images[leftIndex];
+    const rightImg = this.group.images[leftIndex + 1];
+    if (leftImg.display.kind === "multi") leftImg.display.share = clampFlexGrow(left);
+    if (rightImg.display.kind === "multi") rightImg.display.share = clampFlexGrow(right);
 
-    // Set scales to 1 so images fill their items, and recalculateRowHeight's
-    // scale branch uses the else-clause (clamped uniform height) for these images.
-    // Using 1 (not null) prevents auto-backfill from re-computing scales.
-    this.group.images[leftIndex].scale = 1;
-    this.group.images[leftIndex + 1].scale = 1;
-    this.group.images[leftIndex].hasExplicitWidth = true;
-    this.group.images[leftIndex + 1].hasExplicitWidth = true;
+    // Set fills to 1 so images fill their items, and recalculateRowHeight's
+    // fill branch uses the else-clause (clamped uniform height) for these images.
+    // Using 1 (not null) prevents auto-backfill from re-computing fills.
+    if (leftImg.display.kind === "multi") leftImg.display.fill = 1;
+    if (rightImg.display.kind === "multi") rightImg.display.fill = 1;
+    leftImg.hasSizing = true;
+    rightImg.hasSizing = true;
     this._scaleDirtyImages.add(leftIndex);
     this._scaleDirtyImages.add(leftIndex + 1);
 
@@ -1882,12 +1921,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     for (let i = 0; i < n; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
-      this.group.images[i].flexGrow = grows[i];
-      // Set scale to 1 so images fill their items, and recalculateRowHeight's
-      // scale branch uses the else-clause (clamped uniform height).  Using 1
-      // (not null) prevents auto-backfill from re-computing scales.
-      this.group.images[i].scale = 1;
-      this.group.images[i].hasExplicitWidth = true;
+      const mi = this.group.images[i];
+      if (mi.display.kind === "multi") mi.display.share = grows[i];
+      // Set fill to 1 so images fill their items, and recalculateRowHeight's
+      // fill branch uses the else-clause (clamped uniform height).  Using 1
+      // (not null) prevents auto-backfill from re-computing fills.
+      if (mi.display.kind === "multi") mi.display.fill = 1;
+      mi.hasSizing = true;
       this._scaleDirtyImages.add(i);
     }
 
@@ -1986,13 +2026,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // the initial "100%" default from build()), to avoid poisoning the
     // preserved map with pre-layout values when the widget is destroyed
     // before applyLayout could run (e.g. plugin starts in Reading Mode).
-    // Only save preserved sizes when the row has NO scale data.
-    // When scale ratios exist in markdown, per-image heights are derived
+    // Only save preserved sizes when the row has NO fill data.
+    // When fill ratios exist in markdown, per-image heights are derived
     // from them on next load — preserved pixel values would be stale.
-    const hasScale = this.group.images.some(img => img.scale != null);
+    const hasFill = this.group.images.some(img => this.fillOf(img) != null);
     if (this.group.images.length > 1 && this.imageEls.length > 0
         && this.itemEls.some((el) => el.style.height && el.style.height !== "100%")
-        && !hasScale) {
+        && !hasFill) {
       const data: MultiImageSizeData = {
         images: this.imageEls.map((img, i) => ({
           styleW: img.style.width,

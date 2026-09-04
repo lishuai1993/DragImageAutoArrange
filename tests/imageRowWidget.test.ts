@@ -20,27 +20,36 @@ vi.mock('obsidian', () => ({
 }));
 
 import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRender/imageRowWidget';
-import { ImageGroup, ImageEmbed } from '../src/imageParse/imageDetector';
+import type { RowGroup } from '../src/imageParse/imageDetector';
+import type { RowImage, RowKind } from '../src/imageParse/rowParams';
 import { setPendingTransform, clearPendingTransform, listPendingTransforms } from '../src/imageTransform/transformStore';
 
 // ── Test helpers ─────────────────────────────────────────────────────
 
-function makeImage(fileName: string, line: number, flexGrow: number, hasExplicitWidth = false): ImageEmbed {
+/** Build a typed RowImage.  Callers hand over the flex-grammar grow the widget
+ *  used to seed; hasExplicitWidth maps to the model's hasSizing flag. */
+function makeImage(fileName: string, line: number, flexGrow: number, hasExplicitWidth = false): RowImage {
   return {
     line,
     raw: hasExplicitWidth ? `![[${fileName}|${Math.round(flexGrow * 100)}]]` : `![[${fileName}]]`,
     fileName,
-    explicitWidth: hasExplicitWidth ? Math.round(flexGrow * 100) : null,
-    hasExplicitWidth,
-    flexGrow,
+    hasSizing: hasExplicitWidth,
+    display: { kind: 'multi', share: flexGrow, fill: null },
   };
 }
 
-function makeGroup(images: ImageEmbed[], lineStart = 17): ImageGroup {
+/** Build a RowGroup.  Kind follows the member count (mirrors detectRowGroups);
+ *  a lone member reads under single grammar, so its display is single-follow. */
+function makeGroup(images: RowImage[], lineStart = 17): RowGroup {
+  const kind: RowKind = images.length === 1 ? 'single' : 'multi';
+  const typed = kind === 'single'
+    ? images.map((img) => ({ ...img, display: { kind: 'single-follow' as const } }))
+    : images;
   return {
     lineStart,
-    lineEnd: lineStart + images.length,
-    images,
+    lineEnd: lineStart + typed.length,
+    kind,
+    images: typed,
   };
 }
 

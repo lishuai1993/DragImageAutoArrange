@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildImageRowIndex, toLine1, ImageRowIndex } from '../src/anchor/viewportAnchor';
-import { parseImageLine } from '../src/imageParse/imageDetector';
+import { detectRowGroups } from '../src/imageParse/imageDetector';
 import { buildImageLineRe } from '../src/constants';
 
 const EXTS = 'png,jpg,jpeg,gif,webp,svg,bmp,avif';
@@ -55,23 +55,19 @@ describe('buildImageRowIndex', () => {
     expect(buildImageRowIndex(['# Title', '', 'text'], RE)).toEqual([]);
   });
 
-  // CONTRACT: the 0-based line from parseImageLine, once passed through toLine1,
-  // must land inside the [startLine, endLine] of the row it belongs to. This is
-  // the exact off-by-one that silently froze RM anchoring; pin it in CI.
+  // CONTRACT: every RowImage.line (0-based, from detectRowGroups), once passed
+  // through toLine1, must land inside the [startLine, endLine] of the row it
+  // belongs to. This is the exact off-by-one that silently froze RM anchoring;
+  // pin it in CI.
   it('every parsed image (0-based) maps via toLine1 into its row range', () => {
     const rows = buildImageRowIndex(doc, RE);
     const inSomeRow = (line1: number) =>
       rows.some(r => line1 >= r.startLine && line1 <= r.endLine);
 
-    let parsedCount = 0;
-    doc.forEach((text, i) => {
-      const parsed = parseImageLine(text, i, RE);
-      if (!parsed) return;
-      parsedCount++;
-      const line1 = toLine1(parsed.line);
-      expect(parsed.line).toBe(i);            // parseImageLine keeps 0-based line
-      expect(inSomeRow(line1)).toBe(true);    // toLine1 lands in a row
-    });
-    expect(parsedCount).toBe(6); // a,b,c,d,e,f
+    const images = detectRowGroups(doc.join('\n'), 10, EXTS).flatMap(g => g.images);
+    expect(images.map(img => img.line)).toEqual([2, 3, 6, 7, 8, 10]); // a..f
+    for (const img of images) {
+      expect(inSomeRow(toLine1(img.line))).toBe(true); // toLine1 lands in a row
+    }
   });
 });
