@@ -18,7 +18,7 @@ import { setEditorDirty } from "./anchor/anchorStore";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { openUnifiedImageMenu } from "./pixelPerfect/unifiedContextMenu";
-import { setMenuScale } from "./pixelPerfect/menuUi";
+import { closeAllMenus, setMenuScale } from "./pixelPerfect/menuUi";
 import { createPixelPerfectFacade, type PixelPerfectFacade } from "./pixelPerfect/pixelPerfectHost";
 import { findMarkdownViewForElement } from "./vendor/pixelPerfectImage/utils/utils";
 import { logger } from "./logger";
@@ -133,7 +133,11 @@ export default class DragImageAutoArrangePlugin
     // Registered at document level in capture phase so it runs BEFORE any
     // other plugin's contextmenu handler. Routes every image inside a markdown
     // note to the unified menu; everything else keeps Obsidian's native menu.
-    document.addEventListener("contextmenu", (e) => {
+    // Registered via registerDomEvent so Obsidian detaches the handler on
+    // disable — otherwise a disable→enable toggle reload (the supported way to
+    // pick up a rebuilt main.js without restarting Obsidian) would stack a
+    // second capture handler and open the image menu twice per right-click.
+    this.registerDomEvent(document, "contextmenu", (e) => {
       const target = e.target as HTMLElement;
       if (!target?.tagName) return;
 
@@ -325,6 +329,9 @@ export default class DragImageAutoArrangePlugin
 
   async onunload(): Promise<void> {
     log.info("Plugin unloading");
+    // Drop any open menu and its transient document listeners so a disable→enable
+    // toggle reload leaves no leaked global handlers behind.
+    closeAllMenus();
     // Bake any orientation still pending so a note closed without a layout event
     // (window teardown, plugin disable) doesn't lose the user's rotation.
     await flushAllTransforms(this.app);
