@@ -212,42 +212,59 @@ function addCopyPathSubmenu(menu: DomMenu, app: App, facade: PixelPerfectFacade,
 }
 
 /**
- * Add the "resize to X% of the original width" presets (from the shared
- * `customResizeSizes` setting) for a DIA-managed image. Only percentage entries
- * make sense — an absolute px entry has no meaning for a weighted member — so px
- * entries are skipped. Writes route through the renderer's `__diaa_onResize`.
+ * "调整为原图宽度的... ▸" hover submenu for a DIA-managed image: one caret
+ * parent row that opens into the numeric percentage presets from the shared
+ * `customResizeSizes` setting. Only percentage entries make sense — an absolute
+ * px entry has no meaning for a row member — so px entries are skipped and each
+ * child shows the bare percentage (e.g. `25%`). Writes route through the
+ * renderer's `__diaa_onResize`.
  *
- * Gate (per user spec): the presets only act on a single-image row in Live
- * Preview.  They are greyed out for multi-member rows (divider drag is the resize
- * path there) and for Reading Mode's read-only surface.
+ * Gate (per user spec): the presets act on a single-image row in Live Preview
+ * only, so the parent greys out for multi-member rows (divider drag is the
+ * resize path there) and for Reading Mode's read-only surface.
  */
-function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): boolean {
+function addDiaResizeSizesSubmenu(
+    menu: DomMenu,
+    facade: PixelPerfectFacade,
+    img: HTMLImageElement,
+    modeDisabled: boolean
+): boolean {
     if (!diaResizeEnabled(img)) return false;
     const natural = diaNaturalWidth(img);
     const singleRow = diaIsSingleRow(img);
-    const sizes = facade.host.settings.customResizeSizes;
-    let added = false;
+    const amounts = facade.host.settings.customResizeSizes
+        .map(parseResizeSize)
+        .filter((parsed): parsed is NonNullable<typeof parsed> => parsed !== null && parsed.unit === '%')
+        .map(parsed => parsed.amount);
+    if (amounts.length === 0) return false;
 
-    for (const sizeStr of sizes) {
-        const parsed = parseResizeSize(sizeStr);
-        if (!parsed || parsed.unit !== '%') continue;
+    const parentRow = createMenuRowEl('调整为原图宽度的...', 'percent', true);
+    menu.appendRowEl(parentRow);
+    if (modeDisabled || !singleRow || natural <= 0) {
+        parentRow.classList.add('diaa-menu-item-disabled');
+        return true;
+    }
+
+    attachHoverSubmenu(parentRow, () => {
+        const sub = new DomMenu();
         const rectW = img.getBoundingClientRect().width;
         const shownPct = natural > 0 && rectW > 0 ? Math.round((rectW / natural) * 100) : null;
-        const disabled = modeDisabled || !singleRow || natural <= 0 || (shownPct !== null && shownPct === parsed.amount);
-        if (!added) {
-            menu.addSeparator();
-            added = true;
+        const resize = (img as any).__diaa_onResize as ((pct: number) => unknown) | undefined;
+        for (const amount of amounts) {
+            sub.addItem(item => {
+                if (shownPct !== null && shownPct === amount) item.setDisabled(true);
+                item.setTitle(`${amount}%`);
+                item.onClick(() => {
+                    if (typeof resize !== 'function') return;
+                    Promise.resolve()
+                        .then(() => resize(amount))
+                        .catch(() => new Notice(strings.notices.failedToResizeTo.replace('{size}', `${amount}%`)));
+                });
+            });
         }
-        facade.menuService.addMenuItem(
-            menu,
-            `调整为原图宽度的 ${parsed.amount}%`,
-            parsed.amount === 100 ? 'image' : 'percent',
-            async () => (img as any).__diaa_onResize(parsed.amount),
-            strings.notices.failedToResizeTo.replace('{size}', sizeStr),
-            disabled
-        );
-    }
-    return added;
+        return sub;
+    });
+    return true;
 }
 
 /**
@@ -260,7 +277,6 @@ function addDiaResetToSettingItem(menu: DomMenu, facade: PixelPerfectFacade, img
     if (typeof (img as any).__diaa_resetSingleManual !== 'function') return;
     const target = diaResetTargetWidth(img);
     const enabled = !modeDisabled && diaIsManualSingle(img) && target > 0;
-    menu.addSeparator();
     facade.menuService.addMenuItem(
         menu,
         `重置为设置宽度 ${target}`,
@@ -397,45 +413,55 @@ export async function openUnifiedImageMenu(
             ? facade.host.imageService.getCurrentImageWidth(resolved.activeFile, resolved.imgFile)
             : null;
 
-        // Top: filename/dimensions info first, then the DIA per-image alignment
-        // and rotate/flip actions clustered beneath it (alignment sits directly
-        // above the rotate/flip group).
+        // Group 1 — identity + clipboard at the very top: filename / dimensions
+        // info (setting-gated), then for DIA-managed images "copy image" and
+        // "copy local path". All image operations live in group 2, so the four of
+        // them stay in one contiguous block with a single divider above it.
         if (resolved && facade.host.settings.showFileInfo) {
             await facade.menuService.addDimensionsMenuItem(menu, img, resolved, currentWidth);
         }
-        if (managed) addAlignSubmenu(menu, img);
-        const hasTop = managed || (resolved !== null && facade.host.settings.showFileInfo);
+        let hadGroup1 = resolved !== null && facade.host.settings.showFileInfo;
+        if (resolved && managed) {
+            const svg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
+            if (!svg) {
+                addCopyImage(menu, facade, img);
+                hadGroup1 = true;
+            }
+            addCopyPathSubmenu(menu, app, facade, resolved.imgFile);
+            hadGroup1 = true;
+        }
 
-        // Middle: rotate / flip (P3). Editing is Live-Preview/Source only, so the
-        // group renders greyed-out in Reading Mode and for formats (svg/gif/avif)
-        // that cannot be re-encoded when the note closes.
+        // Editing is Live-Preview/Source only, so rotate / flip renders greyed-out
+        // in Reading Mode and for formats (svg/gif/avif) that cannot be re-encoded
+        // when the note closes.
         const transformDisabled =
             isReadingMode || (resolved !== null && isTransformFormatUnsupported(resolved.imgFile));
-        let transformAdded = false;
-        if (resolved) {
-            transformAdded = addTransformGroup(
+
+        if (managed) {
+            // Group 2 — the four image operations as one contiguous block with no
+            // internal separators: alignment → rotate / flip → resize preset →
+            // reset to the setting width.
+            if (hadGroup1) menu.addSeparator();
+            addAlignSubmenu(menu, img);
+            if (resolved) {
+                addTransformGroup(menu, { img, resolved, activeFile }, transformDisabled);
+                addDiaResizeSizesSubmenu(menu, facade, img, isReadingMode);
+                addDiaResetToSettingItem(menu, facade, img, isReadingMode);
+            }
+        } else if (resolved) {
+            // Non-DIA images: rotate / flip, then the PP resize items (their copy
+            // image / copy local path rows and dividers are self-contained) under
+            // a single divider.
+            const transformAdded = addTransformGroup(
                 menu,
                 { img, resolved, activeFile },
                 transformDisabled
             );
+            if (hadGroup1 || transformAdded) menu.addSeparator();
+            await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth, isReadingMode);
         }
-
-        // Bottom: PP actions — copy image/path always; size items only meaningful
-        // when an editor can persist them, so they grey out in Reading Mode too.
-        if (resolved) {
-            if (hasTop || transformAdded) menu.addSeparator();
-            const svg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
-            if (managed) {
-                if (!svg) addCopyImage(menu, facade, img);
-                addCopyPathSubmenu(menu, app, facade, resolved.imgFile);
-                addDiaManagedResizeSizes(menu, facade, img, isReadingMode);
-                addDiaResetToSettingItem(menu, facade, img, isReadingMode);
-            } else {
-                await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth, isReadingMode);
-            }
-            if (!Platform.isMobile) {
-                facade.menuService.addFileOperationMenuItems(menu, resolved.imgFile);
-            }
+        if (resolved && !Platform.isMobile) {
+            facade.menuService.addFileOperationMenuItems(menu, resolved.imgFile);
         }
     }
 

@@ -15,6 +15,7 @@
     "singleImageSizeMode": "fixed",
     "singleImageWidth": 400,
     "enableReadingModeContextMenu": true,
+    "enableReadingModeDoubleClickZoom": true,
     "menuScalePercent": 90
   },
   "preservedSizes": {},
