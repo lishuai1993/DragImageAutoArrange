@@ -20,6 +20,7 @@ export interface DragImageSettings {
   singleImageSizeMode: SingleImageSizeMode;
   singleImageWidth: number;
   enableReadingModeContextMenu: boolean;
+  enableReadingModeDoubleClickZoom: boolean;
   menuScalePercent: number;
 }
 
@@ -286,6 +287,20 @@ export class DragImageSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.enableReadingModeContextMenu)
           .onChange(async (value) => {
             this.plugin.settings.enableReadingModeContextMenu = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(alignGroup)
+      .setName("Reading mode: double-click image to preview")
+      .setDesc(
+        "When enabled, opening an image's preview in Reading Mode requires a double click instead of a single click. When disabled, Reading Mode keeps Obsidian's native single-click behavior."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enableReadingModeDoubleClickZoom)
+          .onChange(async (value) => {
+            this.plugin.settings.enableReadingModeDoubleClickZoom = value;
             await this.plugin.saveSettings();
           })
       );

@@ -83,6 +83,18 @@ function diaIsManualSingle(img: HTMLImageElement): boolean {
     return typeof fn === 'function' ? Boolean(fn()) : false;
 }
 
+/** True when the image is the sole member of a single-image row. */
+function diaIsSingleRow(img: HTMLImageElement): boolean {
+    const fn = (img as any).__diaa_singleRow;
+    return typeof fn === 'function' ? Boolean(fn()) : true;
+}
+
+/** Pixel width a manual single row adopts when reset to the size setting. */
+function diaResetTargetWidth(img: HTMLImageElement): number {
+    const fn = (img as any).__diaa_resetTargetWidth;
+    return typeof fn === 'function' ? Math.round(Number(fn()) || 0) : 0;
+}
+
 /**
  * Formats the rotate/flip disk write cannot preserve: svg (vector), gif and avif
  * (canvas re-encode would silently fall back to PNG). Those rows render greyed.
@@ -200,16 +212,19 @@ function addCopyPathSubmenu(menu: DomMenu, app: App, facade: PixelPerfectFacade,
 }
 
 /**
- * Add the PP "resize to X%" presets (from the shared `customResizeSizes`
- * setting) for a DIA-managed image. Only percentage entries make sense on DIA
- * flex rows — an absolute px entry has no meaning for a weighted member — so px
- * entries are skipped. Writes route through the renderer's `__diaa_onResize`,
- * which handles single-image (`S=1` pixel width) and multi-member (flex-weight
- * rebalance) semantics. Returns true when any row was added.
+ * Add the "resize to X% of the original width" presets (from the shared
+ * `customResizeSizes` setting) for a DIA-managed image. Only percentage entries
+ * make sense — an absolute px entry has no meaning for a weighted member — so px
+ * entries are skipped. Writes route through the renderer's `__diaa_onResize`.
+ *
+ * Gate (per user spec): the presets only act on a single-image row in Live
+ * Preview.  They are greyed out for multi-member rows (divider drag is the resize
+ * path there) and for Reading Mode's read-only surface.
  */
 function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): boolean {
     if (!diaResizeEnabled(img)) return false;
     const natural = diaNaturalWidth(img);
+    const singleRow = diaIsSingleRow(img);
     const sizes = facade.host.settings.customResizeSizes;
     let added = false;
 
@@ -218,14 +233,14 @@ function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img
         if (!parsed || parsed.unit !== '%') continue;
         const rectW = img.getBoundingClientRect().width;
         const shownPct = natural > 0 && rectW > 0 ? Math.round((rectW / natural) * 100) : null;
-        const disabled = modeDisabled || natural <= 0 || (shownPct !== null && shownPct === parsed.amount);
+        const disabled = modeDisabled || !singleRow || natural <= 0 || (shownPct !== null && shownPct === parsed.amount);
         if (!added) {
             menu.addSeparator();
             added = true;
         }
         facade.menuService.addMenuItem(
             menu,
-            strings.menu.resizeTo.replace('{size}', sizeStr),
+            `调整为原图宽度的 ${parsed.amount}%`,
             parsed.amount === 100 ? 'image' : 'percent',
             async () => (img as any).__diaa_onResize(parsed.amount),
             strings.notices.failedToResizeTo.replace('{size}', sizeStr),
@@ -235,17 +250,24 @@ function addDiaManagedResizeSizes(menu: DomMenu, facade: PixelPerfectFacade, img
     return added;
 }
 
-/** "Remove custom size": flip a manual single-image row back to setting-driven. */
-function addDiaRemoveCustomSize(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): void {
+/**
+ * "重置为设置宽度 {W}": flip a manual single-image row back to setting-driven
+ * (S=1 → S=0).  Always visible on DIA-managed images so the affordance is stable;
+ * enabled only when the image is a manual single row in Live Preview and a reset
+ * target width is known — every other case renders greyed and does nothing.
+ */
+function addDiaResetToSettingItem(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): void {
     if (typeof (img as any).__diaa_resetSingleManual !== 'function') return;
-    if (!diaIsManualSingle(img)) return;
+    const target = diaResetTargetWidth(img);
+    const enabled = !modeDisabled && diaIsManualSingle(img) && target > 0;
+    menu.addSeparator();
     facade.menuService.addMenuItem(
         menu,
-        strings.menu.removeCustomSize,
+        `重置为设置宽度 ${target}`,
         'reset',
         async () => (img as any).__diaa_resetSingleManual(),
-        strings.notices.failedToRemoveSize,
-        modeDisabled
+        '重置宽度失败',
+        !enabled
     );
 }
 
@@ -407,7 +429,7 @@ export async function openUnifiedImageMenu(
                 if (!svg) addCopyImage(menu, facade, img);
                 addCopyPathSubmenu(menu, app, facade, resolved.imgFile);
                 addDiaManagedResizeSizes(menu, facade, img, isReadingMode);
-                addDiaRemoveCustomSize(menu, facade, img, isReadingMode);
+                addDiaResetToSettingItem(menu, facade, img, isReadingMode);
             } else {
                 await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth, isReadingMode);
             }

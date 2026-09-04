@@ -310,7 +310,31 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.display = { kind: "single-manual", widthPx: w };
     img.hasSizing = true;
     this.singleWidthPx = w;
+
+    // Immediate visual feedback.  CodeMirror's widget eq() compares single rows by
+    // manual flag only, not widthPx, so a menu-driven resize used to stay frozen
+    // until a source↔Live-Preview round trip rebuilt the widget.  Re-run the
+    // single-row layout so the new width paints right away.
+    const container = this.container;
+    if (container) {
+      const preHeight = container.style.height;
+      const containerWidth = container.getBoundingClientRect().width;
+      if (containerWidth > 0) this.layoutSingleImage(containerWidth);
+      if (container.style.height !== preHeight) this.onLayoutChange?.();
+    }
+    // layoutSingleImage schedules a deferred write; persist synchronously too so
+    // the |1|W still lands even if the widget is torn down before that frame.
     this.persistCallback?.();
+  }
+
+  /** The pixel width a manual single row adopts when reset to the size setting:
+   *  fixed mode → the settings width; natural mode → the image's natural width. */
+  private singleResetTargetWidthPx(): number {
+    if (this.options.singleImageSizeMode === "fixed") {
+      return this.options.singleImageWidth;
+    }
+    const meta = this.loadedMetas.get(0);
+    return meta?.naturalWidth ?? this.imageEls[0]?.naturalWidth ?? 0;
   }
 
   /**
@@ -372,6 +396,21 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (!this.isSingleRow()) return;
     const img = this.group.images[0];
     img.display = { kind: "single-follow" };
+
+    // Immediate visual feedback.  Mirror setSingleImageWidth: flipping the manual
+    // flag alone used to freeze the image at its old manual width until a
+    // source↔Live-Preview round trip rebuilt the widget, while the model already
+    // read "follow" — leaving the 100%-resize item and the reset item greyed at
+    // the same time. Re-run the single-row layout so the follow width paints now.
+    const container = this.container;
+    if (container) {
+      const preHeight = container.style.height;
+      const containerWidth = container.getBoundingClientRect().width;
+      if (containerWidth > 0) this.layoutSingleImage(containerWidth);
+      if (container.style.height !== preHeight) this.onLayoutChange?.();
+    }
+    // layoutSingleImage schedules a deferred write; persist synchronously too so
+    // the |0|W still lands even if the widget is torn down before that frame.
     this.persistCallback?.();
   }
 
@@ -843,6 +882,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       naturalWidth: () =>
         this.loadedMetas.get(index)?.naturalWidth ?? img.naturalWidth ?? 0,
       manualSingle: () => this.isSingleManual(),
+      singleRow: () => this.isSingleRow(),
+      resetTargetWidth: () => this.singleResetTargetWidthPx(),
       onResize: (pct) => this.resizeToNaturalPercent(index, pct),
       resetSingleManual: () => this.resetSingleManualWidth(),
     });

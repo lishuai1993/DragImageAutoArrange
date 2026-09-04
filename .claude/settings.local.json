@@ -94,7 +94,12 @@
       "Bash(sed -n '585,660p' src/imageRender/imageRowWidget.ts)",
       "Bash(sed -n '1160,1275p' src/imageRender/imageRowWidget.ts)",
       "Bash(sed -n '53,116p' src/imageRender/rmFlexRow.ts)",
-      "Bash(sed -n '218,300p' src/imageRender/rmFlexRow.ts)"
+      "Bash(sed -n '218,300p' src/imageRender/rmFlexRow.ts)",
+      "Read(//Applications/Obsidian.app/Contents/Resources/**)",
+      "Bash(npx --yes @electron/asar list app.asar)",
+      "Read(//Applications/Google Chrome.app/Contents/MacOS/**)",
+      "Read(//Applications/Chromium.app/Contents/MacOS/**)",
+      "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless=new --disable-gpu --no-sandbox --dump-dom \"file:///tmp/zoomtest.html\")"
     ]
   }
 }

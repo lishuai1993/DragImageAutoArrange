@@ -327,6 +327,8 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         resizeEnabled: options.enableResize,
         naturalWidth: () => img.naturalWidth || 0,
         manualSingle: () => false,
+        singleRow: () => false,
+        resetTargetWidth: () => img.naturalWidth || 0,
         onResize: null,
         resetSingleManual: null,
       });

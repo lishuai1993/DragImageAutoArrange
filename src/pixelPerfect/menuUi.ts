@@ -13,9 +13,10 @@ let openMenus: DomMenu[] = [];
 let outsideCleanup: (() => void) | null = null;
 
 // ── Shared UI scale (right-click menu size setting) ────────────────────────
-// Applied as CSS `zoom` on every menu container so padding, spacing, font and
-// icon sizes scale together. Chromium/Electron property — supported in the
-// Obsidian desktop app; the submenu (separate `.diaa-menu`) reads it too, so a
+// Applied as `transform: scale()` (origin top-left) on every menu container so
+// padding, spacing, font and icon sizes scale together while the menu's fixed
+// coordinates stay viewport-true (CSS `zoom` would scale those offsets too, so
+// it is avoided). The submenu (separate `.diaa-menu`) reads it too, so a
 // top-level menu and its hover submenu always share the same size.
 let menuScale = 1;
 
@@ -93,7 +94,11 @@ function registerMenu(menu: DomMenu): void {
     openMenus.push(menu);
     if (outsideCleanup) return;
 
-    const onDocClick = (e: MouseEvent): void => {
+    // Outside-dismiss on the document CAPTURE phase of `mousedown`. Capture runs
+    // before any target/bubble handler, so a Reading-Mode element that calls
+    // stopPropagation on a click can no longer swallow the dismiss (it did when
+    // this listened on bubble-phase `click`, leaving the menu open forever).
+    const onDocMouseDown = (e: MouseEvent): void => {
         const target = e.target as Node;
         if (openMenus.some(menu => menu.rootEl.contains(target))) return;
         closeAllMenus();
@@ -106,20 +111,43 @@ function registerMenu(menu: DomMenu): void {
     };
     const onResize = (): void => closeAllMenus();
 
-    // Defer so the opening event (a contextmenu / click that produced this menu)
-    // can never be mistaken for an outside click. If the menu was already closed
-    // by the time the timer fires, don't attach stale listeners.
+    // Defer so the opening event (a contextmenu / the mousedown that produced
+    // this menu) can never be mistaken for an outside click. If the menu was
+    // already closed by the time the timer fires, don't attach stale listeners.
     setTimeout(() => {
         if (openMenus.length === 0) return;
-        document.addEventListener('click', onDocClick, false);
-        document.addEventListener('keydown', onKey, false);
+        document.addEventListener('mousedown', onDocMouseDown, true);
+        document.addEventListener('keydown', onKey, true);
         window.addEventListener('resize', onResize);
         outsideCleanup = () => {
-            document.removeEventListener('click', onDocClick);
-            document.removeEventListener('keydown', onKey);
+            document.removeEventListener('mousedown', onDocMouseDown, true);
+            document.removeEventListener('keydown', onKey, true);
             window.removeEventListener('resize', onResize);
         };
     }, 0);
+}
+
+/**
+ * Shift a menu's desired top-left so the whole menu stays inside the viewport.
+ * Both axes clamp independently with a shared inset; a menu wider/taller than the
+ * viewport degrades to flush against the inset edge rather than overflowing.
+ */
+function fitToViewport(
+    desiredLeft: number,
+    desiredTop: number,
+    width: number,
+    height: number,
+    vw: number,
+    vh: number,
+    inset = 8
+): { left: number; top: number } {
+    let left = desiredLeft;
+    let top = desiredTop;
+    if (left < inset) left = inset;
+    if (left + width > vw - inset) left = Math.max(inset, vw - inset - width);
+    if (top < inset) top = inset;
+    if (top + height > vh - inset) top = Math.max(inset, vh - inset - height);
+    return { left, top };
 }
 
 // ── Row building ────────────────────────────────────────────────────────────
@@ -197,8 +225,13 @@ export class DomMenu implements MenuLike {
         this.rootEl = document.createElement('div');
         this.rootEl.className = 'diaa-menu';
         this.rootEl.setAttribute('role', 'menu');
-        // zoom is non-standard but Chromium/Electron-native (see menuScale).
-        (this.rootEl.style as any).zoom = String(menuScale);
+        // Scale via transform, NOT CSS zoom: Chromium multiplies the offsets of a
+        // zoomed fixed element by the zoom factor (left:100 at zoom 1.5 paints at
+        // 150), so a scaled menu would drift off the cursor/anchor. transform keeps
+        // the fixed coordinates intact and scales content from the top-left corner,
+        // which is exactly the anchor showAt/showBeside set.
+        this.rootEl.style.transformOrigin = 'top left';
+        this.rootEl.style.transform = `scale(${menuScale})`;
     }
 
     addSeparator(): this {
@@ -236,15 +269,13 @@ export class DomMenu implements MenuLike {
         this.rootEl.style.left = '0px';
         this.rootEl.style.top = '0px';
         const rect = this.rootEl.getBoundingClientRect();
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        let left = clientX;
-        let top = clientY;
-        if (left + rect.width > vw - 8) left = Math.max(8, vw - rect.width - 8);
-        if (top + rect.height > vh - 8) top = Math.max(8, vh - rect.height - 8);
+        const { left, top } = fitToViewport(
+            clientX, clientY, rect.width, rect.height,
+            window.innerWidth, window.innerHeight
+        );
         this.rootEl.style.visibility = 'visible';
-        this.rootEl.style.left = `${Math.max(8, left)}px`;
-        this.rootEl.style.top = `${Math.max(8, top)}px`;
+        this.rootEl.style.left = `${left}px`;
+        this.rootEl.style.top = `${top}px`;
     }
 
     /** Remove this menu without touching the others (used for hover submenus). */
@@ -257,7 +288,12 @@ export class DomMenu implements MenuLike {
         }
     }
 
-    /** Attach beside a parent row (submenu), flushing the right edge inward. */
+    /**
+     * Attach beside a parent row (submenu), tightly abutting the row's right edge
+     * with the submenu's top aligned to the parent's top. When there is not enough
+     * room on the right, the submenu flips to the parent's left side; a final
+     * viewport clamp then guarantees the whole submenu stays visible.
+     */
     showBeside(anchorRect: DOMRect): void {
         document.body.appendChild(this.rootEl);
         registerMenu(this);
@@ -267,13 +303,26 @@ export class DomMenu implements MenuLike {
         const rect = this.rootEl.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        let left = anchorRect.right;
-        if (left + rect.width > vw - 8) left = Math.max(8, anchorRect.left - rect.width);
-        let top = anchorRect.top;
-        if (top + rect.height > vh - 8) top = Math.max(8, vh - rect.height - 8);
+        const inset = 8;
+        // Choose the side with enough room, preferring right (tight abutment);
+        // if neither fits, pick the larger gap so the clamp shifts the least.
+        const spaceRight = vw - inset - anchorRect.right;
+        const spaceLeft = anchorRect.left - inset;
+        let left: number;
+        if (spaceRight >= rect.width) {
+            left = anchorRect.right;
+        } else if (spaceLeft >= rect.width) {
+            left = anchorRect.left - rect.width;
+        } else {
+            left = spaceRight >= spaceLeft ? anchorRect.right : anchorRect.left - rect.width;
+        }
+        const desiredTop = anchorRect.top;
+        const { left: fittedLeft, top } = fitToViewport(
+            left, desiredTop, rect.width, rect.height, vw, vh, inset
+        );
         this.rootEl.style.visibility = 'visible';
-        this.rootEl.style.left = `${Math.max(8, left)}px`;
-        this.rootEl.style.top = `${Math.max(8, top)}px`;
+        this.rootEl.style.left = `${fittedLeft}px`;
+        this.rootEl.style.top = `${top}px`;
     }
 }
 

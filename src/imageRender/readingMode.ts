@@ -273,6 +273,8 @@ export function createReadingModeProcessor(
             naturalWidth: () => img.naturalWidth || 0,
             manualSingle: () =>
               parsed != null && parsed.display.kind === "single-manual",
+            singleRow: () => true,
+            resetTargetWidth: () => img.naturalWidth || 0,
             onResize: null,
             resetSingleManual: null,
           });

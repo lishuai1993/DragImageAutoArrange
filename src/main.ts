@@ -14,6 +14,7 @@ import {
   recordRMSwitch, scheduleIdleWarmup,
 } from "./scrollSync/warmupScheduler";
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./imageRender/livePreview";
+import { installReadingModeImageDoubleClickZoom } from "./imageRender/rmImageDoubleClick";
 import { setEditorDirty } from "./anchor/anchorStore";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
@@ -103,6 +104,7 @@ export default class DragImageAutoArrangePlugin
     singleImageSizeMode: "natural",
     singleImageWidth: 400,
     enableReadingModeContextMenu: true,
+    enableReadingModeDoubleClickZoom: true,
     menuScalePercent: 100,
   };
 
@@ -127,6 +129,7 @@ export default class DragImageAutoArrangePlugin
       "warmupScheduler",
       "transformStore",
       "transformWriter",
+      "rmImageClick",
     ]);
 
     // ── Unified image context menu (DIA + Pixel Perfect Image) ────────
@@ -159,6 +162,15 @@ export default class DragImageAutoArrangePlugin
       setMenuScale(this.settings.menuScalePercent / 100);
       void openUnifiedImageMenu(e, img, { app: this.app, facade: this.pixelPerfect });
     }, true);
+
+    // Reading Mode image preview gesture: single-click → double-click, covering
+    // every image Obsidian renders there. The setting is read live per event, so
+    // toggling it in settings applies without a plugin reload.
+    this.register(
+      installReadingModeImageDoubleClickZoom(
+        () => this.settings.enableReadingModeDoubleClickZoom
+      )
+    );
 
     this.settings = await loadSettings(this);
     // Restore preserved per-image sizes from previous session

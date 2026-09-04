@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS = {
   singleImageSizeMode: "natural" as SingleImageSizeMode,
   singleImageWidth: 400,
   enableReadingModeContextMenu: true,
+  enableReadingModeDoubleClickZoom: true,
   menuScalePercent: 100,
 } as const;
 
