@@ -283,6 +283,17 @@
   margin-top: 2px;
 }
 
+/* Settings tab: two-level grouping grid. Headings sit flush-left; every group's
+   cards share one fixed indent (.drag-img-settings-group), so no card row is ever
+   misaligned against another group's — regardless of which group it belongs to. */
+.drag-img-settings h3 {
+  margin: 1.2em 0 0.2em;
+}
+
+.drag-img-settings .drag-img-settings-group {
+  padding-left: 16px;
+}
+
 /* === Unified right-click menu (DIA align top / rotate-flip middle / PP bottom) ===
    DOM-based with Obsidian's native look, because the native Menu API exposes no
    submenu support for the alignment hover layer. Driven by theme CSS variables

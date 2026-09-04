@@ -12,6 +12,18 @@ import type { MenuLike, MenuLikeItem } from '../vendor/pixelPerfectImage/ui/Menu
 let openMenus: DomMenu[] = [];
 let outsideCleanup: (() => void) | null = null;
 
+// ── Shared UI scale (right-click menu size setting) ────────────────────────
+// Applied as CSS `zoom` on every menu container so padding, spacing, font and
+// icon sizes scale together. Chromium/Electron property — supported in the
+// Obsidian desktop app; the submenu (separate `.diaa-menu`) reads it too, so a
+// top-level menu and its hover submenu always share the same size.
+let menuScale = 1;
+
+/** Set the shared scale for every menu this module creates (1 = 100%). */
+export function setMenuScale(scale: number): void {
+  menuScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
 // ── Hover-submenu host state ────────────────────────────────────────────────
 // A caret'd parent row and its open submenu form one hover region. At most one
 // such submenu is open per menu tree; the host fields record whose it is. When
@@ -185,6 +197,8 @@ export class DomMenu implements MenuLike {
         this.rootEl = document.createElement('div');
         this.rootEl.className = 'diaa-menu';
         this.rootEl.setAttribute('role', 'menu');
+        // zoom is non-standard but Chromium/Electron-native (see menuScale).
+        (this.rootEl.style as any).zoom = String(menuScale);
     }
 
     addSeparator(): this {

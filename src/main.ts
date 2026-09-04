@@ -18,6 +18,7 @@ import { setEditorDirty } from "./anchor/anchorStore";
 import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { openUnifiedImageMenu } from "./pixelPerfect/unifiedContextMenu";
+import { setMenuScale } from "./pixelPerfect/menuUi";
 import { createPixelPerfectFacade, type PixelPerfectFacade } from "./pixelPerfect/pixelPerfectHost";
 import { findMarkdownViewForElement } from "./vendor/pixelPerfectImage/utils/utils";
 import { logger } from "./logger";
@@ -102,6 +103,7 @@ export default class DragImageAutoArrangePlugin
     singleImageSizeMode: "natural",
     singleImageWidth: 400,
     enableReadingModeContextMenu: true,
+    menuScalePercent: 100,
   };
 
   /** Merged Pixel Perfect Image runtime (PP settings + services + menu builder). */
@@ -150,6 +152,7 @@ export default class DragImageAutoArrangePlugin
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
+      setMenuScale(this.settings.menuScalePercent / 100);
       void openUnifiedImageMenu(e, img, { app: this.app, facade: this.pixelPerfect });
     }, true);
 
@@ -169,10 +172,6 @@ export default class DragImageAutoArrangePlugin
       enableResize: this.settings.enableResize,
       enableDividers: this.settings.enableDividers,
     });
-
-    this.addSettingTab(
-      new DragImageSettingTab(this.app, this as IDragImagePlugin)
-    );
 
     // Reading Mode processor with drag-to-merge support
     this.registerMarkdownPostProcessor(
@@ -311,6 +310,17 @@ export default class DragImageAutoArrangePlugin
     log.info("Pixel Perfect Image feature set merged", {
       customResizeSizes: this.pixelPerfect.host.settings.customResizeSizes,
     });
+
+    // The settings tab edits PP-owned options (file info / resize presets /
+    // delete confirmation / file operations), so it is registered only after
+    // the merged host is ready and its settings object can be handed over.
+    this.addSettingTab(
+      new DragImageSettingTab(
+        this.app,
+        this as IDragImagePlugin,
+        this.pixelPerfect.host
+      )
+    );
   }
 
   async onunload(): Promise<void> {

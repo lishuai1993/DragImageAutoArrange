@@ -43,7 +43,7 @@ function renderOtherPlugins(setting: Setting): void {
     }
 }
 
-const FILE_OPERATION_IDS = [
+export const FILE_OPERATION_IDS = [
     'openInNewTab',
     'openToTheRight',
     'openInNewWindow',
@@ -206,7 +206,7 @@ function getFileOperationControlId(key: string): FileOperationId | null {
     return isFileOperationId(id) ? id : null;
 }
 
-function getFileOperationName(id: FileOperationId): string {
+export function getFileOperationName(id: FileOperationId): string {
     switch (id) {
         case 'openInNewTab':
             return strings.menu.openInNewTab;
@@ -230,6 +230,23 @@ function hasDefaultFileOperationOrder(operations: readonly FileOperationConfig[]
         operations.length === FILE_OPERATION_IDS.length &&
         operations.every((operation, index) => operation.id === FILE_OPERATION_IDS[index])
     );
+}
+
+/**
+ * Reorder `operations` back to the canonical FILE_OPERATION_IDS order while
+ * preserving each operation's current visibility. Used by the "restore default
+ * order" reset in the merged DIA settings tab.
+ */
+export function restoreDefaultFileOperationOrder(
+    operations: readonly FileOperationConfig[]
+): FileOperationConfig[] {
+    const visibilityById = new Map(
+        operations.map(operation => [operation.id, operation.visible] as const)
+    );
+    return FILE_OPERATION_IDS.map(id => ({
+        id,
+        visible: visibilityById.get(id) ?? true
+    }));
 }
 
 function formatContextMenuDisplayValue(shown: number): string {

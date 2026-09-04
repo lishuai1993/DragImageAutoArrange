@@ -89,7 +89,8 @@
       "Bash(cp -R /tmp/pp-src/src src/vendor/pixelPerfectImage)",
       "Bash(perl -0pi -e \"s/\\\\bmenu: Menu\\\\b/menu: MenuLike/g\" ui/MenuService.ts)",
       "Bash(perl -0pi -e \"s/import type \\\\{ PixelPerfectImageHost \\\\} from '..\\\\/PixelPerfectImageHost';/import type { MenuLike } from '.\\\\/MenuLike';\\\\nimport type { PixelPerfectImageHost } from '..\\\\/PixelPerfectImageHost';/\" ui/MenuService.ts)",
-      "Bash(xargs -I{} sh -c 'echo \"== {}\"; sed -n \"1,12p\" \"{}\"')"
+      "Bash(xargs -I{} sh -c 'echo \"== {}\"; sed -n \"1,12p\" \"{}\"')",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

@@ -22,3 +22,18 @@ export const TFile = class {};
 export const MarkdownPostProcessorContext = class {};
 export const DataAdapter = class {};
 export const editorLivePreviewField = {};
+
+// Extra surface used by the vendored Pixel Perfect runtime / i18n loader.
+export const getLanguage = () => 'en';
+export const Platform = { isMacOS: true, isMobile: false };
+export const setIcon = () => {};
+export const addIcon = () => {};
+export const getIcon = () => null;
+export const Notice = class {};
+export const ButtonComponent = class {};
+export const ExtraButtonComponent = class {};
+export const FileSystemAdapter = class {};
+export const TextComponent = class {};
+export const ToggleComponent = class {};
+export const DropdownComponent = class {};
+export const SliderComponent = class {};

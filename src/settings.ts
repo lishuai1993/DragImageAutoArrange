@@ -1,5 +1,6 @@
 import { App, ButtonComponent, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
+import { renderPixelPerfectSettings, type PixelPerfectBridge } from "./pixelPerfect/ppSettingsUi";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
 
@@ -19,6 +20,7 @@ export interface DragImageSettings {
   singleImageSizeMode: SingleImageSizeMode;
   singleImageWidth: number;
   enableReadingModeContextMenu: boolean;
+  menuScalePercent: number;
 }
 
 export interface IDragImagePlugin {
@@ -43,10 +45,12 @@ export async function loadSettings(plugin: { loadData(): Promise<any> }): Promis
 
 export class DragImageSettingTab extends PluginSettingTab {
   plugin: IDragImagePlugin;
+  private bridge: PixelPerfectBridge | null;
 
-  constructor(app: App, plugin: IDragImagePlugin) {
+  constructor(app: App, plugin: IDragImagePlugin, bridge?: PixelPerfectBridge | null) {
     super(app, plugin as any);
     this.plugin = plugin;
+    this.bridge = bridge ?? null;
   }
 
   display(): void {
@@ -57,7 +61,12 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Drag Image Auto Arrange" });
 
-    new Setting(containerEl)
+    // ── Layout & interaction (global) ──────────────────────────
+    containerEl.createEl("h3", { text: "行布局与交互设置" });
+    const layoutGroup = containerEl.createDiv();
+    layoutGroup.addClass("drag-img-settings-group");
+
+    new Setting(layoutGroup)
       .setName("Default row height")
       .setDesc("Default uniform height (px) for image rows. Individual rows adapt based on image aspect ratios.")
       .addSlider((slider) =>
@@ -71,7 +80,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Max images per row")
       .setDesc("Maximum number of images allowed in a single row (1-10). Groups exceeding this limit are split.")
       .addSlider((slider) =>
@@ -85,7 +94,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Gap size")
       .setDesc("Spacing between images in a row (px).")
       .addSlider((slider) =>
@@ -99,7 +108,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Snap sensitivity")
       .setDesc("When dragging a divider or resize handle, snap into place when the height difference between adjacent images falls within this percentage of their equilibrium (equal) height. Set to 0 to disable snapping.")
       .addSlider((slider) =>
@@ -113,7 +122,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Top bar activation zone")
       .setDesc("Pixel distance from the top of a flex row within which the global-balance top bar appears (4-40 px).")
       .addSlider((slider) =>
@@ -127,7 +136,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Ghost image width")
       .setDesc("Width (px) of the drag ghost image that follows the cursor (100-500 px).")
       .addSlider((slider) =>
@@ -141,7 +150,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Drag ghost opacity")
       .setDesc("Transparency of the original image during drag (10% = nearly opaque, 90% = very transparent).")
       .addSlider((slider) =>
@@ -155,7 +164,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Enable drag reorder")
       .setDesc("Allow dragging images within a row to reorder them.")
       .addToggle((toggle) =>
@@ -167,7 +176,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Enable resize handles")
       .setDesc("Show corner resize handles on hover to adjust individual image sizes.")
       .addToggle((toggle) =>
@@ -179,7 +188,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(layoutGroup)
       .setName("Enable column dividers")
       .setDesc("Show draggable dividers between images to adjust width ratios.")
       .addToggle((toggle) =>
@@ -191,12 +200,38 @@ export class DragImageSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(layoutGroup)
+      .setName("Context menu size")
+      .setDesc("Scale of the right-click image menu (50%–150%). Menu padding, spacing, fonts and icons scale together in 10% steps.")
+      .addSlider((slider) =>
+        slider
+          .setLimits(50, 150, 10)
+          .setValue(this.plugin.settings.menuScalePercent)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.menuScalePercent = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(layoutGroup)
+      .setName("Image extensions")
+      .setDesc("Comma-separated list of image file extensions to detect (e.g., png,jpg,gif,webp).")
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.imageExtensions)
+          .onChange(async (value) => {
+            this.plugin.settings.imageExtensions = value || DEFAULT_SETTINGS.imageExtensions;
+            await this.plugin.saveSettings();
+          })
+      );
+
     // ── Image Alignment (grouped) ──────────────────────────────
 
     containerEl.createEl("h3", { text: "图片统一对齐设置" });
 
     const alignGroup = containerEl.createDiv();
-    alignGroup.style.paddingLeft = "16px";
+    alignGroup.addClass("drag-img-settings-group");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let alignDropdown: any;
@@ -260,7 +295,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "单图行图片尺寸设置" });
 
     const singleImageGroup = containerEl.createDiv();
-    singleImageGroup.style.paddingLeft = "16px";
+    singleImageGroup.addClass("drag-img-settings-group");
 
     const mode = this.plugin.settings.singleImageSizeMode;
 
@@ -346,17 +381,11 @@ export class DragImageSettingTab extends PluginSettingTab {
           });
       });
 
-    new Setting(containerEl)
-      .setName("Image extensions")
-      .setDesc("Comma-separated list of image file extensions to detect (e.g., png,jpg,gif,webp).")
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.imageExtensions)
-          .onChange(async (value) => {
-            this.plugin.settings.imageExtensions = value || DEFAULT_SETTINGS.imageExtensions;
-            await this.plugin.saveSettings();
-          })
-      );
+    // Pixel Perfect settings (merged features only) — surfaced as two groups at
+    // the tail of the page once the merged host is available.
+    if (this.bridge) {
+      renderPixelPerfectSettings(containerEl, this.bridge);
+    }
 
     // Move every description element out of the left info column and onto its
     // own full-width line, so long descriptions no longer wrap inside a narrow

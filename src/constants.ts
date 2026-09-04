@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS = {
   singleImageSizeMode: "natural" as SingleImageSizeMode,
   singleImageWidth: 400,
   enableReadingModeContextMenu: true,
+  menuScalePercent: 100,
 } as const;
 
 export const SINGLE_IMAGE_MIN_WIDTH = 100;
