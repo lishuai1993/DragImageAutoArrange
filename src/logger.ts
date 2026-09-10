@@ -1,6 +1,15 @@
 import { DataAdapter } from "obsidian";
 
-type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
+export type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
+
+/** Severity order — a higher rank is more severe. The level gate lets a
+ *  message through when its rank is >= the configured minimum. */
+const LEVEL_RANK: Record<LogLevel, number> = {
+  DEBUG: 10,
+  INFO: 20,
+  WARN: 30,
+  ERROR: 40,
+};
 
 interface LogEntry {
   timestamp: string;
@@ -78,6 +87,11 @@ class Logger {
   private _flushTimer: ReturnType<typeof setInterval> | null = null;
   private _flushing = false;
   private _fileOutputFilter: string[] | null = null;
+  /** Minimum severity emitted to either sink. Default DEBUG = emit everything,
+   *  i.e. identical to the pre-gate behavior. */
+  private _minLevel: LogLevel = "DEBUG";
+  /** Master switch for the log.txt sink (settings-driven). */
+  private _fileEnabled = true;
 
   // ── Lifecycle ──
 
@@ -85,7 +99,6 @@ class Logger {
     this._adapter = adapter;
     this._logPath = logPath;
     try { await adapter.write(logPath, ""); } catch { /* ignore */ }
-    console.log(`[DragImg] Logger initialized, logPath=${logPath}`);
     this._flushTimer = setInterval(() => this.flush(), 5000);
   }
 
@@ -153,6 +166,34 @@ class Logger {
     this._fileOutputFilter = null;
   }
 
+  // ── Level gate + file sink switch (settings-driven) ──
+
+  /** Drop any entry below `level` from both sinks. */
+  setMinLevel(level: LogLevel): void {
+    this._minLevel = level;
+  }
+
+  getMinLevel(): LogLevel {
+    return this._minLevel;
+  }
+
+  /** Enable/disable the log.txt sink entirely. */
+  setFileEnabled(enabled: boolean): void {
+    this._fileEnabled = enabled;
+    // Drop anything buffered while the sink is off so it can't linger.
+    if (!enabled) this._buffer = [];
+  }
+
+  isFileEnabled(): boolean {
+    return this._fileEnabled;
+  }
+
+  /** Truncate log.txt so the next session starts from a clean file. */
+  async clearLogFile(): Promise<void> {
+    if (!this._adapter) return;
+    try { await this._adapter.write(this._logPath, ""); } catch { /* ignore */ }
+  }
+
   // ── Backward-compatible direct log methods (use "default" channel) ──
 
   info(message: string, data?: unknown): void {
@@ -171,22 +212,28 @@ class Logger {
   // ── Internal ──
 
   _write(channel: LogChannel, level: LogLevel, message: string, data?: unknown): void {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level,
-      channel: channel.name,
-      message,
-      data,
-    };
-    this._buffer.push(entry);
-    if (channel.outputToConsole) {
+    const rank = LEVEL_RANK[level];
+    const toFile = this._fileEnabled && rank >= LEVEL_RANK[this._minLevel];
+    const toConsole = channel.outputToConsole && rank >= LEVEL_RANK[this._minLevel];
+    if (!toFile && !toConsole) return;
+
+    if (toFile) {
+      this._buffer.push({
+        timestamp: new Date().toISOString(),
+        level,
+        channel: channel.name,
+        message,
+        data,
+      });
+    }
+    if (toConsole) {
       const dataStr = data !== undefined ? ` ${JSON.stringify(data)}` : "";
       console.log(`[DragImg] [${level}] ${message}${dataStr}`);
     }
   }
 
   async flush(): Promise<void> {
-    if (!this._adapter || this._buffer.length === 0 || this._flushing) return;
+    if (!this._adapter || !this._fileEnabled || this._buffer.length === 0 || this._flushing) return;
     this._flushing = true;
     try {
       const allowed = this._buffer.filter((entry) => {

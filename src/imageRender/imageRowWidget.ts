@@ -1591,7 +1591,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         const el = this.container?.closest(sel) as HTMLElement | null;
         return el ? Math.round(el.getBoundingClientRect().width) : -1;
       };
-      log.info("FLICKER_DIAG transient@recalc", {
+      log.debug("FLICKER_DIAG transient@recalc", {
         lineStart: this.group.lineStart,
         imageCount: this.imageEls.length,
         containerRectW: Math.round(cRect.width),
@@ -1821,7 +1821,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         fill: this.group.images[i] ? this.fillOf(this.group.images[i]) : null,
       };
     });
-    log.info("RENDER_COMPARE " + mode, {
+    log.debug("RENDER_COMPARE " + mode, {
       containerRect: { x: Math.round(containerRect.x), y: Math.round(containerRect.y), w: Math.round(containerRect.width), h: Math.round(containerRect.height) },
       containerStyle: { height: containerStyle.height, justifyContent: containerStyle.justifyContent },
       alignment: this.options.alignment,

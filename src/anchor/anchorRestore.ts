@@ -465,13 +465,13 @@ export function restoreTextInRM(
       : [];
   }
 
-  log.info("VIEWPORT ledger debug: restoreTextInRM about to call rmLedgerYForLine", {
+  log.debug("VIEWPORT ledger debug: restoreTextInRM about to call rmLedgerYForLine", {
     anchorLine: anchor.anchorLine, anchorTotalLines: anchor.totalLines, filePath,
   });
   const ledgerY = anchor.anchorLine && anchor.anchorLine > 0
     ? rmLedgerYForLine(app, anchor.anchorLine, filePath, anchor.totalLines)
     : -1;
-  log.info("VIEWPORT ledger debug: rmLedgerYForLine returned", { ledgerY: Math.round(ledgerY) });
+  log.debug("VIEWPORT ledger debug: rmLedgerYForLine returned", { ledgerY: Math.round(ledgerY) });
 
   let chosen: HTMLElement | null = null;
   // ── diagnostic: text matching summary ──────────────────────────

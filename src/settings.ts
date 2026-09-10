@@ -1,6 +1,7 @@
 import { App, ButtonComponent, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 import { renderPixelPerfectSettings, type PixelPerfectBridge } from "./pixelPerfect/ppSettingsUi";
+import { logger, type LogLevel } from "./logger";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
 
@@ -22,7 +23,12 @@ export interface DragImageSettings {
   enableReadingModeContextMenu: boolean;
   enableReadingModeDoubleClickZoom: boolean;
   menuScalePercent: number;
+  logLevel: LogLevel;
+  logToFile: boolean;
 }
+
+/** Slider stops, least→most verbose. The slider index maps into this array. */
+const LOG_LEVELS: LogLevel[] = ["ERROR", "WARN", "INFO", "DEBUG"];
 
 export interface IDragImagePlugin {
   settings: DragImageSettings;
@@ -402,10 +408,133 @@ export class DragImageSettingTab extends PluginSettingTab {
       renderPixelPerfectSettings(containerEl, this.bridge);
     }
 
+    this.renderLogSettings(containerEl);
+
     // Move every description element out of the left info column and onto its
     // own full-width line, so long descriptions no longer wrap inside a narrow
     // column beside the control. Re-run per display() since the DOM is rebuilt.
     this.reflowDescriptions();
+  }
+
+  /**
+   * Logging & debugging group. A 4-stop severity slider (ERROR → WARN → INFO →
+   * DEBUG, least → most verbose) gates both sinks; a toggle controls the log.txt
+   * sink. Both write straight through to the logger singleton, so a change takes
+   * effect on the next log call — no plugin reload needed.
+   */
+  private renderLogSettings(containerEl: HTMLElement): void {
+    containerEl.createEl("h3", { text: "日志与调试设置" });
+    const group = containerEl.createDiv();
+    group.addClass("drag-img-settings-group");
+
+    let active = LOG_LEVELS.indexOf(this.plugin.settings.logLevel);
+    if (active < 0) active = 0;
+
+    let ticksEl: HTMLElement | null = null;
+    let nodesEl: HTMLElement | null = null;
+    // Paint the current stop on the labels (accent + caret) and on the track dots:
+    // dots to the thumb's left take the filled-track colour, and the dot under the
+    // thumb itself is dropped so it can't show through it.
+    const markActive = (idx: number) => {
+      ticksEl?.querySelectorAll<HTMLElement>(".drag-img-log-tick").forEach((el, i) => {
+        el.toggleClass("is-active", i === idx);
+      });
+      nodesEl?.querySelectorAll<HTMLElement>(".drag-img-log-node").forEach((el, i) => {
+        el.toggleClass("is-on", i < idx);
+        el.toggleClass("is-hidden", i === idx);
+      });
+    };
+
+    const levelSetting = new Setting(group)
+      .setName("日志级别")
+      .setDesc(
+        "低于所选级别的日志不会输出，同时作用于控制台与 log.txt。默认 ERROR，仅记录错误。"
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, LOG_LEVELS.length - 1, 1)
+          .setValue(active)
+          .onChange(async (value) => {
+            const level = LOG_LEVELS[value] ?? "ERROR";
+            this.plugin.settings.logLevel = level;
+            logger.setMinLevel(level);
+            markActive(value);
+            await this.plugin.saveSettings();
+          })
+      );
+
+    // The control takes the whole card row so the track gets its full width, with
+    // four tick labels and a row of stop dots underneath.
+    const controlEl = levelSetting.controlEl;
+    controlEl.addClass("drag-img-log-control");
+    // How far the info column is inset from the control column varies by version
+    // and theme, so measure the gap and indent the track to start flush with the
+    // "日志级别" name rather than assuming a value.
+    const inset = Math.round(
+      levelSetting.nameEl.getBoundingClientRect().left -
+        controlEl.getBoundingClientRect().left
+    );
+    if (inset > 0 && inset < 40) controlEl.style.marginLeft = `${inset}px`;
+
+    ticksEl = controlEl.createDiv("drag-img-log-ticks");
+    for (const name of LOG_LEVELS) {
+      ticksEl.createSpan({ text: name, cls: "drag-img-log-tick" });
+    }
+    // Dots live in their own layer anchored to the stops: the outer two labels are
+    // pushed inside the track ends, so they no longer sit over their stops.
+    nodesEl = ticksEl.createDiv("drag-img-log-nodes");
+    for (let i = 0; i < LOG_LEVELS.length; i++) {
+      nodesEl.createSpan({ cls: "drag-img-log-node" });
+    }
+    // Where the track centre sits above the ticks row depends on the theme's
+    // slider height and on whatever gap the flex layout adds, so measure the lift
+    // instead of assuming either.
+    const sliderEl = controlEl.querySelector<HTMLInputElement>('input[type="range"]');
+    if (sliderEl) {
+      const sliderRect = sliderEl.getBoundingClientRect();
+      const ticksRect = ticksEl.getBoundingClientRect();
+      const lift = ticksRect.top - sliderRect.top - sliderRect.height / 2;
+      if (lift > 0) {
+        controlEl.style.setProperty("--diaa-log-lift", `${Math.round(lift)}px`);
+      }
+      // The native thumb is inset by half its own width at each end of the track,
+      // so its centre travels r..(100% - r) and the middle two stops sit at
+      // r + i·(100% - 2r)/3 — not at the value's plain fraction of the track.
+      // Every theme picks its own thumb size, so read the used one here instead
+      // of assuming (the pseudo-element style is Chromium-only; the CSS variable
+      // is the fallback).
+      const num = (v: string | null | undefined) => {
+        const n = parseFloat(v ?? "");
+        return Number.isFinite(n) ? n : 0;
+      };
+      const thumbCs = getComputedStyle(sliderEl, "::-webkit-slider-thumb");
+      const thumbW =
+        num(thumbCs.width) ||
+        num(getComputedStyle(sliderEl).getPropertyValue("--slider-thumb-width"));
+      const thumbR =
+        (thumbW + num(thumbCs.borderLeftWidth) + num(thumbCs.borderRightWidth)) / 2;
+      if (thumbR > 0 && thumbR < 40) {
+        controlEl.style.setProperty("--diaa-log-thumb-r", `${thumbR}px`);
+      }
+      logger.debug("LOG_SLIDER_GEOM", { thumbW, thumbR, lift: Math.round(lift) });
+    }
+    markActive(active);
+
+    new Setting(group)
+      .setName("写入 log.txt")
+      .setDesc(
+        "开启后，符合级别的日志写入插件目录下的 log.txt（开启时清空一次，便于读取本次会话）。"
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.logToFile)
+          .onChange(async (value) => {
+            this.plugin.settings.logToFile = value;
+            logger.setFileEnabled(value);
+            if (value) await logger.clearLogFile();
+            await this.plugin.saveSettings();
+          })
+      );
   }
 
   /**

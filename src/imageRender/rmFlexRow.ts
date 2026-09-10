@@ -486,7 +486,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           }
           cur = cur.parentElement;
         }
-        log.info("RM ROW render diagnostic", {
+        log.debug("RM ROW render diagnostic", {
           n: embeds.length,
           rowSetH: row.style.height,
           rowRectH: Math.round(rowRect.height),
@@ -512,7 +512,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         const imgRect = img.getBoundingClientRect();
         const cs = getComputedStyle(img);
         const itemCS = getComputedStyle(embeds[0]);
-        log.info("RM ROW1_IMG0 render snapshot", {
+        log.debug("RM ROW1_IMG0 render snapshot", {
           containerW: Math.round(containerRect.width),
           containerH: Math.round(containerRect.height),
           itemW: Math.round(itemRect.width),

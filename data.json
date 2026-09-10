@@ -16,7 +16,9 @@
     "singleImageWidth": 400,
     "enableReadingModeContextMenu": true,
     "enableReadingModeDoubleClickZoom": true,
-    "menuScalePercent": 90
+    "menuScalePercent": 90,
+    "logLevel": "WARN",
+    "logToFile": false
   },
   "preservedSizes": {},
   "pixelPerfectImage": {

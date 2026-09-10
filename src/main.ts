@@ -106,6 +106,8 @@ export default class DragImageAutoArrangePlugin
     enableReadingModeContextMenu: true,
     enableReadingModeDoubleClickZoom: true,
     menuScalePercent: 100,
+    logLevel: "ERROR",
+    logToFile: false,
   };
 
   /** Merged Pixel Perfect Image runtime (PP settings + services + menu builder). */
@@ -117,20 +119,15 @@ export default class DragImageAutoArrangePlugin
       this.app.vault.adapter,
       ".obsidian/plugins/obsidian-DragImageAutoArrange/log.txt"
     );
-    log.info("Plugin loading", { version: this.manifest.version });
 
-    // ── Log filter: only these channels write to log.txt ─────────────
-    // Comment out to write all channels, or adjust the list to focus on
-    // the module you're currently debugging.
-    logger.setFileOutputFilter([
-      "main",
-      "scrollAnchor",
-      "warmupProbe",
-      "warmupScheduler",
-      "transformStore",
-      "transformWriter",
-      "rmImageClick",
-    ]);
+    // ── Apply persisted logging config before the first log call ─────
+    // Level gate + file sink come from settings, so a release install is quiet
+    // (ERROR → console only) while the settings tab can raise verbosity live.
+    this.settings = await loadSettings(this);
+    logger.setMinLevel(this.settings.logLevel);
+    logger.setFileEnabled(this.settings.logToFile);
+
+    log.info("Plugin loading", { version: this.manifest.version });
 
     // ── Unified image context menu (DIA + Pixel Perfect Image) ────────
     // Registered at document level in capture phase so it runs BEFORE any
@@ -172,7 +169,6 @@ export default class DragImageAutoArrangePlugin
       )
     );
 
-    this.settings = await loadSettings(this);
     // Restore preserved per-image sizes from previous session
     const rawData = await this.loadData();
     if (rawData?.preservedSizes) {

@@ -565,7 +565,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
             const imgs = rmView.querySelectorAll("img");
             const embeds = rmView.querySelectorAll("embed, iframe, .internal-embed, .image-embed");
             const totalNodes = rmView.getElementsByTagName?.("*")?.length ?? all.length;
-            log.info("RM-DOM-STATS", {
+            log.debug("RM-DOM-STATS", {
               file,
               totalNodes,
               imgCount: imgs.length,

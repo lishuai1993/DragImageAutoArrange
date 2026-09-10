@@ -22,6 +22,8 @@ describe('logger', () => {
     (logger as any)._channels.clear();
     (logger as any)._fileOutputFilter = null;
     (logger as any)._buffer = [];
+    logger.setMinLevel('DEBUG');
+    logger.setFileEnabled(true);
   });
 
   describe('init', () => {
@@ -248,6 +250,87 @@ describe('logger', () => {
       const names = channels.map(c => c.name);
       expect(names).toContain('listTest1');
       expect(names).toContain('listTest2');
+    });
+  });
+
+  describe('min level gate', () => {
+    const levelsIn = () =>
+      (logger as any)._buffer.map((e: { level: string }) => e.level);
+
+    it('default DEBUG forwards every level to the buffer', async () => {
+      await logger.init(adapter, 'test-log.txt');
+      logger.setMinLevel('DEBUG');
+      const ch = logger.channel('gateDefault');
+      ch.debug('d');
+      ch.info('i');
+      ch.warn('w');
+      ch.error('e');
+      expect(levelsIn()).toEqual(['DEBUG', 'INFO', 'WARN', 'ERROR']);
+    });
+
+    it('WARN threshold keeps only WARN and ERROR', async () => {
+      await logger.init(adapter, 'test-log.txt');
+      logger.setMinLevel('WARN');
+      const ch = logger.channel('gateWarn');
+      ch.debug('d');
+      ch.info('i');
+      ch.warn('w');
+      ch.error('e');
+      expect(levelsIn()).toEqual(['WARN', 'ERROR']);
+    });
+
+    it('ERROR threshold keeps only ERROR buffered', async () => {
+      await logger.init(adapter, 'test-log.txt');
+      logger.setMinLevel('ERROR');
+      const ch = logger.channel('gateError');
+      ch.debug('d');
+      ch.info('i');
+      ch.warn('w');
+      ch.error('e');
+      expect(levelsIn()).toEqual(['ERROR']);
+    });
+
+    it('ERROR threshold silences the console below ERROR', async () => {
+      await logger.init(adapter, 'test-log.txt');
+      logger.setMinLevel('ERROR');
+      const ch = logger.channel('gateConsole');
+      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      ch.debug('d');
+      ch.info('i');
+      ch.warn('w');
+      ch.error('e');
+      const lines = spy.mock.calls.map((c) => String(c[0]));
+      expect(lines.length).toBe(1);
+      expect(lines[0]).toContain('[ERROR]');
+      spy.mockRestore();
+    });
+
+    it('setFileEnabled(false) buffers nothing and writes nothing', async () => {
+      await logger.init(adapter, 'test-log.txt');
+      logger.setFileEnabled(false);
+      adapter.write.mockClear();
+      const ch = logger.channel('gateNoFile');
+      ch.error('e');
+      ch.info('i');
+      expect((logger as any)._buffer.length).toBe(0);
+      await logger.flush();
+      const nonEmpty = adapter.write.mock.calls.filter(
+        (c: unknown[]) => c[1] !== ''
+      );
+      expect(nonEmpty.length).toBe(0);
+    });
+
+    it('channel console switch still applies on top of the level gate', async () => {
+      await logger.init(adapter, 'test-log.txt');
+      logger.setMinLevel('DEBUG');
+      const ch = logger.channel('gateChannel');
+      ch.outputToConsole = false;
+      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      ch.error('e');
+      expect(spy.mock.calls.length).toBe(0);
+      // Still buffered for the file sink — the two gates are independent.
+      expect((logger as any)._buffer.length).toBe(1);
+      spy.mockRestore();
     });
   });
 });

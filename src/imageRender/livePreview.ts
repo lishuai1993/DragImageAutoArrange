@@ -342,7 +342,7 @@ class StaticImageRowWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     try {
-      log.info("SCROLL_DIAG widget build (toDOM)", {
+      log.debug("SCROLL_DIAG widget build (toDOM)", {
         lineStart: this.group.lineStart,
         lineEnd: this.group.lineEnd,
         imageCount: this.group.images.length,
@@ -402,7 +402,7 @@ class StaticImageRowWidget extends WidgetType {
       this.innerWidget.onPersist(() => {
         if (!this.editorView) return;
         const images = this.group.images;
-        log.info("SCROLL_DIAG persist fired", {
+        log.debug("SCROLL_DIAG persist fired", {
           lineStart: this.group.lineStart,
           imageCount: images.length,
         });
@@ -758,7 +758,7 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   destroy(): void {
-    log.info("SCROLL_DIAG widget destroy", {
+    log.debug("SCROLL_DIAG widget destroy", {
       lineStart: this.group.lineStart,
       imageCount: this.group.images.length,
     });

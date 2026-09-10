@@ -701,7 +701,7 @@ export function findBestTextLine(
 
 
 export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLines?: number): number {
-  log.info("VIEWPORT ledger debug: rmLedgerYForLine called", {
+  log.debug("VIEWPORT ledger debug: rmLedgerYForLine called", {
     line1, totalLines: totalLines ?? "undefined", file: file ?? "undefined",
   });
   const view = app.workspace.activeLeaf?.view as any;
@@ -742,7 +742,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
     const totalH = heights.reduce((a, b) => a + b, 0);
     if (totalH > 0) {
       const y = sectionIndexEstimateY(heights, totalLines, line1);
-      log.info("VIEWPORT ledger debug: live estimateY", {
+      log.debug("VIEWPORT ledger debug: live estimateY", {
         line1, totalLines, heightsLen: heights.length, totalH, estY: Math.round(y),
       });
       if (y >= 0) return y;
@@ -769,7 +769,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
         const totalH = heights.reduce((a, b) => a + b, 0);
         if (totalH > 0) {
           const y2 = sectionIndexEstimateY(heights, totalLines, line1);
-          log.info("VIEWPORT ledger debug: snapshot estimateY", {
+          log.debug("VIEWPORT ledger debug: snapshot estimateY", {
             line1, totalLines, heightsLen: heights.length, totalH, estY: Math.round(y2),
           });
           if (y2 >= 0) return y2;
@@ -795,7 +795,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
     }
   }
 
-  log.info("VIEWPORT ledger debug: all fallbacks failed, returning -1", {
+  log.debug("VIEWPORT ledger debug: all fallbacks failed, returning -1", {
     line1, totalLines: totalLines ?? "undefined",
   });
   return -1;

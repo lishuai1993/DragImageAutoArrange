@@ -1,3 +1,5 @@
+import type { LogLevel } from "./logger";
+
 export const CSS_PREFIX = "drag-img";
 
 export const CLASSES = {
@@ -40,6 +42,8 @@ export const DEFAULT_SETTINGS = {
   enableReadingModeContextMenu: true,
   enableReadingModeDoubleClickZoom: true,
   menuScalePercent: 100,
+  logLevel: "ERROR" as LogLevel,
+  logToFile: false,
 } as const;
 
 export const SINGLE_IMAGE_MIN_WIDTH = 100;
