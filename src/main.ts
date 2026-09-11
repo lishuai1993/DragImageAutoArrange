@@ -114,11 +114,12 @@ export default class DragImageAutoArrangePlugin
   private pixelPerfect: PixelPerfectFacade | null = null;
 
   async onload(): Promise<void> {
-    // Init file logger (hardcoded path for debugging)
-    await logger.init(
-      this.app.vault.adapter,
-      ".obsidian/plugins/obsidian-DragImageAutoArrange/log.txt"
-    );
+    // Init the file logger inside this plugin's own folder. `manifest.dir` is
+    // the vault-relative path Obsidian loaded the plugin from, so the log lands
+    // next to main.js wherever the plugin is installed — the community build
+    // ships as `drag-image-auto-arrange/`, a dev checkout may sit anywhere.
+    const pluginDir = this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`;
+    await logger.init(this.app.vault.adapter, `${pluginDir}/log.txt`);
 
     // ── Apply persisted logging config before the first log call ─────
     // Level gate + file sink come from settings, so a release install is quiet

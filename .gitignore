@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build output — produced by esbuild locally and by the release workflow
+main.js
+
+# Obsidian plugin runtime data / diagnostics
+data.json
+log.txt
+
+# Local tooling config
+.claude/settings.local.json
+
+# macOS
+.DS_Store
