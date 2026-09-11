@@ -157,14 +157,14 @@ export class LinkService {
 
     private replaceMarkdownImageLinks(
         text: string,
-        replacer: (fullMatch: string, description: string, linkPath: string, titleSuffix: string, rawDestination: string) => string
+        replacer: (fullMatch: string, description: string, linkPath: string, titleSuffix: string, rawDestination: string, offset: number) => string
     ): string {
         let result = '';
         let lastIndex = 0;
 
         this.scanMarkdownImageLinks(text, ({ start, end, fullMatch, description, linkPath, titleSuffix, rawDestination }) => {
             result += text.substring(lastIndex, start);
-            result += replacer(fullMatch, description, linkPath, titleSuffix, rawDestination);
+            result += replacer(fullMatch, description, linkPath, titleSuffix, rawDestination, start);
             lastIndex = end;
         });
 
@@ -176,11 +176,14 @@ export class LinkService {
      * Replaces wiki-style image links (![[image.png|100]]) outside Markdown code ranges.
      * Links inside code fences or inline code spans are left untouched.
      */
-    private replaceWikiImageLinks(text: string, replacer: (match: string, linkInner: string) => string): string {
+    private replaceWikiImageLinks(
+        text: string,
+        replacer: (match: string, linkInner: string, offset: number) => string
+    ): string {
         const codeRanges = markdownCodeRanges(text);
         return text.replace(WIKILINK_IMAGE_REGEX, (match: string, linkInner: string, offset: number) => {
             if (overlapsRange(codeRanges, offset, offset + match.length)) return match;
-            return replacer(match, linkInner);
+            return replacer(match, linkInner, offset);
         });
     }
 
@@ -550,4 +553,119 @@ export class LinkService {
 
         return didChange;
     }
+
+    /**
+     * Pure core of {@link removeImageLinkOccurrences}: given a document's full
+     * text, returns the rewritten text plus the match counts and writes nowhere.
+     * Split out so a caller holding the live editor can apply the result as a
+     * CodeMirror transaction — undoable and viewport-preserving — instead of
+     * round-tripping through the vault.
+     *
+     * `opts.afterRemoval` runs on the rewritten content (frontmatter stripped)
+     * and receives the content-relative line the first removal happened on, or
+     * null when nothing was removed.
+     */
+    planImageLinkRemoval(
+        fullText: string,
+        imageFile: TFile,
+        activeFile: TFile,
+        opts: {
+            max?: number;
+            line?: number | null;
+            afterRemoval?: (content: string, removedLine: number | null) => string;
+        } = {}
+    ): { next: string; found: number; removed: number } {
+        const max = opts.max ?? 1;
+        const onlyLine = opts.line ?? null;
+        const { frontmatter, content } = this.splitFrontmatter(fullText);
+        const baseLine = countNewlines(frontmatter);
+
+        let found = 0;
+        let removed = 0;
+        let removedLine: number | null = null;
+
+        const take = (match: string, line: number): string => {
+            found += 1;
+            if (removed >= max) return match;
+            if (onlyLine !== null && line !== onlyLine) return match;
+            removed += 1;
+            if (removedLine === null) removedLine = line;
+            return '';
+        };
+
+        let next = this.replaceWikiImageLinks(content, (match, linkInner, offset) => {
+            const link = this.parseLinkComponents(linkInner);
+            if (!this.resolveLink(link.path, activeFile, imageFile)) return match;
+            return take(match, baseLine + countNewlines(content.slice(0, offset)));
+        });
+
+        // The markdown pass scans the wiki-pass output, so its offsets are
+        // measured against that text, not the original content.
+        const mdPassText = next;
+        next = this.replaceMarkdownImageLinks(
+            mdPassText,
+            (fullMatch, description, linkPath, _titleSuffix, _rawDestination, offset) => {
+                const link = this.parseLinkComponents(description, linkPath);
+                if (!this.resolveLink(link.path, activeFile, imageFile)) return fullMatch;
+                return take(fullMatch, baseLine + countNewlines(mdPassText.slice(0, offset)));
+            }
+        );
+
+        if (opts.afterRemoval) {
+            next = opts.afterRemoval(next, removedLine === null ? null : removedLine - baseLine);
+        }
+
+        if (next === content) return { next: fullText, found, removed };
+        return { next: frontmatter ? `${frontmatter}${next}` : next, found, removed };
+    }
+
+    /**
+     * Removes at most `max` image links pointing to `imageFile` from the active
+     * document, optionally restricted to a single 0-based source line, by writing
+     * the file. Callers that hold the open editor should prefer
+     * {@link planImageLinkRemoval} so the change stays undoable and the viewport
+     * does not jump; this remains the fallback for when no editor is available.
+     *
+     * `removeImageLinks` deliberately clears every reference at once (it backs
+     * "delete image and links"); this variant exists for callers that mean
+     * "drop exactly one reference" — cutting one image out of a row — where
+     * clearing the rest would be collateral damage.
+     *
+     * @returns `found` — references to the image seen in the note before removal;
+     *          `removed` — references actually removed.
+     */
+    async removeImageLinkOccurrences(
+        imageFile: TFile,
+        opts: {
+            max?: number;
+            line?: number | null;
+            afterRemoval?: (content: string, removedLine: number | null) => string;
+        } = {}
+    ): Promise<{ found: number; removed: number }> {
+        const activeFile = this.plugin.app.workspace.getActiveFile();
+        if (!activeFile) {
+            throw new Error('No active file, cannot remove links.');
+        }
+        if (activeFile.path === imageFile.path) {
+            return { found: 0, removed: 0 };
+        }
+
+        let result = { found: 0, removed: 0 };
+
+        await this.plugin.app.vault.process(activeFile, data => {
+            const planned = this.planImageLinkRemoval(data, imageFile, activeFile, opts);
+            result = { found: planned.found, removed: planned.removed };
+            return planned.next;
+        });
+
+        return result;
+    }
+}
+
+function countNewlines(value: string): number {
+    let count = 0;
+    for (let i = 0; i < value.length; i++) {
+        if (value.charCodeAt(i) === 10) count += 1;
+    }
+    return count;
 }

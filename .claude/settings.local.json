@@ -100,7 +100,15 @@
       "Read(//Applications/Google Chrome.app/Contents/MacOS/**)",
       "Read(//Applications/Chromium.app/Contents/MacOS/**)",
       "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless=new --disable-gpu --no-sandbox --dump-dom \"file:///tmp/zoomtest.html\")",
-      "Bash(perl -pi -e 's/\\\\blog\\\\.info\\\\\\(/log.debug\\(/ if /DIAG|COMPARE|STATS|ledger debug|snapshot|render diagnostic/' src/imageRender/livePreview.ts src/imageRender/rmFlexRow.ts src/imageRender/imageRowWidget.ts src/anchor/anchorModeSwitch.ts src/anchor/anchorRestore.ts src/anchor/anchorCapture.ts)"
+      "Bash(perl -pi -e 's/\\\\blog\\\\.info\\\\\\(/log.debug\\(/ if /DIAG|COMPARE|STATS|ledger debug|snapshot|render diagnostic/' src/imageRender/livePreview.ts src/imageRender/rmFlexRow.ts src/imageRender/imageRowWidget.ts src/anchor/anchorModeSwitch.ts src/anchor/anchorRestore.ts src/anchor/anchorCapture.ts)",
+      "Bash(sed -n '600,665p' src/vendor/pixelPerfectImage/ui/MenuService.ts)",
+      "Bash(sed -n '330,365p' src/vendor/pixelPerfectImage/core/FileService.ts)",
+      "Bash(sed -n '370,400p' src/vendor/pixelPerfectImage/ui/MenuService.ts)",
+      "Bash(sed -n '470,545p' src/vendor/pixelPerfectImage/ui/MenuService.ts)",
+      "Bash(sed -n '1,45p' src/vendor/pixelPerfectImage/PixelPerfectImageHost.ts)",
+      "Bash(sed -n '1,60p' src/vendor/pixelPerfectImage/ui/MenuService.ts)",
+      "Bash(sed -n '590,605p' src/imageRender/imageRowWidget.ts)",
+      "Bash(sed -n '840,870p' src/imageRender/imageRowWidget.ts)"
     ]
   }
 }

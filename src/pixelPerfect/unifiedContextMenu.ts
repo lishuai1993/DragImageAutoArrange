@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Notice, Platform, type App, type TFile } from 'obsidian';
+import { FileSystemAdapter, Notice, Platform, type App, type Editor, type TFile } from 'obsidian';
 import { strings } from '../vendor/pixelPerfectImage/i18n';
 import { parseResizeSize } from '../vendor/pixelPerfectImage/ui/settings';
 import {
@@ -9,6 +9,13 @@ import {
 } from '../vendor/pixelPerfectImage/utils/utils';
 import { DomMenu, closeAllMenus, createMenuRowEl, attachHoverSubmenu } from './menuUi';
 import type { PixelPerfectFacade } from './pixelPerfectHost';
+import {
+    cutImage,
+    cutMenuItemEnabled,
+    CUT_IMAGE_FAILED,
+    CUT_IMAGE_ICON,
+    CUT_IMAGE_TITLE,
+} from './cutImage';
 import {
   composeOrientation,
   IDENTITY_STATE,
@@ -155,6 +162,32 @@ function addCopyImage(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageE
             new Notice(strings.notices.imageCopied);
         },
         strings.notices.failedToCopyImage
+    );
+}
+
+/**
+ * "Cut image" row, rendered directly above "copy image" and gated identically
+ * (local raster files only). Copies the bitmap, then drops the reference — and
+ * the file too when nothing else in the vault points at it.
+ *
+ * `disabled` greys the row wherever the target reference cannot be pinned down
+ * or the note must not be rewritten (see `cutMenuItemEnabled`); it stays visible
+ * so the menu layout is stable.
+ */
+function addCutImageItem(
+    menu: DomMenu,
+    facade: PixelPerfectFacade,
+    img: HTMLImageElement,
+    target: { imgFile: TFile; noteFile: TFile; editor: Editor | null },
+    disabled: boolean
+): void {
+    facade.menuService.addMenuItem(
+        menu,
+        CUT_IMAGE_TITLE,
+        CUT_IMAGE_ICON,
+        () => cutImage(facade, img, target.imgFile, target.noteFile, target.editor),
+        CUT_IMAGE_FAILED,
+        disabled
     );
 }
 
@@ -394,6 +427,8 @@ export async function openUnifiedImageMenu(
         Boolean(img.closest('.markdown-preview-view'));
     const remote = isRemoteImage(img);
     const managed = isDiaManaged(img);
+    const cutDisabled = !cutMenuItemEnabled(managed, isReadingMode);
+    const cutEditor = mdView?.editor ?? null;
 
     const menu = new DomMenu();
 
@@ -424,6 +459,13 @@ export async function openUnifiedImageMenu(
         if (resolved && managed) {
             const svg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
             if (!svg) {
+                addCutImageItem(
+                    menu,
+                    facade,
+                    img,
+                    { imgFile: resolved.imgFile, noteFile: resolved.activeFile, editor: cutEditor },
+                    cutDisabled
+                );
                 addCopyImage(menu, facade, img);
                 hadGroup1 = true;
             }
@@ -458,6 +500,20 @@ export async function openUnifiedImageMenu(
                 transformDisabled
             );
             if (hadGroup1 || transformAdded) menu.addSeparator();
+            // The PP resize block opens with its own "copy image" row, so the cut
+            // row lands here to sit directly above it (and stays off for SVGs,
+            // which that block also skips). Non-DIA images have no row anchor to
+            // resolve the clicked reference, so the row is always greyed here.
+            const nonDiaSvg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
+            if (!nonDiaSvg) {
+                addCutImageItem(
+                    menu,
+                    facade,
+                    img,
+                    { imgFile: resolved.imgFile, noteFile: resolved.activeFile, editor: cutEditor },
+                    cutDisabled
+                );
+            }
             await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth, isReadingMode);
         }
         if (resolved && !Platform.isMobile) {
