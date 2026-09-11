@@ -4,12 +4,12 @@ import { runRestoreLoop, type FrameOutcome } from "../src/anchor/anchorRestoreSe
 // The loops run in Obsidian where requestAnimationFrame exists; vitest's node
 // env has none, so shim a setTimeout-backed rAF for the primitive's control flow.
 beforeAll(() => {
-  (globalThis as any).requestAnimationFrame = (cb: (t: number) => void) =>
-    setTimeout(() => cb(Date.now()), 0) as unknown as number;
-  (globalThis as any).cancelAnimationFrame = (h: number) => clearTimeout(h);
+  window.requestAnimationFrame = (cb: FrameRequestCallback) =>
+    window.setTimeout(() => cb(Date.now()), 0);
+  window.cancelAnimationFrame = (h: number) => window.clearTimeout(h);
 });
 
-const tick = () => new Promise((r) => setTimeout(r, 5));
+const tick = () => new Promise((r) => window.setTimeout(r, 5));
 
 describe("runRestoreLoop primitive (P4-B)", () => {
   it("stop on the first (sync) frame halts and clears the id slot", () => {
@@ -19,7 +19,7 @@ describe("runRestoreLoop primitive (P4-B)", () => {
       getId: () => id,
       setId: (v) => { id = v; },
       firstFrameSync: true,
-      onFrame: () => { frames++; return "stop" as FrameOutcome; },
+      onFrame: () => { frames++; return "stop"; },
     });
     expect(frames).toBe(1);
     expect(id).toBe(null); // halt cleared the slot

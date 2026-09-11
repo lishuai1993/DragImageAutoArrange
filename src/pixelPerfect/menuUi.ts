@@ -1,11 +1,11 @@
 import { setIcon } from 'obsidian';
-import type { MenuLike, MenuLikeItem } from '../vendor/pixelPerfectImage/ui/MenuLike';
+import type { MenuLike, MenuLikeItem } from './menuLike';
 
 /**
- * Native-looking DOM menu that doubles as a `MenuLike` so the vendored PP
- * menu builders can populate it. Keeps Obsidian's native look by reusing its
- * CSS variables and `setIcon`, while giving DragImageAutoArrange full control
- * over nesting (Obsidian's Menu API has no submenu support).
+ * Native-looking DOM menu that doubles as a `MenuLike` so the menu builders
+ * can populate it. Keeps Obsidian's native look by reusing its CSS variables
+ * and `setIcon`, while giving DragImageAutoArrange full control over nesting
+ * (Obsidian's Menu API has no submenu support).
  */
 
 // ── Global open-menu registry + outside/Escape closing ─────────────────────
@@ -36,11 +36,11 @@ const caretParents = new WeakSet<HTMLElement>();
 const delegatedMenus = new WeakSet<HTMLElement>();
 let hoverParent: HTMLElement | null = null;
 let hoverClose: (() => void) | null = null;
-let bridgeTimer: ReturnType<typeof setTimeout> | null = null;
+let bridgeTimer: number | null = null;
 
 function clearBridgeTimer(): void {
     if (bridgeTimer !== null) {
-        clearTimeout(bridgeTimer);
+        window.clearTimeout(bridgeTimer);
         bridgeTimer = null;
     }
 }
@@ -57,7 +57,7 @@ function dismissHoverSub(): void {
 /** Wait briefly for an adjacent caret parent to take over; else close. */
 function scheduleBridgeClose(delayMs: number): void {
     clearBridgeTimer();
-    bridgeTimer = setTimeout(() => {
+    bridgeTimer = window.setTimeout(() => {
         bridgeTimer = null;
         dismissHoverSub();
     }, delayMs);
@@ -114,7 +114,7 @@ function registerMenu(menu: DomMenu): void {
     // Defer so the opening event (a contextmenu / the mousedown that produced
     // this menu) can never be mistaken for an outside click. If the menu was
     // already closed by the time the timer fires, don't attach stale listeners.
-    setTimeout(() => {
+    window.setTimeout(() => {
         if (openMenus.length === 0) return;
         document.addEventListener('mousedown', onDocMouseDown, true);
         document.addEventListener('keydown', onKey, true);
@@ -152,22 +152,22 @@ function fitToViewport(
 
 // ── Row building ────────────────────────────────────────────────────────────
 export function createMenuRowEl(title: string, icon: string | null, caret = false): HTMLElement {
-    const row = document.createElement('div');
+    const row = createDiv();
     row.className = 'diaa-menu-item';
     row.setAttribute('role', 'menuitem');
 
-    const iconBox = document.createElement('span');
+    const iconBox = createSpan();
     iconBox.className = 'diaa-menu-icon';
     if (icon) setIcon(iconBox, icon);
     row.appendChild(iconBox);
 
-    const titleBox = document.createElement('span');
+    const titleBox = createSpan();
     titleBox.className = 'diaa-menu-title';
     titleBox.textContent = title;
     row.appendChild(titleBox);
 
     if (caret) {
-        const caretBox = document.createElement('span');
+        const caretBox = createSpan();
         caretBox.className = 'diaa-menu-caret';
         setIcon(caretBox, 'chevron-right');
         row.appendChild(caretBox);
@@ -222,7 +222,7 @@ export class DomMenu implements MenuLike {
     readonly rootEl: HTMLElement;
 
     constructor() {
-        this.rootEl = document.createElement('div');
+        this.rootEl = createDiv();
         this.rootEl.className = 'diaa-menu';
         this.rootEl.setAttribute('role', 'menu');
         // Scale via transform, NOT CSS zoom: Chromium multiplies the offsets of a
@@ -230,12 +230,12 @@ export class DomMenu implements MenuLike {
         // 150), so a scaled menu would drift off the cursor/anchor. transform keeps
         // the fixed coordinates intact and scales content from the top-left corner,
         // which is exactly the anchor showAt/showBeside set.
-        this.rootEl.style.transformOrigin = 'top left';
+        this.rootEl.setCssStyles({ transformOrigin: 'top left' });
         this.rootEl.style.transform = `scale(${menuScale})`;
     }
 
     addSeparator(): this {
-        const sep = document.createElement('div');
+        const sep = createDiv();
         sep.className = 'diaa-menu-sep';
         this.rootEl.appendChild(sep);
         return this;
@@ -265,15 +265,15 @@ export class DomMenu implements MenuLike {
     showAt(clientX: number, clientY: number): void {
         document.body.appendChild(this.rootEl);
         registerMenu(this);
-        this.rootEl.style.visibility = 'hidden';
-        this.rootEl.style.left = '0px';
-        this.rootEl.style.top = '0px';
+        this.rootEl.setCssStyles({ visibility: 'hidden' });
+        this.rootEl.setCssStyles({ left: '0px' });
+        this.rootEl.setCssStyles({ top: '0px' });
         const rect = this.rootEl.getBoundingClientRect();
         const { left, top } = fitToViewport(
             clientX, clientY, rect.width, rect.height,
             window.innerWidth, window.innerHeight
         );
-        this.rootEl.style.visibility = 'visible';
+        this.rootEl.setCssStyles({ visibility: 'visible' });
         this.rootEl.style.left = `${left}px`;
         this.rootEl.style.top = `${top}px`;
     }
@@ -297,9 +297,9 @@ export class DomMenu implements MenuLike {
     showBeside(anchorRect: DOMRect): void {
         document.body.appendChild(this.rootEl);
         registerMenu(this);
-        this.rootEl.style.visibility = 'hidden';
-        this.rootEl.style.left = '0px';
-        this.rootEl.style.top = '0px';
+        this.rootEl.setCssStyles({ visibility: 'hidden' });
+        this.rootEl.setCssStyles({ left: '0px' });
+        this.rootEl.setCssStyles({ top: '0px' });
         const rect = this.rootEl.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
@@ -320,7 +320,7 @@ export class DomMenu implements MenuLike {
         const { left: fittedLeft, top } = fitToViewport(
             left, desiredTop, rect.width, rect.height, vw, vh, inset
         );
-        this.rootEl.style.visibility = 'visible';
+        this.rootEl.setCssStyles({ visibility: 'visible' });
         this.rootEl.style.left = `${fittedLeft}px`;
         this.rootEl.style.top = `${top}px`;
     }
@@ -341,7 +341,7 @@ export function attachHoverSubmenu(
     buildSub: () => DomMenu,
     bridgeDelayMs = 100
 ): void {
-    const parentMenu = parentRow.closest('.diaa-menu') as HTMLElement | null;
+    const parentMenu = parentRow.closest<HTMLElement>('.diaa-menu');
     caretParents.add(parentRow);
     if (parentMenu) ensureHoverDelegate(parentMenu);
 

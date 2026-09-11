@@ -4,6 +4,8 @@
  * not import from imageRowWidget/livePreview/readingMode to avoid init cycles.
  */
 
+import { CLASSES } from "../constants";
+
 /** Obsidian alignment classes that override our flex layout and must be stripped. */
 export const OBSIDIAN_ALIGN_CLASSES = [
   "image-position-center",
@@ -30,9 +32,10 @@ export function stripObsidianClasses(img: HTMLElement): boolean {
 
 /**
  * Neutralize Obsidian's intermediate wrapper elements (e.g. .image-resize-container)
- * between an img and a boundary element by setting `display: contents !important`,
- * so the img behaves as a direct flex child.  Walks from `img.parentElement` up to
- * (but not including) `boundary`, skipping any element listed in `skipEls`.
+ * between an img and a boundary element by tagging them with the
+ * `drag-img-contents` class, so the img behaves as a direct flex child.  Walks
+ * from `img.parentElement` up to (but not including) `boundary`, skipping any
+ * element listed in `skipEls`.
  */
 export function neutralizeWrappers(
   img: HTMLElement,
@@ -42,7 +45,7 @@ export function neutralizeWrappers(
   let el: HTMLElement | null = img.parentElement;
   while (el && el !== boundary) {
     if (!skipEls.includes(el)) {
-      el.style.setProperty("display", "contents", "important");
+      el.addClass(CLASSES.contents);
     }
     el = el.parentElement;
   }
@@ -63,19 +66,19 @@ export function createDragGhost(
   if (!img || img.naturalWidth <= 0 || !e.dataTransfer) return noop;
 
   // Hide the browser's default semi-transparent ghost with a transparent 1x1 pixel.
-  const pixel = document.createElement("canvas");
+  const pixel = createEl("canvas");
   pixel.width = 1;
   pixel.height = 1;
-  pixel.style.cssText = "position:fixed;left:0;top:0;pointer-events:none";
+  pixel.setCssStyles({ position: "fixed", left: "0", top: "0", pointerEvents: "none" });
   document.body.appendChild(pixel);
   e.dataTransfer.setDragImage(pixel, 0, 0);
-  setTimeout(() => pixel.remove(), 0);
+  window.setTimeout(() => pixel.remove(), 0);
 
   // Custom fully-opaque ghost, initially at cursor (DPR-scaled for sharpness).
   const w = ghostWidth;
   const h = (img.naturalHeight / img.naturalWidth) * w;
   const dpr = window.devicePixelRatio || 1;
-  const ghost = document.createElement("canvas");
+  const ghost = createEl("canvas");
   ghost.width = w * dpr;
   ghost.height = h * dpr;
   ghost.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;width:${w}px;height:${h}px;pointer-events:none;z-index:2147483647`;

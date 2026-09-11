@@ -6,7 +6,7 @@ import type { RowImage } from "../imageParse/rowParams";
 import { matchEmbedsToParsed } from "../imageParse/matchEmbeds";
 import { logger } from "../logger";
 const log = logger.channel("readingMode");
-import { storePendingAlignment, AlignValue } from "./rmAlignStore";
+import { storePendingAlignment } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
 import {
   setImageRowIndex, setImageLineRe,
@@ -77,8 +77,8 @@ export function createReadingModeProcessor(
     _postProcessing.add(el);
 
     const allInternalEmbeds = Array.from(
-      el.querySelectorAll(".internal-embed")
-    ) as HTMLElement[];
+      el.querySelectorAll<HTMLElement>(".internal-embed")
+    );
 
     // Skip embeds already inside a flex row (from a previous run)
     const freshEmbeds = allInternalEmbeds.filter(
@@ -109,7 +109,7 @@ export function createReadingModeProcessor(
     try {
       const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
       if (file instanceof TFile) {
-        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => window.setTimeout(r, 0));
         const content = await app.vault.cachedRead(file);
         const re = buildImageLineRe(options.imageExtensions);
         // Register the configured image-line regex so scrollAnchor's capture /
@@ -140,7 +140,7 @@ export function createReadingModeProcessor(
       } else {
         log.debug("ReadingMode file not found or not TFile", {
           sourcePath: ctx.sourcePath,
-          abstractFile: String(file),
+          abstractFile: file?.path ?? "(none)",
         });
       }
     } catch (e) {
@@ -248,17 +248,17 @@ export function createReadingModeProcessor(
         applyStandaloneAlignment(embed, options.alignment);
         const img = embed.querySelector<HTMLImageElement>("img");
         if (img) {
-          (img as any).__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
-          (img as any).__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+          img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
+          img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
             if (newAlign) {
               embed.setAttribute("data-diaa-alignment", newAlign);
             } else {
               embed.removeAttribute("data-diaa-alignment");
             }
-            (img as any).__diaa_alignment = newAlign;
+            img.__diaa_alignment = newAlign;
             applyStandaloneAlignment(embed, options.alignment);
             if (app && ctx.sourcePath) {
-              const effectiveAlign = (newAlign ?? options.alignment) as AlignValue;
+              const effectiveAlign = newAlign ?? options.alignment;
               const fn = getFileNameFromEmbed(embed);
               if (fn) storePendingAlignment(ctx.sourcePath, fn, effectiveAlign);
             }
@@ -334,7 +334,7 @@ export function createReadingModeProcessor(
       driveViewportTransition(app, "rm-after-restore");
     };
     if (wrapPromises.length > 0) {
-      Promise.all(wrapPromises).then(afterRender);
+      void Promise.all(wrapPromises).then(afterRender);
     } else {
       afterRender();
     }

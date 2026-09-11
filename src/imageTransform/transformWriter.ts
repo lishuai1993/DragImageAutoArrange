@@ -133,7 +133,7 @@ export async function writeOrientationToFile(
         const tx = -minX;
         const ty = -minY;
 
-        const canvas = document.createElement('canvas');
+        const canvas = createEl('canvas');
         canvas.width = dw;
         canvas.height = dh;
         const ctx = canvas.getContext('2d');

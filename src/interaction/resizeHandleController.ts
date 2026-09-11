@@ -61,7 +61,7 @@ export class ResizeHandleController {
 
     for (let i = 0; i < defs.length; i++) {
       const hd = defs[i];
-      const handle = document.createElement("div");
+      const handle = createDiv();
       handle.className = CLASSES.resizeHandle;
       // Use setProperty with "important" to defend against Obsidian CSS
       // that may apply !important overrides inside .cm-embed-block elements.
@@ -86,13 +86,9 @@ export class ResizeHandleController {
       // Converts cursor dx → item width change → flex-grow, so left/right
       // handles scale symmetrically despite the nonlinear flex→width mapping.
       let AW = 0;
-      let totalG = 0;
-      let startFlex = 0;
-      let startWidth = 0;
       let startHeight = 0;
       let startDisplayH = 0;
       let startItemHeights: number[] = [];
-      let scale = 1;
       let nItems = 0;
       handle.onmousedown = (e) => {
         try {
@@ -107,15 +103,6 @@ export class ResizeHandleController {
         nItems = this.host.getItemEls().length;
         AW = containerRect.width - (nItems - 1) * this.host.getGap();
 
-        totalG = 0;
-        const grows: number[] = [];
-        for (let j = 0; j < nItems; j++) {
-          const g = parseFloat(this.host.getItemEls()[j].style.flexGrow || "1");
-          grows.push(g);
-          totalG += g;
-        }
-        startFlex = grows[index];
-        startWidth = (startFlex / totalG) * AW;
         // Container height may be auto for single-image rows; fall back to
         // the actual rendered height from getBoundingClientRect.
         const explicitH = parseFloat(this.host.getContainer()!.style.height || "");
@@ -163,14 +150,8 @@ export class ResizeHandleController {
           ? Math.round(AW * meta.naturalHeight / meta.naturalWidth)
           : startHeight;
 
-        // Scale: image-content width to item-width ratio.
-        // When object-fit:contain makes the image narrower than the item,
-        // a cursor dx maps to a larger item-width change so the handle
-        // visually tracks the cursor 1:1.
         const displayRect = this.host.getImageContentRect(index);
-        const displayW = displayRect ? displayRect.width : startWidth;
         startDisplayH = displayRect ? displayRect.height : startHeight;
-        scale = displayW > 0 ? startWidth / displayW : 1;
         if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
         if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
 
@@ -200,19 +181,20 @@ export class ResizeHandleController {
               // Normal mode: image height directly controls rendered size.
               // width:auto preserves aspect ratio; flex:0 0 auto lets item
               // shrink to image size so justify-content alignment is visible.
-              this.host.getImageEls()[0].style.objectFit = "contain";
+              this.host.getImageEls()[0].setCssStyles({ objectFit: "contain" });
               this.host.getImageEls()[0].style.setProperty("object-position", this.host.getObjectPosition(), "important");
-              this.host.getImageEls()[0].style.width = "auto";
+              this.host.getImageEls()[0].removeClass(CLASSES.zoomPos);
+              this.host.getImageEls()[0].setCssStyles({ width: "auto" });
               this.host.getImageEls()[0].style.height = `${newHeight}px`;
-              this.host.getItemEls()[0].style.height = "";
-              this.host.getItemEls()[0].style.flex = "0 0 auto";
-              this.host.getContainer()!.style.height = "";
+              this.host.getItemEls()[0].setCssStyles({ height: "" });
+              this.host.getItemEls()[0].setCssStyles({ flex: "0 0 auto" });
+              this.host.getContainer()!.setCssStyles({ height: "" });
             } else {
               // Zoom mode: image and container "locked" together beyond fill-width.
               // Switch to object-fit:cover so the image fills the element height,
               // allowing growth past the width-constrained boundary.
-              this.host.getImageEls()[0].style.objectFit = "cover";
-              this.host.getImageEls()[0].style.setProperty("object-position", "center", "important");
+              this.host.getImageEls()[0].setCssStyles({ objectFit: "cover" });
+              this.host.getImageEls()[0].addClass(CLASSES.zoomPos);
               this.host.getImageEls()[0].style.height = `${newHeight}px`;
               this.host.getItemEls()[0].style.height = `${newHeight}px`;
               this.host.getContainer()!.style.height = `${newHeight}px`;

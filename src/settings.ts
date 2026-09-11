@@ -1,4 +1,12 @@
-import { App, ButtonComponent, PluginSettingTab, Setting } from "obsidian";
+import {
+  App,
+  ButtonComponent,
+  DropdownComponent,
+  Plugin,
+  PluginSettingTab,
+  Setting,
+  TextComponent,
+} from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 import { renderPixelPerfectSettings, type PixelPerfectBridge } from "./pixelPerfect/ppSettingsUi";
 import { logger, type LogLevel } from "./logger";
@@ -30,7 +38,7 @@ export interface DragImageSettings {
 /** Slider stops, least→most verbose. The slider index maps into this array. */
 const LOG_LEVELS: LogLevel[] = ["ERROR", "WARN", "INFO", "DEBUG"];
 
-export interface IDragImagePlugin {
+export interface IDragImagePlugin extends Plugin {
   settings: DragImageSettings;
   saveSettings(): Promise<void>;
   /** One-shot: reset every single-image row to the current size setting. */
@@ -39,14 +47,15 @@ export interface IDragImagePlugin {
   resetAllImageAlignments(): void;
 }
 
-export async function loadSettings(plugin: { loadData(): Promise<any> }): Promise<DragImageSettings> {
+export async function loadSettings(plugin: { loadData(): Promise<unknown> }): Promise<DragImageSettings> {
   const data = await plugin.loadData();
   // Support both new format ({ settings, preservedSizes }) and old format (settings directly)
-  const settings = data?.settings ?? data;
-  const merged = Object.assign({}, DEFAULT_SETTINGS, settings ?? {});
+  const raw = (data as { settings?: unknown } | null | undefined)?.settings ?? data;
+  const settings = (raw && typeof raw === "object" ? raw : {}) as Partial<DragImageSettings>;
+  const merged = Object.assign({}, DEFAULT_SETTINGS, settings);
   // Drop the pre-refactor `enabled` key so a stale saved `false` can't linger
   // in settings data — enable/disable is now exclusively the Obsidian plugin-list toggle.
-  delete (merged as Record<string, unknown>).enabled;
+  delete (merged as unknown as Record<string, unknown>).enabled;
   return merged;
 }
 
@@ -55,7 +64,7 @@ export class DragImageSettingTab extends PluginSettingTab {
   private bridge: PixelPerfectBridge | null;
 
   constructor(app: App, plugin: IDragImagePlugin, bridge?: PixelPerfectBridge | null) {
-    super(app, plugin as any);
+    super(app, plugin);
     this.plugin = plugin;
     this.bridge = bridge ?? null;
   }
@@ -66,10 +75,10 @@ export class DragImageSettingTab extends PluginSettingTab {
     // Scope the full-width-description reflow styles to this settings tab only.
     containerEl.addClass("drag-img-settings");
 
-    containerEl.createEl("h2", { text: "Drag Image Auto Arrange" });
+    // No plugin-name heading: the settings tab already carries it as its title.
 
     // ── Layout & interaction (global) ──────────────────────────
-    containerEl.createEl("h3", { text: "行布局与交互设置" });
+    new Setting(containerEl).setName("行布局与交互设置").setHeading();
     const layoutGroup = containerEl.createDiv();
     layoutGroup.addClass("drag-img-settings-group");
 
@@ -80,7 +89,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(80, 600, 10)
           .setValue(this.plugin.settings.defaultRowHeight)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.defaultRowHeight = value;
             await this.plugin.saveSettings();
@@ -94,7 +102,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(2, 10, 1)
           .setValue(this.plugin.settings.maxImagesPerRow)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.maxImagesPerRow = value;
             await this.plugin.saveSettings();
@@ -108,7 +115,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(0, 20, 1)
           .setValue(this.plugin.settings.gapSize)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.gapSize = value;
             await this.plugin.saveSettings();
@@ -122,7 +128,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(0, 10, 1)
           .setValue(this.plugin.settings.snapSensitivity)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.snapSensitivity = value;
             await this.plugin.saveSettings();
@@ -136,7 +141,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(4, 40, 2)
           .setValue(this.plugin.settings.topBarSensitivity)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.topBarSensitivity = value;
             await this.plugin.saveSettings();
@@ -145,12 +149,11 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     new Setting(layoutGroup)
       .setName("Ghost image width")
-      .setDesc("Width (px) of the drag ghost image that follows the cursor (100-500 px).")
+      .setDesc("Width (px) of the drag ghost image that follows the Cursor (100-500 px).")
       .addSlider((slider) =>
         slider
           .setLimits(100, 500, 10)
           .setValue(this.plugin.settings.ghostImageWidth)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.ghostImageWidth = value;
             await this.plugin.saveSettings();
@@ -164,7 +167,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(10, 90, 5)
           .setValue(this.plugin.settings.dragOpacity)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.dragOpacity = value;
             await this.plugin.saveSettings();
@@ -214,7 +216,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         slider
           .setLimits(50, 150, 10)
           .setValue(this.plugin.settings.menuScalePercent)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.menuScalePercent = value;
             await this.plugin.saveSettings();
@@ -223,7 +224,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     new Setting(layoutGroup)
       .setName("Image extensions")
-      .setDesc("Comma-separated list of image file extensions to detect (e.g., png,jpg,gif,webp).")
+      .setDesc("Comma-separated list of image file extensions to detect (e.g., PNG,JPG,GIF,webp).")
       .addText((text) =>
         text
           .setValue(this.plugin.settings.imageExtensions)
@@ -235,13 +236,12 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // ── Image Alignment (grouped) ──────────────────────────────
 
-    containerEl.createEl("h3", { text: "图片统一对齐设置" });
+    new Setting(containerEl).setName("图片统一对齐设置").setHeading();
 
     const alignGroup = containerEl.createDiv();
     alignGroup.addClass("drag-img-settings-group");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let alignDropdown: any;
+    let alignDropdown: DropdownComponent | null = null;
 
     new Setting(alignGroup)
       .setName("Image alignment")
@@ -260,9 +260,8 @@ export class DragImageSettingTab extends PluginSettingTab {
       });
 
     const alignSep = alignGroup.createDiv();
-    alignSep.style.borderBottom =
-      "1px solid var(--background-modifier-border)";
-    alignSep.style.margin = "12px 0";
+    alignSep.setCssStyles({ borderBottom: "1px solid var(--background-modifier-border)" });
+    alignSep.setCssStyles({ margin: "12px 0" });
 
     new Setting(alignGroup)
       .setName("Reset image alignments")
@@ -276,7 +275,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           .setCta()
           .onClick(() => {
             this.plugin.resetAllImageAlignments();
-            alignDropdown.setValue(
+            alignDropdown?.setValue(
               this.plugin.settings.alignment
             );
             this.flashResetFeedback(button);
@@ -286,7 +285,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     new Setting(alignGroup)
       .setName("Enable reading mode context menu")
       .setDesc(
-        "When enabled, right-clicking an image in Reading Mode shows the alignment menu. When disabled, Reading Mode is read-only — alignment can only be changed in Live Preview or Source mode."
+        "When enabled, right-clicking an image in reading mode shows the alignment menu. When disabled, reading mode is read-only — alignment can only be changed in live preview or source mode."
       )
       .addToggle((toggle) =>
         toggle
@@ -300,7 +299,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     new Setting(alignGroup)
       .setName("Reading mode: double-click image to preview")
       .setDesc(
-        "When enabled, opening an image's preview in Reading Mode requires a double click instead of a single click. When disabled, Reading Mode keeps Obsidian's native single-click behavior."
+        "When enabled, opening an image's preview in reading mode requires a double click instead of a single click. When disabled, reading mode keeps Obsidian's native single-click behavior."
       )
       .addToggle((toggle) =>
         toggle
@@ -313,7 +312,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // ── Single Image Display (grouped) ──────────────────────────
 
-    containerEl.createEl("h3", { text: "单图行图片尺寸设置" });
+    new Setting(containerEl).setName("单图行图片尺寸设置").setHeading();
 
     const singleImageGroup = containerEl.createDiv();
     singleImageGroup.addClass("drag-img-settings-group");
@@ -322,10 +321,8 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // Capture component refs so dropdown onChange and reset button onClick can
     // update the UI in-place (no full this.display() rebuild → no page jitter).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let sizeDropdown: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let widthText: any;
+    let sizeDropdown: DropdownComponent | null = null;
+    let widthText: TextComponent | null = null;
 
     const setWidthDisabled = (disabled: boolean) => {
       if (!widthText) return;
@@ -372,9 +369,8 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // Horizontal separator between the two sub-items
     const sep = singleImageGroup.createDiv();
-    sep.style.borderBottom =
-      "1px solid var(--background-modifier-border)";
-    sep.style.margin = "12px 0";
+    sep.setCssStyles({ borderBottom: "1px solid var(--background-modifier-border)" });
+    sep.setCssStyles({ margin: "12px 0" });
 
     new Setting(singleImageGroup)
       .setName("Reset single image sizes")
@@ -389,10 +385,10 @@ export class DragImageSettingTab extends PluginSettingTab {
           .onClick(() => {
             this.plugin.resetAllSingleImages();
             // Sync dropdown + width input in-place to reflect the reset
-            sizeDropdown.setValue(
+            sizeDropdown?.setValue(
               this.plugin.settings.singleImageSizeMode
             );
-            widthText.setValue(
+            widthText?.setValue(
               String(this.plugin.settings.singleImageWidth)
             );
             setWidthDisabled(
@@ -423,7 +419,7 @@ export class DragImageSettingTab extends PluginSettingTab {
    * effect on the next log call — no plugin reload needed.
    */
   private renderLogSettings(containerEl: HTMLElement): void {
-    containerEl.createEl("h3", { text: "日志与调试设置" });
+    new Setting(containerEl).setName("日志与调试设置").setHeading();
     const group = containerEl.createDiv();
     group.addClass("drag-img-settings-group");
 
@@ -448,7 +444,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     const levelSetting = new Setting(group)
       .setName("日志级别")
       .setDesc(
-        "低于所选级别的日志不会输出，同时作用于控制台与 log.txt。默认 ERROR，仅记录错误。"
+        "低于所选级别的日志不会输出，同时作用于控制台与 log.txt。默认 error，仅记录错误。"
       )
       .addSlider((slider) =>
         slider
@@ -565,11 +561,11 @@ export class DragImageSettingTab extends PluginSettingTab {
     button.setDisabled(true);
     button.setButtonText("已重置");
     el.classList.add("drag-img-btn-pressed");
-    setTimeout(() => {
+    window.setTimeout(() => {
       button.setDisabled(false);
       button.setButtonText(originalText);
       el.classList.remove("drag-img-btn-pressed");
-      el.style.minWidth = "";
+      el.setCssStyles({ minWidth: "" });
     }, 1500);
   }
 }

@@ -2,6 +2,7 @@ import { App, WorkspaceLeaf } from "obsidian";
 import { logger } from "../logger";
 const log = logger.channel("warmupProbe");
 import { setSectionSnapshot } from "./scrollAnchor";
+import { viewInternals } from "../obsidianInternals";
 // L3: release the per-section re-entry marks this warmup pass wrote into the RM
 // post-processor guard, so the real RM render can reprocess any section the warmup
 // touched but did not fully wrap (cross-pass mark leak → problem 1).
@@ -28,39 +29,21 @@ const STABLE_FRAMES_EARLY = 2;
 const SET_FALLBACK_AT_MS = 3000;
 
 // ── CSS override machinery ─────────────────────────────────────────────
+// The override rules live in styles.css (`.diaa-warmup-container` /
+// `.diaa-warmup-probe`): the classes are only ever applied by this module
+// while a warm-up is in flight, so a static rule set is equivalent to the
+// runtime-injected <style> element this used to create.
 
 const OVERRIDE_CLASS = "diaa-warmup-probe";
 const CONTAINER_OVERRIDE_CLASS = "diaa-warmup-container";
-const STYLE_ID = "diaa-warmup-probe-style";
-
-function ensureStyleEl(): void {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = `
-.${CONTAINER_OVERRIDE_CLASS} {
-  display: block !important;
-  visibility: hidden !important;
-  position: absolute !important;
-  inset: 0 !important;
-  pointer-events: none !important;
-}
-.${OVERRIDE_CLASS} {
-  display: block !important;
-  visibility: hidden !important;
-  position: absolute !important;
-  inset: 0 !important;
-  pointer-events: none !important;
-}`;
-  document.head.appendChild(style);
-}
 
 /** Apply overrides to the container chain so a non-active leaf's DOM
  *  is layout-capable. Returns cleanup. */
 function applyContainerOverrides(leaf: WorkspaceLeaf): () => void {
   const overridden: HTMLElement[] = [];
-  const contentEl = (leaf.view as any)?.contentEl as HTMLElement | undefined;
-  const containerEl = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+  const view = viewInternals(leaf.view);
+  const contentEl = view?.contentEl;
+  const containerEl = view?.containerEl;
 
   // Walk up from contentEl to the workspace-leaf, overriding each
   // ancestor that might have display:none.
@@ -103,7 +86,6 @@ function removeOverride(): void {
 export function cancelWarmupProbe(): void {
   removeOverride();
   _active = false;
-  document.getElementById(STYLE_ID)?.remove();
 }
 
 // ── Core warmup runner ─────────────────────────────────────────────────
@@ -123,19 +105,20 @@ export async function runWarmup(
 ): Promise<void> {
   if (_active) return;
 
-  const leaf = targetLeaf ?? app.workspace.activeLeaf;
+  const leaf = targetLeaf ?? app.workspace.getMostRecentLeaf();
   if (!leaf) return;
-  const view = leaf.view as any;
-  const file = view?.file?.path ?? "";
-  const mode = view?.getMode?.() ?? "";
+  const view = viewInternals(leaf.view);
+  if (!view) return;
+  const file = view.file?.path ?? "";
+  const mode = view.getMode?.() ?? "";
 
   if (!file || mode !== "source") return;
 
   const pm = view.previewMode;
-  const contentEl = (view.contentEl ?? view.containerEl) as HTMLElement | undefined;
-  const readingEl = contentEl?.querySelector(".markdown-reading-view") as HTMLElement | null;
-  const previewEl = readingEl?.querySelector(".markdown-preview-view") as HTMLElement | null;
-  const sizer = previewEl?.querySelector(".markdown-preview-sizer") as HTMLElement | null;
+  const contentEl = view.contentEl ?? view.containerEl;
+  const readingEl = contentEl?.querySelector<HTMLElement>(".markdown-reading-view");
+  const previewEl = readingEl?.querySelector<HTMLElement>(".markdown-preview-view");
+  const sizer = previewEl?.querySelector<HTMLElement>(".markdown-preview-sizer");
   if (!pm || !readingEl || !previewEl) {
     log.info("WARMUP aborted: preview objects missing", {
       file, hasPm: !!pm, hasReadingEl: !!readingEl, hasPreviewEl: !!previewEl,
@@ -148,13 +131,12 @@ export async function runWarmup(
 
   const preChildren = sizer?.childElementCount ?? -1;
   _active = true;
-  ensureStyleEl();
   readingEl.classList.add(OVERRIDE_CLASS);
   _overriddenEl = readingEl;
 
   log.info("WARMUP start", {
     file,
-    isActive: leaf === app.workspace.activeLeaf,
+    isActive: leaf === app.workspace.getMostRecentLeaf(),
     preChildren,
     clientH: previewEl.clientHeight,
     docH: previewEl.scrollHeight,
@@ -179,10 +161,10 @@ export async function runWarmup(
     // Capture snapshot if sections are available
     try {
       if (Array.isArray(secs) && secs.length > 0) {
-        const snap = secs.map((s: any) => ({
+        const snap = secs.map((s) => ({
           lineStart: s.lineStart, lineEnd: s.lineEnd, height: s.height,
         }));
-        const totalLines = view.editor?.lineCount?.()
+        const totalLines = view.editor?.lineCount()
           ?? (snap.length > 0 ? snap[snap.length - 1].lineEnd : 0);
         setSectionSnapshot(file, snap, totalLines);
         log.debug("WARMUP snapshot captured", { sections: snap.length, totalLines });
@@ -232,9 +214,9 @@ export async function runWarmup(
     const elapsed = performance.now() - t0;
 
     // User switched modes/files mid-warmup on the active leaf
-    if (leaf === app.workspace.activeLeaf) {
-      const curMode = (view?.getMode?.() ?? "");
-      const curFile = (view?.file?.path ?? "");
+    if (leaf === app.workspace.getMostRecentLeaf()) {
+      const curMode = view.getMode?.() ?? "";
+      const curFile = view.file?.path ?? "";
       if (curMode !== "source" || curFile !== file) {
         finish("aborted: view changed (user took over)");
         return;
@@ -260,7 +242,7 @@ export async function runWarmup(
     if (!setFallbackTried && elapsed >= SET_FALLBACK_AT_MS
         && (children <= preChildren || !rerenderOk)) {
       setFallbackTried = true;
-      const data = view.editor?.getValue?.() ?? "";
+      const data = view.editor?.getValue() ?? "";
       if (typeof pm.set === "function" && data) {
         try {
           pm.set(data, true);
@@ -302,7 +284,7 @@ export async function runWarmup(
       _active = false;
       return;
     }
-    requestAnimationFrame(tick);
+    window.requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
+  window.requestAnimationFrame(tick);
 }

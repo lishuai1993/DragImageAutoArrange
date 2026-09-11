@@ -1,7 +1,10 @@
 import { Notice, type Editor, type TFile } from 'obsidian';
 import { logger } from '../logger';
 import { parseEmbedParams, stripEmbedParams } from '../imageParse/embedRaw';
+import { trashFile } from '../utils';
 import { lineStartOffset, minimalTextChange } from './noteEdit';
+import { copyImageToClipboard } from './imageOps';
+import { planImageLinkRemoval, removeImageLinkOccurrences } from './imageLinkOps';
 import type { PixelPerfectFacade } from './pixelPerfectHost';
 
 const log = logger.channel('cutImage');
@@ -181,11 +184,11 @@ async function removeReferenceFromNote(
   const opts = { max: 1, line, afterRemoval: normalizeRowAfterRemoval };
   if (!editor) {
     log.debug('LOG_CUT_NO_EDITOR', { note: noteFile.path });
-    return facade.host.linkService.removeImageLinkOccurrences(imgFile, opts);
+    return removeImageLinkOccurrences(facade.app, imgFile, opts);
   }
 
   const before = editor.getValue();
-  const planned = facade.host.linkService.planImageLinkRemoval(before, imgFile, noteFile, opts);
+  const planned = planImageLinkRemoval(facade.app, before, imgFile, noteFile, opts);
   const change = minimalTextChange(before, planned.next);
   if (change) {
     editor.replaceRange(
@@ -217,13 +220,13 @@ export async function cutImage(
   editor: Editor | null
 ): Promise<void> {
   try {
-    await facade.host.imageService.copyImageToClipboard(img);
+    await copyImageToClipboard(img);
   } catch {
     new Notice(CUT_IMAGE_FAILED);
     return;
   }
 
-  const app = facade.host.app;
+  const app = facade.app;
   const line = resolveClickedSourceLine(img);
   const other = countOtherRefs(app.metadataCache.resolvedLinks, imgFile.path, noteFile.path);
 
@@ -259,6 +262,6 @@ export async function cutImage(
     return;
   }
 
-  await app.fileManager.trashFile(imgFile);
+  await trashFile(app, imgFile);
   new Notice(CUT_IMAGE_DONE);
 }

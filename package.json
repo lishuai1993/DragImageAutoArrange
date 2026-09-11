@@ -7,6 +7,7 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "lint": "tsc -noEmit -skipLibCheck",
+    "lint:obsidian": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -24,14 +25,18 @@
   "devDependencies": {
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
+    "@eslint/js": "^9.39.5",
+    "@eslint/json": "^0.14.0",
     "@types/jsdom": "^28.0.3",
     "@types/node": "^20.0.0",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
     "jsdom": "^29.1.1",
     "obsidian": "1.13.1",
     "tslib": "^2.6.0",
     "typescript": "^5.4.0",
+    "typescript-eslint": "^8.70.0",
     "vitest": "^4.1.9"
   }
 }

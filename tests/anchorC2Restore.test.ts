@@ -19,26 +19,27 @@ class FakeMutationObserver {
   constructor(cb: MutationCallback) { this.cb = cb; FakeMutationObserver.last = this; }
   observe() {}
   disconnect() {}
-  trigger() { this.cb([] as any, this as any); }
+  trigger() { this.cb([], this as unknown as MutationObserver); }
 }
 
 beforeAll(() => {
-  (globalThis as any).requestAnimationFrame = (cb: (t: number) => void) =>
-    setTimeout(() => cb(Date.now()), 0) as unknown as number;
-  (globalThis as any).cancelAnimationFrame = (h: number) => clearTimeout(h);
-  (globalThis as any).MutationObserver = FakeMutationObserver;
+  window.requestAnimationFrame = (cb: FrameRequestCallback) =>
+    window.setTimeout(() => cb(Date.now()), 0);
+  window.cancelAnimationFrame = (h: number) => window.clearTimeout(h);
+  // FakeMutationObserver omits `takeRecords`; the cast bridges that one gap.
+  window.MutationObserver = FakeMutationObserver as unknown as typeof MutationObserver;
 });
 
 /** Minimal preview root whose target embed can be toggled into existence. */
 class FakeRoot {
   present = false;
-  embed = { tag: "internal-embed" } as any;
+  readonly embed = { tag: "internal-embed" };
   querySelector(sel: string) {
     return this.present && sel.includes("internal-embed") ? this.embed : null;
   }
 }
 
-const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+const tick = (ms = 5) => new Promise((r) => window.setTimeout(r, ms));
 
 /** Build the C2 image-anchor cold-restore onFrame around the real primitives. */
 function makeColdRMFrame(root: FakeRoot, counters: {

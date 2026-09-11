@@ -1,59 +1,16 @@
-import { App, MarkdownView } from "obsidian";
+import { App } from "obsidian";
 import { logger } from "../logger";
-import {
-  getPendingAlignmentCount, clearFlushTimer, setFlushTimer, getFlushTimer, flushPendingAlignments,
-} from "../imageRender/rmAlignStore";
+import { activeMarkdownView } from "../utils";
+import { viewInternals, type ObsidianEditorView } from "../obsidianInternals";
+
 import {
   classifyCenter, ImageRowIndex, Line1, asLine1, buildImageRowIndex,
 } from "./viewportAnchor";
-import {
-  clamp01, intraRowRatio, gapRatioFromGeom, imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY,
-  LedgerSection, clientTopToDocY, scrollTopToPct, pctToScrollTop,
-} from "./anchorMath";
-import { assertNever } from "../utils";
-import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "../scrollSync/domLocators";
+import { clamp01, intraRowRatio, gapRatioFromGeom, nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY, clientTopToDocY, scrollTopToPct } from "./anchorMath";
+
+import { getRMPreviewEl, findEmbedByLine } from "../scrollSync/domLocators";
 import { normalizeAnchorText } from "./textAnchor";
-import {
-  ViewportAnchor, setImageRowIndex, getImageRowIndex, invalidateImageRowIndex,
-  getActiveAnchor, setActiveAnchor, getFallbackPct, setFallbackPct, getLastFallbackPct,
-  setLastFallbackPct, setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor,
-  getLastMode, setLastMode, getLastDocH, setLastDocH, getImageLineRe,
-  setRMLastAnchorList, getRMLastAnchorList,
-  state,
-  MIN_ANCHOR_TEXT_LEN,
-  TABLE_ROW_RE,
-  TABLE_SPLIT_RE,
-  BOX_DRAWING_RE,
-  _sectionSnapshot,
-  _snapshotLineCount,
-  LEDGER_DOCH_TOLERANCE,
-  LEDGER_PARK_TOL_MIN,
-  LEDGER_PARK_TOL_FRAC,
-  RATIO_GATE_TOL,
-  ENABLE_NATIVE_SCROLL,
-  SILENCE_WINDOW_MS,
-  RM_RESTORE_TIMEOUT_MS,
-  NATIVE_RETRY_INTERVAL,
-  RM_HOLD_TIMEOUT_MS,
-  RM_HOLD_CALM_FRAMES,
-  EARLY_RESTORE_MAX_FRAMES,
-  RM_EARLY_HOLD_FRAMES,
-  getRMDeferredRestoreId,
-  rmLoopEnterGuard,
-  cancelAllRestoreChains,
-  applySnapshotLineDelta,
-  setLastAnchor,
-  rmLoopExitGuard,
-  enterRestoreGuard,
-  setSectionSnapshot,
-  exitRestoreGuard,
-  isRestoreGuardActive,
-  isInSilenceWindow,
-  cancelRMHoldChain,
-  getScrollAnchor,
-  cancelRMDeferredRestore,
-} from "./anchorStore";
+import { ViewportAnchor, setImageRowIndex, getImageRowIndex, getActiveAnchor, getImageLineRe, MIN_ANCHOR_TEXT_LEN, TABLE_ROW_RE, TABLE_SPLIT_RE, BOX_DRAWING_RE, _sectionSnapshot, LEDGER_DOCH_TOLERANCE, RATIO_GATE_TOL } from "./anchorStore";
 
 const log = logger.channel("scrollAnchor");
 
@@ -61,11 +18,11 @@ const log = logger.channel("scrollAnchor");
 // ── anchorCapture (extracted from scrollAnchor.ts in P3 split) ──
 
 export function ensureImageRowIndexFromCM(app: App): void {
-  const view = (app.workspace.activeLeaf?.view as any);
+  const view = viewInternals(activeMarkdownView(app));
   const filePath = view?.file?.path ?? "";
   if (!filePath || getImageRowIndex(filePath) !== undefined) return;
 
-  const cm = view.editor?.cm;
+  const cm = view?.editor?.cm;
   if (!cm) return;
 
   const lines: string[] = [];
@@ -95,7 +52,10 @@ export function clampRatioWarn(raw: number, where: string): number {
  *  lineBlockAt expects a character position, not a line number). */
 
 
-export function lineBlockByNumber(cm: any, lineNo: Line1): any {
+export function lineBlockByNumber(
+  cm: ObsidianEditorView,
+  lineNo: Line1,
+): ReturnType<ObsidianEditorView["lineBlockAt"]> {
   const clamped = Math.max(1, Math.min(cm.state.doc.lines, lineNo));
   return cm.lineBlockAt(cm.state.doc.line(clamped).from);
 }
@@ -108,7 +68,7 @@ export function lineBlockByNumber(cm: any, lineNo: Line1): any {
  *  Returns 0 when `documentTop` is unavailable (degrades to prior behavior). */
 
 
-export function lpInset(cm: any, sd: HTMLElement): number {
+export function lpInset(cm: ObsidianEditorView | undefined, sd: HTMLElement): number {
   const docTop = cm?.documentTop;
   if (typeof docTop !== "number") return 0;
   return docTop - sd.getBoundingClientRect().top + sd.scrollTop;
@@ -135,8 +95,10 @@ export function nearestImgRowsByLine(
 
 export function rmTextBlocks(previewEl: HTMLElement): HTMLElement[] {
   const els = Array.from(
-    previewEl.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, .callout-title")
-  ) as HTMLElement[];
+    previewEl.querySelectorAll<HTMLElement>(
+      "p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, .callout-title"
+    )
+  );
   return els.filter(
     (e) => !e.closest(".internal-embed") && (e.textContent?.trim().length ?? 0) > 0
   );
@@ -159,8 +121,7 @@ export function imgIndexToSelector(imgRow: ImageRowIndex): string {
 
 
 export function computeScrollPct(app: App): number {
-  const leaf = app.workspace.activeLeaf;
-  const view = (leaf?.view as any);
+  const view = viewInternals(activeMarkdownView(app));
   if (!view?.file) return -1;
   const mode = view?.getMode?.() ?? "";
 
@@ -184,8 +145,7 @@ export function computeScrollPct(app: App): number {
 
 
 export function captureContentAnchor(app: App): ViewportAnchor | null {
-  const leaf = app.workspace.activeLeaf;
-  const view = (leaf?.view as any);
+  const view = activeMarkdownView(app);
   if (!view?.file) return null;
   const mode = view?.getMode?.() ?? "";
   const filePath = view.file.path ?? "";
@@ -220,8 +180,8 @@ export function extractCandidates(
 
 
 export function captureAnchorLP(app: App, filePath: string): ViewportAnchor | null {
-  const view = (app.workspace.activeLeaf?.view as any);
-  const cm = view.editor?.cm;
+  const view = viewInternals(activeMarkdownView(app));
+  const cm = view?.editor?.cm;
   const sd = cm?.scrollDOM;
   if (!sd || sd.clientHeight === 0) return null;
 
@@ -250,9 +210,9 @@ export function captureAnchorLP(app: App, filePath: string): ViewportAnchor | nu
       }
     }
   }
-  if (fmEndLine === undefined) {
+  if (fmEndLine === undefined && view?.file) {
     const fc = app.metadataCache.getFileCache(view.file);
-    fmEndLine = fc?.sections?.find(s => (s as any).type === "yaml")?.position?.end?.line;
+    fmEndLine = fc?.sections?.find(s => s.type === "yaml")?.position?.end?.line;
   }
 
   // ── Structural improvement A: pre-compute un-anchorable regions ──────
@@ -553,7 +513,7 @@ export function captureImageRowRM(
 
 
 export function findBestTextLine(
-  cm: any,
+  cm: ObsidianEditorView,
   anchor: Extract<ViewportAnchor, { kind: "text" }>,
   filePath: string,
 ): number {
@@ -704,7 +664,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
   log.debug("VIEWPORT ledger debug: rmLedgerYForLine called", {
     line1, totalLines: totalLines ?? "undefined", file: file ?? "undefined",
   });
-  const view = app.workspace.activeLeaf?.view as any;
+  const view = viewInternals(activeMarkdownView(app));
   const secs = view?.previewMode?.renderer?.sections;
   if (!Array.isArray(secs) || secs.length === 0) {
     log.debug("VIEWPORT ledger unavailable", {
@@ -721,7 +681,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
       });
       // Fall through to snapshot below — heights zeroed after warmup override removed.
     } else {
-      const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+      const docH = getRMPreviewEl(app)?.scrollHeight ?? 0;
       if (docH > 0 && Math.abs(total - docH) / docH > LEDGER_DOCH_TOLERANCE) {
         log.debug("VIEWPORT ledger distrusted", { total: Math.round(total), docH });
       } else {
@@ -738,7 +698,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
   // Fallback: when all sections lack lineStart/lineEnd, estimate Y from
   // proportional section heights.
   if (Array.isArray(secs) && secs.length > 0 && totalLines && totalLines > 0) {
-    const heights = secs.map((s: any) => (s.height as number) ?? 0);
+    const heights = secs.map((s) => s.height ?? 0);
     const totalH = heights.reduce((a, b) => a + b, 0);
     if (totalH > 0) {
       const y = sectionIndexEstimateY(heights, totalLines, line1);
@@ -750,12 +710,12 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
   }
 
   // Live ledger is empty / missing / distrusted — try the warm-up snapshot.
-  const key = file ?? (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+  const key = file ?? activeMarkdownView(app)?.file?.path ?? "";
   const snap = _sectionSnapshot.get(key);
   if (snap && snap.length > 0) {
     const total = ledgerTotalHeight(snap);
     if (total > 0) {
-      const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+      const docH = getRMPreviewEl(app)?.scrollHeight ?? 0;
       // Snapshot was taken under the warm-up override (viewport ~725px, not the
       // real 687px), so heights can drift a few percent. Allow a wider band.
       if (docH > 0 && Math.abs(total - docH) / docH > LEDGER_DOCH_TOLERANCE) {
@@ -765,7 +725,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
       const y = ledgerYForLine(snap, line1 - 1);
       if (y >= 0) return y;
       if (totalLines && totalLines > 0) {
-        const heights = snap.map((s: any) => (s.height as number) ?? 0);
+        const heights = snap.map((s) => s.height ?? 0);
         const totalH = heights.reduce((a, b) => a + b, 0);
         if (totalH > 0) {
           const y2 = sectionIndexEstimateY(heights, totalLines, line1);
@@ -781,14 +741,14 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
   // Both live ledger and warmup snapshot failed — try extrapolation from the
   // last known section for lines near the document tail.
   if (Array.isArray(secs) && secs.length > 0 && totalLines && totalLines > 0) {
-    const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+    const docH = getRMPreviewEl(app)?.scrollHeight ?? 0;
     if (docH > 0) {
       const y = extrapolateLedgerY(secs, line1, totalLines, docH);
       if (y >= 0) return y;
     }
   }
   if (snap && snap.length > 0 && totalLines && totalLines > 0) {
-    const docH = (getRMPreviewEl(app) as HTMLElement | null)?.scrollHeight ?? 0;
+    const docH = getRMPreviewEl(app)?.scrollHeight ?? 0;
     if (docH > 0) {
       const y = extrapolateLedgerY(snap, line1, totalLines, docH);
       if (y >= 0) return y;
@@ -806,7 +766,7 @@ export function rmLedgerYForLine(app: App, line1: number, file?: string, totalLi
 export function anchorTargetLine(app: App): number {
   const active = getActiveAnchor();
   if (!active) return 0;
-  const view = (app.workspace.activeLeaf?.view as any);
+  const view = activeMarkdownView(app);
   const filePath = view?.file?.path ?? "";
   if (!filePath) return 0;
 
@@ -859,7 +819,7 @@ export function anchorTargetLine(app: App): number {
 
 export function computeDocH(app: App, mode: string): number {
   if (mode === "source") {
-    const sd = (app.workspace.activeLeaf?.view as any)?.editor?.cm?.scrollDOM;
+    const sd = viewInternals(activeMarkdownView(app))?.editor?.cm?.scrollDOM;
     return sd?.scrollHeight ?? 0;
   }
   if (mode === "preview") {

@@ -2,7 +2,7 @@ import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IM
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
 import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
 import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
-import { resolveImageSrc, alignmentToCSS } from "../utils";
+import { alignmentToCSS } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
@@ -26,7 +26,7 @@ function mkRowKey(sourcePath: string, _lineStart: number, fileNames: string[]): 
  *  state — sidebars change the editor content width, which drives row heights. */
 export function getSidebarWidths(): { left: number; right: number } {
   const measure = (sel: string): number => {
-    const el = document.querySelector(sel) as HTMLElement | null;
+    const el = document.querySelector<HTMLElement>(sel);
     if (!el) return -1;
     if (el.classList.contains("is-collapsed")) return 0;
     return Math.round(el.getBoundingClientRect().width);
@@ -43,7 +43,7 @@ export function getSidebarWidths(): { left: number; right: number } {
  *  unreliable per-widget getBoundingClientRect width.  Returns 0 if unavailable. */
 export function getEditorContentWidth(container: HTMLElement | null): number {
   if (!container) return 0;
-  const content = container.closest(".cm-content") as HTMLElement | null;
+  const content = container.closest<HTMLElement>(".cm-content");
   return content ? Math.round(content.getBoundingClientRect().width) : 0;
 }
 
@@ -63,7 +63,7 @@ export function importPreservedSizes(data: Record<string, MultiImageSizeData>): 
     const suffix = key.split(":").pop()!;
     if (/^\d+$/.test(suffix)) continue;
     if (val && val.images && val.items) {
-      preservedMultiImageSizes.set(key, val as MultiImageSizeData);
+      preservedMultiImageSizes.set(key, val);
     }
   }
 }
@@ -459,9 +459,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const item = this.itemEls[i];
       // Level 1: position img element within item
       if (item) {
-        item.style.display = "flex";
+        item.setCssStyles({ display: "flex" });
         item.style.setProperty("justify-content", css.justifyContent, "important");
-        item.style.alignItems = "flex-start";
+        item.setCssStyles({ alignItems: "flex-start" });
       }
       // Level 2: position image content within img element
       img.style.setProperty("object-position", css.objectPosition, "important");
@@ -512,12 +512,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const css = alignmentToCSS(perImageAlign);
       // Level 1: position img element within its item via flex
       if (item) {
-        item.style.display = "flex";
+        item.setCssStyles({ display: "flex" });
         item.style.setProperty("justify-content", css.justifyContent, "important");
-        item.style.alignItems = "flex-start";
+        item.setCssStyles({ alignItems: "flex-start" });
       }
       // Level 2: position image content within img element
-      img.style.objectFit = "contain";
+      img.setCssStyles({ objectFit: "contain" });
       img.style.setProperty("object-position", css.objectPosition, "important");
       // Neutralize any Obsidian wrapper (.image-resize-container) inserted
       // between the item and the img.  Obsidian may set inline flex/alignment
@@ -549,8 +549,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Delayed check: what does the browser ACTUALLY render?
     // Inline "right top" with !important should win, but if computed
     // stays "left top", something is overriding it after our write.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         for (let i = 0; i < this.imageEls.length; i++) {
           const img = this.imageEls[i];
           if (!img || !img.isConnected) continue;
@@ -593,23 +593,23 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       },
     });
 
-    this.container = document.createElement("div");
+    this.container = createDiv();
     this.container.className = CLASSES.row;
     this.container.dataset.lineStart = String(this.group.lineStart);
     this.container.dataset.lineEnd = String(this.group.lineEnd);
-    this.container.style.display = "flex";
-    this.container.style.alignItems = "flex-start";
+    this.container.setCssStyles({ display: "flex" });
+    this.container.setCssStyles({ alignItems: "flex-start" });
     this.container.style.gap = `${this.options.gap}px`;
     // Apply alignment — use "important" to prevent CSS (Obsidian or our own) from overriding
     this.container.style.setProperty("justify-content", alignmentToCSS(this.options.alignment).justifyContent, "important");
-    this.container.style.width = "100%";
-    this.container.style.overflow = "hidden";
-    this.container.style.position = "relative";
+    this.container.setCssStyles({ width: "100%" });
+    this.container.setCssStyles({ overflow: "hidden" });
+    this.container.setCssStyles({ position: "relative" });
 
     // Edge indicators: absolutely-positioned lines that render above images
     // so they are always visible when the cursor targets the left/right edges.
     const makeEdge = (side: "left" | "right") => {
-      const el = document.createElement("div");
+      const el = createDiv();
       el.style.cssText = `display:none;position:absolute;top:0;bottom:0;width:${DIVIDER_WIDTH}px;${side}:0;background-color:#4a9eff;border-radius:2px;pointer-events:none;z-index:10`;
       this.container!.appendChild(el);
       return el;
@@ -619,7 +619,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Top hover bar (visual indicator only — pointer-events: none so it
     // never blocks resize handles at the top edge of images).
-    const topBar = document.createElement("div");
+    const topBar = createDiv();
     topBar.className = CLASSES.topBar;
     this.container.appendChild(topBar);
 
@@ -653,7 +653,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       topBar.style.backgroundColor = offsetY <= sensitivity ? "#4a9eff" : "";
     });
     this.container.addEventListener("mouseleave", () => {
-      topBar.style.backgroundColor = "";
+      topBar.setCssStyles({ backgroundColor: "" });
     });
 
     const images = this.group.images;
@@ -677,17 +677,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Set single-image base sizing immediately so it never appears at a wrong
     // size before the image loads and applyLayout computes the real width.
     if (this.isSingleRow()) {
-      this.imageEls[0].style.width = "auto";
+      this.imageEls[0].setCssStyles({ width: "auto" });
       this.imageEls[0].style.height = `${this.options.defaultRowHeight}px`;
       // Cap width to the container so a cached (wide-editor) height restored on
       // scroll-in rebuild can never overflow a narrow editor and get left-right
       // clipped; object-fit:contain then degrades it to a vertical letterbox
       // until recalc lands the exact height.
-      this.imageEls[0].style.maxWidth = "100%";
-      this.itemEls[0].style.flex = "0 0 auto";
-      this.itemEls[0].style.height = "";
-      this.itemEls[0].style.maxWidth = "100%";
-      this.container.style.height = "";
+      this.imageEls[0].setCssStyles({ maxWidth: "100%" });
+      this.itemEls[0].setCssStyles({ flex: "0 0 auto" });
+      this.itemEls[0].setCssStyles({ height: "" });
+      this.itemEls[0].setCssStyles({ maxWidth: "100%" });
+      this.container.setCssStyles({ height: "" });
     }
 
     // Restore last rendered pixel dimensions so the very first frame after a
@@ -788,7 +788,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // our synchronous calls return.  Schedule a deferred re-application so
     // we catch and strip any late-arriving classes (e.g. on tab switch
     // where cached images fire onload synchronously).
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       this.applyAlignmentToAll();
     });
 
@@ -796,28 +796,28 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
 
   private buildImageItem(image: RowImage, index: number): HTMLElement {
-    const item = document.createElement("div");
+    const item = createDiv();
     item.className = CLASSES.imageItem;
     const seedGrow = this.shareOf(image);
     item.style.flex = `${seedGrow} 1 0%`;
     item.style.flexGrow = `${seedGrow}`;
-    item.style.position = "relative";
-    item.style.overflow = "hidden";
-    item.style.minWidth = "50px";
-    item.style.minHeight = "0";
-    item.style.height = "100%";
+    item.setCssStyles({ position: "relative" });
+    item.setCssStyles({ overflow: "hidden" });
+    item.setCssStyles({ minWidth: "50px" });
+    item.setCssStyles({ minHeight: "0" });
+    item.setCssStyles({ height: "100%" });
     item.dataset.index = String(index);
 
-    const img = document.createElement("img");
+    const img = createEl("img");
     img.className = CLASSES.imageInner;
     img.alt = image.fileName;
     // Prevent Obsidian from wrapping this img in .image-resize-container,
     // which causes DOM mutations on hover that produce visual flashing.
     img.contentEditable = "false";
-    img.style.display = "block";
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.objectFit = "contain";
+    img.setCssStyles({ display: "block" });
+    img.setCssStyles({ width: "100%" });
+    img.setCssStyles({ height: "100%" });
+    img.setCssStyles({ objectFit: "contain" });
     img.style.setProperty("object-position", this.getObjectPosition(index), "important");
     log.debug("buildImageItem object-position", {
       index,
@@ -835,7 +835,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       log.debug("ImageRowWidget img onload", { index, file: image.fileName, naturalWidth: nw, naturalHeight: nh, complete: img.complete });
       this.loadedMetas.set(index, { naturalWidth: nw, naturalHeight: nh });
       this.applyLayout();
-      requestAnimationFrame(() => this.updateHandlePositions(index));
+      window.requestAnimationFrame(() => this.updateHandlePositions(index));
     };
 
     img.onload = handleLoad;
@@ -843,7 +843,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.onerror = () => {
       log.warn("Image load failed in widget", { fileName: image.fileName, index, src: img.src.substring(0, 80) });
       this.loadedMetas.set(index, { naturalWidth: 400, naturalHeight: 300 });
-      img.style.backgroundColor = "#f0f0f0";
+      img.setCssStyles({ backgroundColor: "#f0f0f0" });
       img.alt = `[Not found: ${image.fileName}]`;
       this.applyLayout();
     };
@@ -865,10 +865,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Store alignment callback on the img element so the document-level
     // contextmenu handler (main.ts) can read it at capture phase, which
     // runs before any other plugin's handler.
-    (img as any).__diaa_alignment = image.alignment;
-    (img as any).__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+    img.__diaa_alignment = image.alignment;
+    img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
       image.alignment = newAlign;
-      (img as any).__diaa_alignment = newAlign;
+      img.__diaa_alignment = newAlign;
       this.applyAlignmentToAll();
       this.persistCallback?.();
     };
@@ -932,8 +932,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
               restored: itemH,
             });
             imgEl.style.height = itemH;
-            imgEl.style.width = "auto";
-            imgEl.style.objectFit = "contain";
+            imgEl.setCssStyles({ width: "auto" });
+            imgEl.setCssStyles({ objectFit: "contain" });
             imgEl.style.setProperty("object-position", this.getObjectPosition(index), "important");
           }
         }
@@ -1187,15 +1187,15 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     renderWidth = Math.max(1, renderWidth);
     const imageH = Math.max(1, Math.round(renderWidth / aspect));
 
-    this.imageEls[0].style.objectFit = "contain";
+    this.imageEls[0].setCssStyles({ objectFit: "contain" });
     this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(0), "important");
     this.imageEls[0].style.height = `${imageH}px`;
-    this.imageEls[0].style.width = "auto";
-    this.imageEls[0].style.maxWidth = "100%";
-    this.itemEls[0].style.height = "";
-    this.itemEls[0].style.flex = "0 0 auto";
-    this.itemEls[0].style.maxWidth = "100%";
-    if (this.container) this.container.style.height = "";
+    this.imageEls[0].setCssStyles({ width: "auto" });
+    this.imageEls[0].setCssStyles({ maxWidth: "100%" });
+    this.itemEls[0].setCssStyles({ height: "" });
+    this.itemEls[0].setCssStyles({ flex: "0 0 auto" });
+    this.itemEls[0].setCssStyles({ maxWidth: "100%" });
+    if (this.container) this.container.setCssStyles({ height: "" });
 
     // Update the data model and materialize `|S|W` into markdown when it drifts.
     // Persist the container-independent intended width so it stays stable.
@@ -1208,7 +1208,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const target = writeRowImage({ ...img, alignment: align }, { followWidthPx: intendedWidth });
     if (target !== img.raw) {
       img.raw = target;
-      requestAnimationFrame(() => this.persistCallback?.());
+      window.requestAnimationFrame(() => this.persistCallback?.());
     }
 
     this.rowHeight = imageH;
@@ -1290,10 +1290,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           if (this.container.style.height !== preLayoutContainerH) {
             this.onLayoutChange?.();
           }
-          void this.container!.offsetHeight;
+          void this.container.offsetHeight;
           this.updateAllHandlePositions();
           this.backfillMissingParams();
-          requestAnimationFrame(() => this._logRenderedState("LivePreview"));
+          window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
           return;
           } // !hasScale
           // hasScale: delete stale preserved entry so recalculateRowHeight
@@ -1318,7 +1318,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const containerWidth = this.container.getBoundingClientRect().width;
       // Element not in DOM yet — retry after layout
       if (containerWidth === 0) {
-        requestAnimationFrame(() => this.applyLayout());
+        window.requestAnimationFrame(() => this.applyLayout());
         return;
       }
       // ── Single-image row ──
@@ -1336,7 +1336,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         this.updateAllHandlePositions();
         this.backfillMissingParams();
         this.applyAlignmentToAll();
-        requestAnimationFrame(() => this._logRenderedState("LivePreview"));
+        window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
         return;
       }
 
@@ -1369,11 +1369,11 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           this._scaleDirtyImages.add(i);
           if (this.group.images[i].alignment == null) {
             this.group.images[i].alignment = this.options.alignment;
-            if (this.imageEls[i]) (this.imageEls[i] as any).__diaa_alignment = this.options.alignment;
+            if (this.imageEls[i]) this.imageEls[i].__diaa_alignment = this.options.alignment;
           }
         }
         // Compute scale ratios after layout settles (RAF so DOM is painted).
-        requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
           for (let i = 0; i < this.group.images.length; i++) {
             const mi = this.group.images[i];
             if (mi.display.kind !== "multi" || mi.display.fill != null) continue;
@@ -1391,7 +1391,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       }
       for (let i = 0; i < this.imageEls.length; i++) {
         this.imageEls[i].style.height = h;
-        this.imageEls[i].style.width = "auto";
+        this.imageEls[i].setCssStyles({ width: "auto" });
       }
 
       log.debug("ImageRowWidget layout applied", {
@@ -1407,7 +1407,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // Force reflow so handle positions use the new dimensions
       void this.container.offsetHeight;
       this.updateAllHandlePositions();
-      requestAnimationFrame(() => this._logRenderedState("LivePreview"));
+      window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } else {
       // Use a sensible default until images load.  Prefer the last rendered
       // container height (cached from a previous successful layout) so the
@@ -1470,7 +1470,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
       if (img.alignment == null) {
         img.alignment = this.options.alignment;
-        if (this.imageEls[i]) (this.imageEls[i] as any).__diaa_alignment = this.options.alignment;
+        if (this.imageEls[i]) this.imageEls[i].__diaa_alignment = this.options.alignment;
         changed = true;
       }
 
@@ -1526,7 +1526,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     if (changed) {
       this.applyAlignmentToAll();
-      requestAnimationFrame(() => this.persistCallback?.());
+      window.requestAnimationFrame(() => this.persistCallback?.());
     }
     return needRelayout;
   }
@@ -1539,7 +1539,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     for (const item of this.itemEls) item.style.height = h;
     for (const img of this.imageEls) {
       img.style.height = h;
-      img.style.width = "auto";
+      img.setCssStyles({ width: "auto" });
     }
   }
 
@@ -1569,7 +1569,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       currentContainerH: _beforeContainerH,
     });
     if (containerWidth === 0) {
-      requestAnimationFrame(() => this.recalculateRowHeight());
+      window.requestAnimationFrame(() => this.recalculateRowHeight());
       return;
     }
     // Record the document-uniform width so build() can scale stale cached
@@ -1683,7 +1683,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           this._scaleDirtyImages.add(i);
         }
         // Compute scale ratios after layout settles.
-        requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
           for (let i = 0; i < n; i++) {
             const mi = this.group.images[i];
             if (mi.display.kind !== "multi" || mi.display.fill != null) continue;
@@ -1722,7 +1722,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       for (let i = 0; i < n; i++) {
         const hPx = `${heights[i]}px`;
         this.imageEls[i].style.height = hPx;
-        this.imageEls[i].style.width = "auto";
+        this.imageEls[i].setCssStyles({ width: "auto" });
         this.itemEls[i].style.height = hPx;
       }
       this.container.style.height = `${maxH}px`;
@@ -1742,7 +1742,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         // aspect ratio so that flex justify-content alignment within
         // the item is visible (without "auto", width stays 100% and
         // the img fills the item, hiding any alignment offset).
-        this.imageEls[i].style.width = "auto";
+        this.imageEls[i].setCssStyles({ width: "auto" });
       }
     }
 
@@ -1792,7 +1792,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         atWidth: containerWidth,
       });
     }
-    requestAnimationFrame(() => this._logRenderedState("LivePreview"));
+    window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } catch (e) {
       log.error("ImageRowWidget recalculateRowHeight error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
       // Leave current DOM unchanged on error.
@@ -1899,8 +1899,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.itemEls[leftIndex + 1].style.height = hPx;
     this.imageEls[leftIndex].style.height = hPx;
     this.imageEls[leftIndex + 1].style.height = hPx;
-    this.imageEls[leftIndex].style.width = "auto";
-    this.imageEls[leftIndex + 1].style.width = "auto";
+    this.imageEls[leftIndex].setCssStyles({ width: "auto" });
+    this.imageEls[leftIndex + 1].setCssStyles({ width: "auto" });
     let maxH = clamped;
     for (let j = 0; j < n; j++) {
       if (j === leftIndex || j === leftIndex + 1) continue;
@@ -1987,7 +1987,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     for (let i = 0; i < n; i++) {
       this.itemEls[i].style.height = hPx2;
       this.imageEls[i].style.height = hPx2;
-      this.imageEls[i].style.width = "auto";
+      this.imageEls[i].setCssStyles({ width: "auto" });
     }
     this.container!.style.height = hPx2;
 

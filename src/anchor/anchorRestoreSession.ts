@@ -53,15 +53,20 @@ export function runRestoreLoop(opts: RestoreLoopOptions): RestoreLoopHandle {
     if (result instanceof Promise) {
       // Async onFrame: its synchronous prefix (e.g. the restore attempt) still
       // runs inline; scheduling/halt happens once the awaited signals resolve.
-      result.then((outcome) => {
-        if (halted) return;
-        if (outcome === "stop") { halt(); return; }
-        opts.setId(requestAnimationFrame(frame));
-      });
+      // A rejected frame means the restore attempt broke, so halt rather than
+      // reschedule onto a broken state — and keep the rejection off the global
+      // unhandled-rejection path.
+      result
+        .then((outcome) => {
+          if (halted) return;
+          if (outcome === "stop") { halt(); return; }
+          opts.setId(window.requestAnimationFrame(frame));
+        })
+        .catch(() => halt());
     } else {
       // Sync fast path — identical to the pre-P4-C behavior (no microtask gap).
       if (result === "stop") { halt(); return; }
-      opts.setId(requestAnimationFrame(frame));
+      opts.setId(window.requestAnimationFrame(frame));
     }
   };
 
@@ -73,7 +78,7 @@ export function runRestoreLoop(opts: RestoreLoopOptions): RestoreLoopHandle {
   }
 
   if (opts.firstFrameSync) frame();
-  else opts.setId(requestAnimationFrame(frame));
+  else opts.setId(window.requestAnimationFrame(frame));
 
   return { cancel: halt };
 }

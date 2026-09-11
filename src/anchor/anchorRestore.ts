@@ -1,84 +1,18 @@
-import { App, MarkdownView } from "obsidian";
+import { App } from "obsidian";
 import { logger } from "../logger";
-import {
-  getPendingAlignmentCount, clearFlushTimer, setFlushTimer, getFlushTimer, flushPendingAlignments,
-} from "../imageRender/rmAlignStore";
-import {
-  classifyCenter, ImageRowIndex, Line1, asLine1, buildImageRowIndex,
-} from "./viewportAnchor";
-import {
-  clamp01, intraRowRatio, gapRatioFromGeom, imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY,
-  LedgerSection, clientTopToDocY, scrollTopToPct, pctToScrollTop,
-} from "./anchorMath";
-import { assertNever } from "../utils";
-import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "../scrollSync/domLocators";
+
+import { asLine1 } from "./viewportAnchor";
+import { imageRowTargetY, gapJunction, gapTargetY, textTargetY, nearestIndexBy, clientTopToDocY, pctToScrollTop } from "./anchorMath";
+import { activeMarkdownView, assertNever } from "../utils";
+import { getRMPreviewEl, findEmbedByLine } from "../scrollSync/domLocators";
 import { normalizeAnchorText } from "./textAnchor";
-import {
-  ViewportAnchor, setImageRowIndex, getImageRowIndex, invalidateImageRowIndex,
-  getActiveAnchor, setActiveAnchor, getFallbackPct, setFallbackPct, getLastFallbackPct,
-  setLastFallbackPct, setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor,
-  getLastMode, setLastMode, getLastDocH, setLastDocH, getImageLineRe,
-  setRMLastAnchorList, getRMLastAnchorList,
-  state,
-  MIN_ANCHOR_TEXT_LEN,
-  TABLE_ROW_RE,
-  TABLE_SPLIT_RE,
-  BOX_DRAWING_RE,
-  _sectionSnapshot,
-  _snapshotLineCount,
-  LEDGER_DOCH_TOLERANCE,
-  LEDGER_PARK_TOL_MIN,
-  LEDGER_PARK_TOL_FRAC,
-  RATIO_GATE_TOL,
-  ENABLE_NATIVE_SCROLL,
-  SILENCE_WINDOW_MS,
-  RM_RESTORE_TIMEOUT_MS,
-  NATIVE_RETRY_INTERVAL,
-  RM_HOLD_TIMEOUT_MS,
-  RM_HOLD_CALM_FRAMES,
-  EARLY_RESTORE_MAX_FRAMES,
-  RM_EARLY_HOLD_FRAMES,
-  getRMDeferredRestoreId,
-  rmLoopEnterGuard,
-  cancelAllRestoreChains,
-  applySnapshotLineDelta,
-  setLastAnchor,
-  rmLoopExitGuard,
-  enterRestoreGuard,
-  setSectionSnapshot,
-  exitRestoreGuard,
-  isRestoreGuardActive,
-  isInSilenceWindow,
-  cancelRMHoldChain,
-  getScrollAnchor,
-  cancelRMDeferredRestore,
-} from "./anchorStore";
+import { editorCmOf, viewInternals, instanceScrollIntoView } from "../obsidianInternals";
+import { ViewportAnchor, getImageRowIndex, getActiveAnchor, setActiveAnchor, getFallbackPct, setFallbackPct, state, ENABLE_NATIVE_SCROLL } from "./anchorStore";
 
 const log = logger.channel("scrollAnchor");
 
 
-import {
-  ensureImageRowIndexFromCM,
-  clampRatioWarn,
-  lineBlockByNumber,
-  lpInset,
-  nearestImgRowsByLine,
-  rmTextBlocks,
-  imgIndexToSelector,
-  computeScrollPct,
-  captureContentAnchor,
-  extractCandidates,
-  captureAnchorLP,
-  captureAnchorRM,
-  nearestImgRowsRM,
-  rmRowBounds,
-  captureImageRowRM,
-  findBestTextLine,
-  rmLedgerYForLine,
-  anchorTargetLine,
-  computeDocH,
-} from "./anchorCapture";
+import { lineBlockByNumber, lpInset, rmTextBlocks, imgIndexToSelector, rmRowBounds, findBestTextLine, rmLedgerYForLine, computeDocH } from "./anchorCapture";
 
 // ── anchorRestore (extracted from scrollAnchor.ts in P3 split) ──
 
@@ -86,13 +20,13 @@ export function scheduleRestoreAccuracyCheck(
   app: App, mode: string, anchor: ViewportAnchor, kind: string,
   restoreScrollTop: number, restoreDocH: number,
 ): void {
-  if (state._accuracyTimer) clearTimeout(state._accuracyTimer);
+  if (state._accuracyTimer) window.clearTimeout(state._accuracyTimer);
   const capturedDocRatio = anchor.kind === "text" ? anchor.docRatio : -1;
   const expectedOffset = anchor.kind === "text" ? anchor.anchorOffset : -1;
   const frag = anchor.kind === "text" ? anchor.anchorText.slice(0, 40) : "";
-  state._accuracyTimer = setTimeout(() => {
+  state._accuracyTimer = window.setTimeout(() => {
     state._accuracyTimer = null;
-    const v = (app.workspace.activeLeaf?.view as any);
+    const v = activeMarkdownView(app);
     const curMode = v?.getMode?.() ?? "";
     if (curMode !== mode) return; // mode changed since restore, stale check
 
@@ -101,7 +35,7 @@ export function scheduleRestoreAccuracyCheck(
     let actualViewportOffset = -1;
 
     if (mode === "preview") {
-      const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+      const previewEl = getRMPreviewEl(app);
       if (!previewEl) return;
       curScrollTop = previewEl.scrollTop;
       curDocH = previewEl.scrollHeight;
@@ -120,7 +54,7 @@ export function scheduleRestoreAccuracyCheck(
         }
       }
     } else if (mode === "source") {
-      const sd = (v?.editor?.cm?.scrollDOM) as HTMLElement | null;
+      const sd = editorCmOf(v)?.scrollDOM;
       if (sd) { curScrollTop = sd.scrollTop; curDocH = sd.scrollHeight; }
     }
 
@@ -156,8 +90,7 @@ export function restoreContentAnchor(app: App): boolean {
   if (!active) return false;
   const anchor = active;
 
-  const leaf = app.workspace.activeLeaf;
-  const view = (leaf?.view as any);
+  const view = activeMarkdownView(app);
   const mode = view?.getMode?.() ?? "";
   const filePath = view?.file?.path ?? "";
 
@@ -189,9 +122,9 @@ export function restoreContentAnchor(app: App): boolean {
     const curDocH = computeDocH(app, mode);
     let curScrollTop = 0;
     if (mode === "preview") {
-      curScrollTop = (getRMPreviewEl(app) as HTMLElement)?.scrollTop ?? 0;
+      curScrollTop = getRMPreviewEl(app)?.scrollTop ?? 0;
     } else if (mode === "source") {
-      curScrollTop = (view?.editor?.cm?.scrollDOM as HTMLElement)?.scrollTop ?? 0;
+      curScrollTop = editorCmOf(view)?.scrollDOM?.scrollTop ?? 0;
     }
     scheduleRestoreAccuracyCheck(app, mode, anchor, anchor.kind, curScrollTop, curDocH);
     setActiveAnchor(null);
@@ -208,10 +141,9 @@ export function restoreImageRowInLP(
   app: App, filePath: string,
   imageRowIndex: number, intraRowRatio: number,
 ): boolean {
-  const view = (app.workspace.activeLeaf?.view as any);
-  const cm = view.editor?.cm;
+  const cm = editorCmOf(activeMarkdownView(app));
   const sd = cm?.scrollDOM;
-  if (!sd || sd.clientHeight === 0) return false;
+  if (!cm || !sd || sd.clientHeight === 0) return false;
 
   const imgIndex = getImageRowIndex(filePath);
   const imgRow = imgIndex?.find(r => r.index === imageRowIndex);
@@ -240,7 +172,7 @@ export function restoreImageRowInRM(
   app: App, filePath: string,
   imageRowIndex: number, intraRowRatio: number,
 ): boolean {
-  const previewEl = getRMPreviewEl(app) as HTMLElement;
+  const previewEl = getRMPreviewEl(app);
   if (!previewEl || previewEl.clientHeight === 0) return false;
 
   const imgIndex = getImageRowIndex(filePath);
@@ -282,10 +214,9 @@ export function restoreImageGapInLP(
   app: App, filePath: string,
   imgBefore: number, imgAfter: number, gapRatio: number,
 ): boolean {
-  const view = (app.workspace.activeLeaf?.view as any);
-  const cm = view.editor?.cm;
+  const cm = editorCmOf(activeMarkdownView(app));
   const sd = cm?.scrollDOM;
-  if (!sd || sd.clientHeight === 0) return false;
+  if (!cm || !sd || sd.clientHeight === 0) return false;
 
   const imgIndex = getImageRowIndex(filePath);
   if (!imgIndex) return false;
@@ -322,7 +253,7 @@ export function restoreImageGapInRM(
   app: App, filePath: string,
   imgBefore: number, imgAfter: number, gapRatio: number,
 ): boolean {
-  const previewEl = getRMPreviewEl(app) as HTMLElement;
+  const previewEl = getRMPreviewEl(app);
   if (!previewEl || previewEl.clientHeight === 0) return false;
 
   const imgIndex = getImageRowIndex(filePath);
@@ -361,10 +292,9 @@ export function restoreTextInLP(
   app: App, filePath: string,
   anchor: Extract<ViewportAnchor, { kind: "text" }>,
 ): boolean {
-  const view = (app.workspace.activeLeaf?.view as any);
-  const cm = view.editor?.cm;
+  const cm = editorCmOf(activeMarkdownView(app));
   const sd = cm?.scrollDOM;
-  if (!sd || sd.clientHeight === 0) return false;
+  if (!cm || !sd || sd.clientHeight === 0) return false;
 
   const line = findBestTextLine(cm, anchor, filePath);
   if (line > 0) {
@@ -426,7 +356,7 @@ export function restoreTextInRM(
   app: App, filePath: string,
   anchor: Extract<ViewportAnchor, { kind: "text" }>,
 ): boolean {
-  const previewEl = getRMPreviewEl(app) as HTMLElement;
+  const previewEl = getRMPreviewEl(app);
   if (!previewEl || previewEl.clientHeight === 0) return false;
 
   const previewRect = previewEl.getBoundingClientRect();
@@ -672,27 +602,24 @@ export function restoreTextInRM(
 
 export function nativeScrollToLine(app: App, targetLine: number): boolean {
   if (!ENABLE_NATIVE_SCROLL || targetLine <= 0) return false;
-  const view = (app.workspace.activeLeaf?.view as any);
-  const mode = view?.getMode?.() ?? "";
+  const view = viewInternals(activeMarkdownView(app));
+  if (!view) return false;
+  const mode = view.getMode?.() ?? "";
   if (mode !== "source" && mode !== "preview") return false;
 
   try {
     if (mode === "source") {
       const cm = view.editor?.cm;
       if (!cm) return false;
-      if (targetLine > (cm.state?.doc?.lines ?? 0)) return false;
+      if (targetLine > cm.state.doc.lines) return false;
       const pos = cm.state.doc.line(targetLine).from;
-      if (typeof cm.scrollIntoView === "function") {
-        cm.scrollIntoView(pos, { y: "center" });
-      } else {
-        return false;
-      }
+      if (!instanceScrollIntoView(cm, pos, { y: "center" })) return false;
       // CM height maps are virtual: scrollTop updates synchronously.
       // Wait one rAF for the scroll position to stabilize, then verify.
-      const sd = cm.scrollDOM as HTMLElement | null;
+      const sd = cm.scrollDOM;
       const before = sd?.scrollTop ?? -1;
       if (before >= 0) {
-        requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
           const after = sd?.scrollTop ?? -1;
           log.debug("VIEWPORT native-scroll LP", { targetLine, before: Math.round(before), after: Math.round(after) });
         });
@@ -712,7 +639,7 @@ export function nativeScrollToLine(app: App, targetLine: number): boolean {
         return true;
       }
       // Fall back to previewMode.applyScroll if available (Obsidian internal API).
-      if (view.previewMode && typeof view.previewMode.applyScroll === "function") {
+      if (typeof view.previewMode?.applyScroll === "function") {
         view.previewMode.applyScroll(targetLine);
         log.debug("VIEWPORT native-scroll RM applyScroll", { targetLine });
         return true;
@@ -741,14 +668,13 @@ export function restoreScrollPct(app: App): boolean {
   const pct = getFallbackPct();
   if (pct < 0) return false;
 
-  const leaf = app.workspace.activeLeaf;
-  const view = (leaf?.view as any);
+  const view = viewInternals(activeMarkdownView(app));
   const mode = view?.getMode?.() ?? "";
 
   let targetY = -1, docH = 0, viewportH = 0, actualY = -1;
 
   if (mode === "source") {
-    const sd = view.editor?.cm?.scrollDOM;
+    const sd = view?.editor?.cm?.scrollDOM;
     if (sd && sd.scrollHeight > sd.clientHeight) {
       docH = sd.scrollHeight;
       viewportH = sd.clientHeight;
@@ -757,7 +683,7 @@ export function restoreScrollPct(app: App): boolean {
       actualY = sd.scrollTop;
     }
   } else if (mode === "preview") {
-    const previewEl = getRMPreviewEl(app) as HTMLElement;
+    const previewEl = getRMPreviewEl(app);
     if (previewEl && previewEl.scrollHeight > previewEl.clientHeight) {
       docH = previewEl.scrollHeight;
       viewportH = previewEl.clientHeight;

@@ -6,7 +6,7 @@ import {
     restoreDefaultFileOperationOrder,
     sanitizeResizeSizes,
     FILE_OPERATION_IDS,
-} from '../src/vendor/pixelPerfectImage/ui/settings';
+} from '../src/pixelPerfect/ppSettingsModel';
 
 describe('restoreDefaultFileOperationOrder', () => {
     it('returns the canonical order, all visible, for an empty input', () => {

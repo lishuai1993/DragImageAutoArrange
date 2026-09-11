@@ -29,7 +29,7 @@ import * as warmupProbe from "../src/scrollSync/warmupProbe";
 import * as warmupScheduler from "../src/scrollSync/warmupScheduler";
 import * as rmAlignStore from "../src/imageRender/rmAlignStore";
 import * as matchEmbeds from "../src/imageParse/matchEmbeds";
-import * as embedRaw from "../src/imageParse/embedRaw";
+
 import * as settings from "../src/settings";
 import * as constants from "../src/constants";
 import * as utils from "../src/utils";
@@ -59,10 +59,10 @@ describe("refactor surface smoke", () => {
   it("critical entry-point names survive refactor (update only on intentional rename)", () => {
     const must = (mod: Mod, name: string) =>
       expect(typeof mod[name] !== "undefined", `${mod === scrollAnchor ? "scrollAnchor" : ""} missing ${name}`).toBe(true);
-    must(rmFlexRow as Mod, "wrapAsFlexRow");
-    must(scrollAnchor as Mod, "driveViewportTransition");
-    must(imageRowWidget as Mod, "ImageRowWidget");
-    must(layoutEngine as Mod, "computeDividerEquilibrium");
-    must(readingMode as Mod, "createReadingModeProcessor");
+    must(rmFlexRow, "wrapAsFlexRow");
+    must(scrollAnchor, "driveViewportTransition");
+    must(imageRowWidget, "ImageRowWidget");
+    must(layoutEngine, "computeDividerEquilibrium");
+    must(readingMode, "createReadingModeProcessor");
   });
 });

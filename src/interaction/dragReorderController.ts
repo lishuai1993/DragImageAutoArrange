@@ -76,7 +76,7 @@ export class DragReorderController {
         e.stopPropagation();
         this.draggingSelf = false;
         item.classList.remove(CLASSES.dragging);
-        item.style.opacity = "";
+        item.setCssStyles({ opacity: "" });
         this.hideDividerHint();
       };
 
@@ -205,7 +205,7 @@ export class DragReorderController {
 
       if (closestIdx === 0 || closestIdx === positions.length - 1) {
         e.preventDefault();
-        e.dataTransfer!.dropEffect = "move";
+        e.dataTransfer.dropEffect = "move";
         this.showDividerHint(e.clientX, e.clientY);
       }
     };
@@ -281,10 +281,10 @@ export class DragReorderController {
       const edgeRight = this.host.getEdgeRight();
       if (cursorX < centerX && edgeLeft) {
         edgeLeft.style.height = `${containerRect.height}px`;
-        edgeLeft.style.display = "";
+        edgeLeft.setCssStyles({ display: "" });
       } else if (edgeRight) {
         edgeRight.style.height = `${containerRect.height}px`;
-        edgeRight.style.display = "";
+        edgeRight.setCssStyles({ display: "" });
       }
       return;
     }
@@ -318,15 +318,15 @@ export class DragReorderController {
       // Internal position → highlight the corresponding physical divider
       const divIndex = closestIdx - 1; // positions[1] maps to dividerEls[0]
       if (divIndex < dividerEls.length) {
-        dividerEls[divIndex].style.backgroundColor = "#4a9eff";
+        dividerEls[divIndex].setCssStyles({ backgroundColor: "#4a9eff" });
         dividerEls[divIndex].classList.add(CLASSES.dividerActive);
       }
     } else if (!this.draggingSelf && closestIdx === 0 && edgeLeft) {
       edgeLeft.style.height = `${containerRect.height}px`;
-      edgeLeft.style.display = "";
+      edgeLeft.setCssStyles({ display: "" });
     } else if (!this.draggingSelf && edgeRight) {
       edgeRight.style.height = `${containerRect.height}px`;
-      edgeRight.style.display = "";
+      edgeRight.setCssStyles({ display: "" });
     }
   }
 
@@ -359,13 +359,13 @@ export class DragReorderController {
   /** Clear all drag-over highlight states. */
   private hideDividerHint(): void {
     for (const div of this.host.getDividerEls()) {
-      div.style.backgroundColor = "";
+      div.setCssStyles({ backgroundColor: "" });
       div.classList.remove(CLASSES.dividerActive);
     }
     const edgeLeft = this.host.getEdgeLeft();
     const edgeRight = this.host.getEdgeRight();
-    if (edgeLeft) edgeLeft.style.display = "none";
-    if (edgeRight) edgeRight.style.display = "none";
+    if (edgeLeft) edgeLeft.setCssStyles({ display: "none" });
+    if (edgeRight) edgeRight.setCssStyles({ display: "none" });
   }
 
   /** Remove document-level capture listeners. */

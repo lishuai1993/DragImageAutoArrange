@@ -80,11 +80,11 @@ function simulateImagesLoaded(
 ): void {
   const imgs = container.querySelectorAll('img');
   for (let i = 0; i < imgs.length && i < dims.length; i++) {
-    const img = imgs[i] as HTMLImageElement;
+    const img = imgs[i];
     Object.defineProperty(img, 'naturalWidth', { value: dims[i].w, configurable: true });
     Object.defineProperty(img, 'naturalHeight', { value: dims[i].h, configurable: true });
     Object.defineProperty(img, 'complete', { value: true, configurable: true });
-    if (img.onload) (img.onload as any)(new Event('load'));
+    if (img.onload) img.onload.call(img, new Event('load'));
   }
 }
 
@@ -94,14 +94,13 @@ class MockResizeObserver {
   unobserve() {}
   disconnect() {}
 }
-(globalThis as any).ResizeObserver = MockResizeObserver;
+window.ResizeObserver = MockResizeObserver;
 
 // jsdom lacks getBoundingClientRect that reflects layout — patch to
 // return a plausible container width so applyLayout doesn't retry via RAF.
 function patchBoundingRect(container: HTMLElement, width = 800): void {
-  const origGetBoundingClientRect = container.getBoundingClientRect.bind(container);
   container.getBoundingClientRect = () => {
-    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: 200, width, height: 200, toJSON() {} } as DOMRect;
+    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: 200, width, height: 200, toJSON() {} };
   };
 }
 
@@ -128,7 +127,7 @@ describe('sanitizeOptions', () => {
       defaultRowHeight: NaN,
       gap: Infinity,
       snapSensitivity: -Infinity,
-    } as unknown as ImageRowOptions;
+    };
     const s = sanitizeOptions(bad);
     expect(s.defaultRowHeight).toBe(200);
     expect(s.gap).toBe(4);
@@ -306,7 +305,7 @@ describe('ImageRowWidget alignment (multi-image, all images)', () => {
     ]);
     const imgs = el.querySelectorAll('img');
     for (let i = 0; i < imgs.length; i++) {
-      expect((imgs[i] as HTMLImageElement).style.objectPosition).toBe('right top');
+      expect(imgs[i].style.objectPosition).toBe('right top');
     }
   });
 });
@@ -340,9 +339,9 @@ describe('ImageRowWidget alignment persists across widget recreation (preserved 
     ]);
     // Simulate corner-handle resize on image 2: set inline height
     const imgsA = elA.querySelectorAll('img');
-    (imgsA[2] as HTMLImageElement).style.height = '361px';
+    imgsA[2].setCssStyles({ height: '361px' });
     const itemC = elA.querySelectorAll('.drag-img-item')[2] as HTMLElement;
-    itemC.style.height = '361px';
+    itemC.setCssStyles({ height: '361px' });
     // Destroy — this saves preservedMultiImageSizes internally
     widgetA.destroy();
 
@@ -366,7 +365,7 @@ describe('ImageRowWidget alignment persists across widget recreation (preserved 
     const imgsB = elB.querySelectorAll('img');
     expect(imgsB.length).toBe(4);
     for (let i = 0; i < imgsB.length; i++) {
-      const op = (imgsB[i] as HTMLImageElement).style.objectPosition;
+      const op = imgsB[i].style.objectPosition;
       expect(op, `img[${i}] object-position after alignment change`).toBe('right top');
     }
   });
@@ -517,8 +516,8 @@ describe('ImageRowWidget re-applies pending orientation preview across rebuild',
     );
     const imgs = el.querySelectorAll('img');
     expect(imgs.length).toBe(2);
-    expect((imgs[0] as HTMLImageElement).style.transform).toBe('rotate(270deg)');
-    expect((imgs[1] as HTMLImageElement).style.transform).toBe('scaleX(-1)');
+    expect(imgs[0].style.transform).toBe('rotate(270deg)');
+    expect(imgs[1].style.transform).toBe('scaleX(-1)');
   });
 
   it('leaves rebuilt images untransformed once the pending state is cleared', () => {

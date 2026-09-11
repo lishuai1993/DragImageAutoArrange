@@ -10,19 +10,20 @@ class FakeMutationObserver {
   constructor(cb: MutationCallback) { this.cb = cb; FakeMutationObserver.last = this; }
   observe() {}
   disconnect() {}
-  trigger() { this.cb([] as any, this as any); }
+  trigger() { this.cb([], this as unknown as MutationObserver); }
 }
 
 beforeAll(() => {
-  (globalThis as any).requestAnimationFrame = (cb: (t: number) => void) =>
-    setTimeout(() => cb(Date.now()), 0) as unknown as number;
-  (globalThis as any).cancelAnimationFrame = (h: number) => clearTimeout(h);
-  (globalThis as any).MutationObserver = FakeMutationObserver;
+  window.requestAnimationFrame = (cb: FrameRequestCallback) =>
+    window.setTimeout(() => cb(Date.now()), 0);
+  window.cancelAnimationFrame = (h: number) => window.clearTimeout(h);
+  // FakeMutationObserver omits `takeRecords`; the cast bridges that one gap.
+  window.MutationObserver = FakeMutationObserver as unknown as typeof MutationObserver;
 });
 
 class FakeRoot {
   present = false;
-  embed = { tag: "internal-embed" } as any;
+  readonly embed = { tag: "internal-embed" };
   querySelector(sel: string) {
     return this.present && sel.includes("internal-embed") ? this.embed : null;
   }
@@ -31,8 +32,8 @@ class FakeRoot {
 describe("anchorSignals (P4-C)", () => {
   it("nextFrame resolves on the next frame", async () => {
     let done = false;
-    nextFrame().then(() => { done = true; });
-    await new Promise((r) => setTimeout(r, 5));
+    void nextFrame().then(() => { done = true; });
+    await new Promise((r) => window.setTimeout(r, 5));
     expect(done).toBe(true);
   });
 
@@ -42,8 +43,7 @@ describe("anchorSignals (P4-C)", () => {
     expect(ok).toBe(true);
     expect(n).toBe(3);
 
-    let m = 0;
-    const fail = await waitFor(() => { m++; return false; }, { maxFrames: 4 });
+    const fail = await waitFor(() => false, { maxFrames: 4 });
     expect(fail).toBe(false);
   });
 

@@ -718,8 +718,6 @@ describe('findInsertIndex', () => {
     // But for cursor at gap center (x=405), old logic doesn't fire on any item
     // → container handler uses old binary choice: 405 > 355 → insertAt = 2 (WRONG)
     // New logic: 405 is exactly at divider → returns 1 (CORRECT)
-    const oldFallback = 405 < (100 + 510 / 2) ? 0 : 2; // 405 > 355 → 2 (WRONG)
-    expect(oldFallback).toBe(2);
     expect(findInsertIndex(405, left, widths, gap, 60)).toBe(1);
   });
 

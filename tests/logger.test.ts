@@ -1,34 +1,56 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import type { DataAdapter } from 'obsidian';
 
 // Mock obsidian DataAdapter
 vi.mock('obsidian', () => ({}));
 
 import { logger } from '../src/logger';
 
-function createMockAdapter() {
+/** The vitest Mock surfaces the tests drive (`mockResolvedValue`, `.mock.calls`)
+ *  while remaining assignable to Obsidian's `DataAdapter` at the call site. */
+type MockAdapter = {
+  write: Mock<(path: string, data: string) => Promise<void>>;
+  read: Mock<(path: string) => Promise<string>>;
+};
+
+function createMockAdapter(): MockAdapter {
   return {
-    write: vi.fn().mockResolvedValue(undefined),
-    read: vi.fn().mockResolvedValue(''),
-  } as any;
+    write: vi.fn<(path: string, data: string) => Promise<void>>().mockResolvedValue(undefined),
+    read: vi.fn<(path: string) => Promise<string>>().mockResolvedValue(''),
+  };
 }
 
+function asAdapter(adapter: MockAdapter): DataAdapter {
+  return adapter as unknown as DataAdapter;
+}
+
+/** Private fields the tests inspect/reset directly (the logger keeps them
+ *  `private` on purpose, so the tests reach them through one narrow view). */
+interface LoggerInternals {
+  _channels: Map<string, unknown>;
+  _fileOutputFilter: string[] | null;
+  _buffer: Array<{ level: string; message: string; data?: unknown }>;
+  _matchFilter(channelName: string): boolean;
+}
+const internals = logger as unknown as LoggerInternals;
+
 describe('logger', () => {
-  let adapter: ReturnType<typeof createMockAdapter>;
+  let adapter: MockAdapter;
 
   beforeEach(async () => {
     adapter = createMockAdapter();
     // Reset singleton state between tests to avoid cross-test pollution
     await logger.dispose();
-    (logger as any)._channels.clear();
-    (logger as any)._fileOutputFilter = null;
-    (logger as any)._buffer = [];
+    internals._channels.clear();
+    internals._fileOutputFilter = null;
+    internals._buffer = [];
     logger.setMinLevel('DEBUG');
     logger.setFileEnabled(true);
   });
 
   describe('init', () => {
     it('clears stale log file on startup', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       expect(adapter.write).toHaveBeenCalledWith('test-log.txt', '');
       expect(adapter.write).toHaveBeenCalledTimes(1);
     });
@@ -36,14 +58,14 @@ describe('logger', () => {
     it('does not throw when adapter.write fails', async () => {
       adapter.write.mockRejectedValue(new Error('disk full'));
       await expect(
-        logger.init(adapter, 'test-log.txt')
+        logger.init(asAdapter(adapter), 'test-log.txt')
       ).resolves.not.toThrow();
     });
   });
 
   describe('dispose', () => {
     it('clears log file on dispose', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       adapter.write.mockClear();
 
       logger.info('test message');
@@ -57,15 +79,15 @@ describe('logger', () => {
     });
 
     it('clears the flush interval timer on dispose', async () => {
-      const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
-      await logger.init(adapter, 'test-log.txt');
+      const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       await logger.dispose();
       expect(clearIntervalSpy).toHaveBeenCalled();
       clearIntervalSpy.mockRestore();
     });
 
     it('sets adapter to null after dispose', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       await logger.dispose();
     });
   });
@@ -73,10 +95,10 @@ describe('logger', () => {
   describe('flush', () => {
     it('writes buffered entries to file', async () => {
       await logger.dispose();
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       adapter.write.mockClear();
 
-      (logger as any)._buffer.push({
+      internals._buffer.push({
         timestamp: '2026-01-01T00:00:00.000Z',
         level: 'INFO',
         channel: 'default',
@@ -98,46 +120,46 @@ describe('logger', () => {
 
   describe('log methods', () => {
     it('info adds entry to buffer', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.info('hello', { count: 1 });
-      const buf = (logger as any)._buffer;
+      const buf = internals._buffer;
       expect(buf.length).toBeGreaterThan(0);
       expect(buf[buf.length - 1].message).toBe('hello');
       expect(buf[buf.length - 1].data).toEqual({ count: 1 });
     });
 
     it('warn adds entry to buffer', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.warn('warning');
-      const buf = (logger as any)._buffer;
+      const buf = internals._buffer;
       expect(buf[buf.length - 1].level).toBe('WARN');
     });
 
     it('error adds entry to buffer', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.error('oops');
-      const buf = (logger as any)._buffer;
+      const buf = internals._buffer;
       expect(buf[buf.length - 1].level).toBe('ERROR');
     });
 
     it('debug adds entry to buffer', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.debug('trace');
-      const buf = (logger as any)._buffer;
+      const buf = internals._buffer;
       expect(buf[buf.length - 1].level).toBe('DEBUG');
     });
   });
 
   describe('log lifecycle', () => {
     it('init → log → dispose clears file from both ends', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       expect(adapter.write).toHaveBeenCalledWith('test-log.txt', '');
 
       logger.info('session start');
       logger.info('something happened');
       logger.warn('anomaly');
       logger.debug('details');
-      expect((logger as any)._buffer.length).toBeGreaterThanOrEqual(4);
+      expect(internals._buffer.length).toBeGreaterThanOrEqual(4);
 
       adapter.write.mockClear();
       await logger.dispose();
@@ -221,13 +243,13 @@ describe('logger', () => {
   describe('file output filter', () => {
     it('filter excludes non-listed channels', () => {
       logger.setFileOutputFilter(['alpha']);
-      const filter = (logger as any)._fileOutputFilter;
+      const filter = internals._fileOutputFilter;
       expect(filter).toEqual(['alpha']);
     });
 
     it('matchFilter matches ancestor names', () => {
       logger.setFileOutputFilter(['livePreview']);
-      const match = (logger as any)._matchFilter.bind(logger);
+      const match = internals._matchFilter.bind(logger);
       expect(match('livePreview')).toBe(true);
       expect(match('livePreview.drag')).toBe(true);
       expect(match('livePreview.drag.resize')).toBe(true);
@@ -237,7 +259,7 @@ describe('logger', () => {
     it('clearFileOutputFilter restores full output', () => {
       logger.setFileOutputFilter(['alpha']);
       logger.clearFileOutputFilter();
-      expect((logger as any)._fileOutputFilter).toBeNull();
+      expect(internals._fileOutputFilter).toBeNull();
     });
   });
 
@@ -255,10 +277,10 @@ describe('logger', () => {
 
   describe('min level gate', () => {
     const levelsIn = () =>
-      (logger as any)._buffer.map((e: { level: string }) => e.level);
+      internals._buffer.map((e: { level: string }) => e.level);
 
     it('default DEBUG forwards every level to the buffer', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.setMinLevel('DEBUG');
       const ch = logger.channel('gateDefault');
       ch.debug('d');
@@ -269,7 +291,7 @@ describe('logger', () => {
     });
 
     it('WARN threshold keeps only WARN and ERROR', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.setMinLevel('WARN');
       const ch = logger.channel('gateWarn');
       ch.debug('d');
@@ -280,7 +302,7 @@ describe('logger', () => {
     });
 
     it('ERROR threshold keeps only ERROR buffered', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.setMinLevel('ERROR');
       const ch = logger.channel('gateError');
       ch.debug('d');
@@ -291,10 +313,10 @@ describe('logger', () => {
     });
 
     it('ERROR threshold silences the console below ERROR', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.setMinLevel('ERROR');
       const ch = logger.channel('gateConsole');
-      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
       ch.debug('d');
       ch.info('i');
       ch.warn('w');
@@ -306,13 +328,13 @@ describe('logger', () => {
     });
 
     it('setFileEnabled(false) buffers nothing and writes nothing', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.setFileEnabled(false);
       adapter.write.mockClear();
       const ch = logger.channel('gateNoFile');
       ch.error('e');
       ch.info('i');
-      expect((logger as any)._buffer.length).toBe(0);
+      expect(internals._buffer.length).toBe(0);
       await logger.flush();
       const nonEmpty = adapter.write.mock.calls.filter(
         (c: unknown[]) => c[1] !== ''
@@ -321,15 +343,15 @@ describe('logger', () => {
     });
 
     it('channel console switch still applies on top of the level gate', async () => {
-      await logger.init(adapter, 'test-log.txt');
+      await logger.init(asAdapter(adapter), 'test-log.txt');
       logger.setMinLevel('DEBUG');
       const ch = logger.channel('gateChannel');
       ch.outputToConsole = false;
-      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
       ch.error('e');
       expect(spy.mock.calls.length).toBe(0);
       // Still buffered for the file sink — the two gates are independent.
-      expect((logger as any)._buffer.length).toBe(1);
+      expect(internals._buffer.length).toBe(1);
       spy.mockRestore();
     });
   });

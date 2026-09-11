@@ -1,117 +1,32 @@
-import { App, MarkdownView } from "obsidian";
+import { App, MarkdownView, type ViewStateResult } from "obsidian";
 import { logger } from "../logger";
 import {
   getPendingAlignmentCount, clearFlushTimer, setFlushTimer, getFlushTimer, flushPendingAlignments,
 } from "../imageRender/rmAlignStore";
-import {
-  classifyCenter, ImageRowIndex, Line1, asLine1, buildImageRowIndex,
-} from "./viewportAnchor";
-import {
-  clamp01, intraRowRatio, gapRatioFromGeom, imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY,
-  LedgerSection, clientTopToDocY, scrollTopToPct, pctToScrollTop,
-} from "./anchorMath";
-import { assertNever } from "../utils";
-import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "../scrollSync/domLocators";
-import { normalizeAnchorText } from "./textAnchor";
-import {
-  ViewportAnchor, setImageRowIndex, getImageRowIndex, invalidateImageRowIndex,
-  getActiveAnchor, setActiveAnchor, getFallbackPct, setFallbackPct, getLastFallbackPct,
-  setLastFallbackPct, setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor,
-  getLastMode, setLastMode, getLastDocH, setLastDocH, getImageLineRe,
-  setRMLastAnchorList, getRMLastAnchorList,
-  state,
-  MIN_ANCHOR_TEXT_LEN,
-  TABLE_ROW_RE,
-  TABLE_SPLIT_RE,
-  BOX_DRAWING_RE,
-  _sectionSnapshot,
-  _snapshotLineCount,
-  LEDGER_DOCH_TOLERANCE,
-  LEDGER_PARK_TOL_MIN,
-  LEDGER_PARK_TOL_FRAC,
-  RATIO_GATE_TOL,
-  ENABLE_NATIVE_SCROLL,
-  SILENCE_WINDOW_MS,
-  RM_RESTORE_TIMEOUT_MS,
-  NATIVE_RETRY_INTERVAL,
-  RM_HOLD_TIMEOUT_MS,
-  RM_HOLD_CALM_FRAMES,
-  EARLY_RESTORE_MAX_FRAMES,
-  RM_EARLY_HOLD_FRAMES,
-  getRMDeferredRestoreId,
-  rmLoopEnterGuard,
-  cancelAllRestoreChains,
-  applySnapshotLineDelta,
-  setLastAnchor,
-  rmLoopExitGuard,
-  enterRestoreGuard,
-  setSectionSnapshot,
-  exitRestoreGuard,
-  isRestoreGuardActive,
-  isInSilenceWindow,
-  cancelRMHoldChain,
-  getScrollAnchor,
-  cancelRMDeferredRestore,
-  getEditorDirty,
-  setEditorDirty,
-} from "./anchorStore";
+import { asLine1 } from "./viewportAnchor";
+import { textTargetY } from "./anchorMath";
+import { activeMarkdownView, assertNever } from "../utils";
+import { editorCmOf, viewInternals } from "../obsidianInternals";
+import { getRMPreviewEl, queryPreviewViewIn } from "../scrollSync/domLocators";
+
+import { ViewportAnchor, getImageRowIndex, invalidateImageRowIndex, setActiveAnchor, getFallbackPct, setFallbackPct, getLastFallbackPct, getRMLastAnchor, getLPLastAnchor, getLastMode, setLastMode, getLastDocH, setLastDocH, getImageLineRe, getRMLastAnchorList, state, EARLY_RESTORE_MAX_FRAMES, RM_EARLY_HOLD_FRAMES, cancelAllRestoreChains, enterRestoreGuard, exitRestoreGuard, cancelRMHoldChain, getEditorDirty, setEditorDirty } from "./anchorStore";
 
 const log = logger.channel("scrollAnchor");
 
 
-import {
-  ensureImageRowIndexFromCM,
-  clampRatioWarn,
-  lineBlockByNumber,
-  lpInset,
-  nearestImgRowsByLine,
-  rmTextBlocks,
-  imgIndexToSelector,
-  computeScrollPct,
-  captureContentAnchor,
-  extractCandidates,
-  captureAnchorLP,
-  captureAnchorRM,
-  nearestImgRowsRM,
-  rmRowBounds,
-  captureImageRowRM,
-  findBestTextLine,
-  rmLedgerYForLine,
-  anchorTargetLine,
-  computeDocH,
-} from "./anchorCapture";
+import { ensureImageRowIndexFromCM, lineBlockByNumber, lpInset, findBestTextLine, anchorTargetLine, computeDocH } from "./anchorCapture";
 
-import {
-  scheduleRestoreAccuracyCheck,
-  restoreContentAnchor,
-  restoreImageRowInLP,
-  restoreImageRowInRM,
-  restoreImageGapInLP,
-  restoreImageGapInRM,
-  restoreTextInLP,
-  restoreTextInRM,
-  nativeScrollToLine,
-  restoreScrollPct,
-} from "./anchorRestore";
+import { restoreContentAnchor, nativeScrollToLine, restoreScrollPct } from "./anchorRestore";
 
-import {
-  logScrollCapture,
-  ensureRMScrollTracking,
-  startRMSettleHold,
-  scheduleRMDeferredRestore,
-  ensureLPScrollTracking,
-  scheduleLPDeferredRestore,
-  probeSwitchScroll,
-} from "./anchorTracking";
+import { scheduleRMDeferredRestore, ensureLPScrollTracking, scheduleLPDeferredRestore, probeSwitchScroll } from "./anchorTracking";
 
 // ── anchorModeSwitch (extracted from scrollAnchor.ts in P3 split) ──
 
-export function incomingScrollerOf(view: any, mode: string): HTMLElement | null {
-  if (mode === "source") return (view?.editor?.cm?.scrollDOM ?? null) as HTMLElement | null;
+export function incomingScrollerOf(view: unknown, mode: string): HTMLElement | null {
+  if (mode === "source") return editorCmOf(view)?.scrollDOM ?? null;
   if (mode === "preview") {
-    const c = (view?.contentEl ?? view?.containerEl) as HTMLElement | undefined;
-    return queryPreviewViewIn(c);
+    const v = viewInternals(view);
+    return queryPreviewViewIn(v?.contentEl ?? v?.containerEl);
   }
   return null;
 }
@@ -137,16 +52,16 @@ export function scheduleRMHold(
   const start = performance.now();
   const hold = () => {
     state._rmHoldChainId = null;
-    const view = app.workspace.activeLeaf?.view as any;
+    const view = activeMarkdownView(app);
     if ((view?.getMode?.() ?? "") !== "preview") return; // switched away
     if ((view?.file?.path ?? "") !== file) return;       // file changed
     // Skip frames where the RM preview DOM has no content yet
     // (post-processor may be mid-flight). Don't count these
     // against the fixed hold budget.
-    const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+    const previewEl = getRMPreviewEl(app);
     const hasContent = previewEl && previewEl.scrollHeight > previewEl.clientHeight + 100;
     if (!hasContent && performance.now() - start < 5000) {
-      state._rmHoldChainId = requestAnimationFrame(hold);
+      state._rmHoldChainId = window.requestAnimationFrame(hold);
       return;
     }
     const before = previewEl?.scrollTop ?? -1;
@@ -154,12 +69,12 @@ export function scheduleRMHold(
     if (--holdFrames > 0) {
       // If scrollTop didn't change after the assertion, the revert either
       // didn't happen or was already corrected — no need for further holds.
-      const after = (getRMPreviewEl(app) as HTMLElement | null)?.scrollTop ?? -2;
+      const after = getRMPreviewEl(app)?.scrollTop ?? -2;
       if (after === before) return;
-      state._rmHoldChainId = requestAnimationFrame(hold);
+      state._rmHoldChainId = window.requestAnimationFrame(hold);
     }
   };
-  state._rmHoldChainId = requestAnimationFrame(hold);
+  state._rmHoldChainId = window.requestAnimationFrame(hold);
 }
 
 /** RM→LP (source) early restore, invoked in the Promise microtask after setState
@@ -192,7 +107,7 @@ export function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string)
   // later occurrence (e.g. TOC entry), producing a large downward offset.
   if (seedPct >= 0 && seedPct <= 0.02) {
     state._lpEarlyRestoreDone = true;
-    const sd = (app.workspace.activeLeaf?.view as any)?.editor?.cm?.scrollDOM as HTMLElement | null;
+    const sd = editorCmOf(activeMarkdownView(app))?.scrollDOM ?? null;
     if (sd && sd.clientHeight > 0) {
       sd.scrollTop = 0;
       log.info("VIEWPORT anchor-restored", { mode: "source", kind: "top-shortcut", targetY: 0 });
@@ -222,12 +137,12 @@ export function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string)
 
   const poll = () => {
     state._earlyRestoreId = null;
-    const view = app.workspace.activeLeaf?.view as any;
+    const view = activeMarkdownView(app);
     if ((view?.getMode?.() ?? "") !== "source") { state._lpEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
     if ((view?.file?.path ?? "") !== file) { state._lpEarlyRestoreDone = true; exitGuardIfNeeded(); return; }
-    const sc = view?.editor?.cm?.scrollDOM as HTMLElement | null;
+    const sc = editorCmOf(view)?.scrollDOM ?? null;
     if (!sc || sc.clientHeight === 0) {
-      if (--frames > 0) { state._earlyRestoreId = requestAnimationFrame(poll); }
+      if (--frames > 0) { state._earlyRestoreId = window.requestAnimationFrame(poll); }
       else { state._lpEarlyRestoreDone = true; }
       return;
     }
@@ -276,7 +191,7 @@ export function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string)
       nativeTried = true;
       const line = anchorTargetLine(app);
       if (nativeScrollToLine(app, line)) {
-        if (--frames > 0) { state._earlyRestoreId = requestAnimationFrame(poll); }
+        if (--frames > 0) { state._earlyRestoreId = window.requestAnimationFrame(poll); }
         else { state._lpEarlyRestoreDone = true; exitGuardIfNeeded(); }
         return;
       }
@@ -294,14 +209,14 @@ export function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string)
     // line's block-top has shifted.
     if (ok && seedAnchor.kind === "text") {
       const saved = seedAnchor;
-      setTimeout(() => {
+      window.setTimeout(() => {
         try {
-          const v = app.workspace.activeLeaf?.view as any;
+          const v = activeMarkdownView(app);
           if ((v?.getMode?.() ?? "") !== "source") return;
           if ((v?.file?.path ?? "") !== file) return;
-          const cm = v?.editor?.cm;
-          const sd = cm?.scrollDOM as HTMLElement | null;
-          if (!sd || sd.clientHeight === 0) return;
+          const cm = editorCmOf(v);
+          const sd = cm?.scrollDOM ?? null;
+          if (!cm || !sd || sd.clientHeight === 0) return;
           const line = findBestTextLine(cm, saved, file);
           if (line > 0) {
             const lb = lineBlockByNumber(cm, asLine1(line));
@@ -321,7 +236,7 @@ export function scheduleEarlyRestoreLP(app: App, fromMode: string, file: string)
     }
   };
 
-  state._earlyRestoreId = requestAnimationFrame(poll);
+  state._earlyRestoreId = window.requestAnimationFrame(poll);
 }
 
 /** Seed the active anchor from the OUTGOING mode's slot (same source as
@@ -362,7 +277,7 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
   let firstReadyFrame = true;
   // B-4: capture diagnostic context at poll-start so the giveup log can report
   // what state led to the failure, even after variables go out of scope.
-  let _failureDiag: Record<string, any> = {};
+  let _failureDiag: Record<string, unknown> = {};
 
   const exitGuardIfNeeded = () => {
     if (guardActive) { exitRestoreGuard(); guardActive = false; }
@@ -370,7 +285,7 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
 
   const poll = () => {
     state._earlyRestoreId = null;
-    const view = app.workspace.activeLeaf?.view as any;
+    const view = activeMarkdownView(app);
     if ((view?.getMode?.() ?? "") !== toMode) {
       state._rmEarlyRestoreDone = true; exitGuardIfNeeded();
       log.info("VIEWPORT early-restore abort", { reason: "mode-changed", frame: EARLY_RESTORE_MAX_FRAMES - frames });
@@ -383,7 +298,7 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
     }
     const sc = incomingScrollerOf(view, toMode);
     if (!sc || sc.clientHeight === 0) {
-      if (--frames > 0) { state._earlyRestoreId = requestAnimationFrame(poll); }
+      if (--frames > 0) { state._earlyRestoreId = window.requestAnimationFrame(poll); }
       else {
         state._rmEarlyRestoreDone = true;
         log.info("VIEWPORT early-restore giveup", {
@@ -404,7 +319,7 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
     if (firstReadyFrame) {
       firstReadyFrame = false;
       const coarsePct = getFallbackPct();
-      const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+      const previewEl = getRMPreviewEl(app);
       const before = previewEl?.scrollTop ?? -1;
       const docH = previewEl?.scrollHeight ?? -1;
       const clientH = previewEl?.clientHeight ?? -1;
@@ -502,7 +417,7 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
             line,
             remainingFrames: frames,
           });
-          state._earlyRestoreId = requestAnimationFrame(poll);
+          state._earlyRestoreId = window.requestAnimationFrame(poll);
         }
         else { state._rmEarlyRestoreDone = true; exitGuardIfNeeded(); }
         return;
@@ -522,7 +437,7 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
     });
     if (toMode === "preview") scheduleRMHold(app, file, seedAnchor, seedPct, RM_EARLY_HOLD_FRAMES);
   };
-  state._earlyRestoreId = requestAnimationFrame(poll);
+  state._earlyRestoreId = window.requestAnimationFrame(poll);
 }
 
 /** Install the early-restore hook (Phase 1). Returns an un-patch function; pass
@@ -530,15 +445,21 @@ export function scheduleEarlyRestore(app: App, fromMode: string, toMode: string,
 
 
 export function installEarlyModeSwitchRestore(app: App): () => void {
-  const proto = MarkdownView.prototype as any;
-  const original = proto.setState as (state: any, result: any) => Promise<void>;
+  const proto = MarkdownView.prototype;
+  // Extracted on purpose: the original is immediately re-attached to the
+  // prototype on unload, and in between it is only invoked via `.call(this,…)`
+  // so `this` is always supplied explicitly.
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- original is re-attached to the prototype and only invoked via .call(this, …)
+  const original = proto.setState;
 
-  proto.setState = async function (this: any, state: any, result: any): Promise<void> {
+  proto.setState = async function (
+    this: MarkdownView, state: unknown, result: ViewStateResult,
+  ): Promise<void> {
     let isSwitch = false, fromMode = "", toMode = "", file = "";
     try {
-      fromMode = this?.getMode?.() ?? "";
-      toMode = state?.mode ?? "";
-      file = this?.file?.path ?? "";
+      fromMode = this.getMode() ?? "";
+      toMode = (state as { mode?: string } | null | undefined)?.mode ?? "";
+      file = this.file?.path ?? "";
       isSwitch = !!(fromMode && toMode && fromMode !== toMode
         && (toMode === "source" || toMode === "preview") && file);
 
@@ -558,7 +479,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
       // correlation with the CM mount latency logged in setState-raf.
       if (isSwitch && fromMode === "preview") {
         try {
-          const outgoingEl = (this?.contentEl ?? this?.containerEl) as HTMLElement | undefined;
+          const outgoingEl = this.contentEl ?? this.containerEl;
           const rmView = queryPreviewViewIn(outgoingEl);
           if (rmView) {
             const all = rmView.querySelectorAll("*");
@@ -578,11 +499,10 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
           }
         } catch { /* diagnostic must never throw */ }
       }
-      const self = this;
-      requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         try {
-          const nowMode = self?.getMode?.() ?? "?";
-          const sc = incomingScrollerOf(self, nowMode);
+          const nowMode = this.getMode() ?? "?";
+          const sc = incomingScrollerOf(this, nowMode);
           log.debug("SWITCH setState-raf", {
             t: Math.round(performance.now()), mode: nowMode,
             clientH: sc?.clientHeight ?? -1,
@@ -604,7 +524,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
         if (isDirty) {
           const _preSaveStart = performance.now();
           log.info("DIRTY-FLAG pre-save triggered", { file });
-          await (this as any).save();
+          await this.save();
           log.info("DIRTY-FLAG pre-save completed", {
             file,
             ms: Math.round(performance.now() - _preSaveStart),
@@ -659,7 +579,7 @@ export function installEarlyModeSwitchRestore(app: App): () => void {
       // stored anchor whose scrollTop was already trashed to 0 by
       // concurrent DOM disruption (e.g. post-processor widget destroy).
       if (saved > 0 || rmAnchor) {
-        requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
           const sc2 = incomingScrollerOf(this, "preview");
           if (sc2 && sc2.scrollTop === 0 && sc2.scrollHeight > sc2.clientHeight) {
             if (saved > 0) {
@@ -693,7 +613,7 @@ export function onViewModeChange(app: App): void {
   const wasNotRM = getLastMode() !== "preview";
   probeSwitchScroll(app, 10, 10); // DIAGNOSTIC: trace native→restore scroll timeline
   driveViewportTransition(app, "layout-change");
-  const mode = (app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
+  const mode = activeMarkdownView(app)?.getMode?.() ?? "";
   if (mode === "source") {
     ensureLPScrollTracking(app);
     if (wasNotLP) scheduleLPDeferredRestore(app);
@@ -707,7 +627,7 @@ export function onViewModeChange(app: App): void {
 /** Flatten an anchor into log fields, handling all three anchor kinds. */
 
 
-export function anchorLogFields(a: ViewportAnchor): Record<string, any> {
+export function anchorLogFields(a: ViewportAnchor): Record<string, unknown> {
   switch (a.kind) {
     case "image-row":
       return { kind: a.kind, imageRowIndex: a.imageRowIndex, ratio: Math.round(a.intraRowRatio * 100) };
@@ -788,7 +708,7 @@ export function handleModeSwitch(app: App, mode: string, file: string, trigger: 
 
 
 export function driveViewportTransition(app: App, trigger: string): void {
-  const view = (app.workspace.activeLeaf?.view as any);
+  const view = activeMarkdownView(app);
   const mode = view?.getMode?.() ?? "none";
   const file = view?.file?.path ?? "";
 
@@ -801,18 +721,17 @@ export function driveViewportTransition(app: App, trigger: string): void {
 
 
 export function logViewportState(app: App, trigger: string): void {
-  const leaf = app.workspace.activeLeaf;
-  const view = (leaf?.view as any);
+  const view = viewInternals(activeMarkdownView(app));
   const mode = view?.getMode?.() ?? "none";
   const file = view?.file?.path ?? "";
 
   if (!file) return;
 
   let scrollY = 0, viewportH = 0, docH = 0;
-  const extra: Record<string, any> = {};
+  const extra: Record<string, unknown> = {};
 
   if (mode === "preview") {
-    const previewEl = getRMPreviewEl(app) as HTMLElement;
+    const previewEl = getRMPreviewEl(app);
     if (previewEl) {
       scrollY = previewEl.scrollTop;
       viewportH = previewEl.clientHeight;
@@ -837,7 +756,7 @@ export function logViewportState(app: App, trigger: string): void {
     extra.firstVis = firstVis;
     extra.lastVis = lastVis;
   } else if (mode === "source") {
-    const cm = view.editor?.cm;
+    const cm = view?.editor?.cm;
     if (cm?.scrollDOM) {
       scrollY = cm.scrollDOM.scrollTop;
       viewportH = cm.scrollDOM.clientHeight;
@@ -883,8 +802,8 @@ export function logViewportState(app: App, trigger: string): void {
 export function schedulePendingFlush(app: App): void {
   if (getPendingAlignmentCount() === 0) return;
   if (getFlushTimer()) clearFlushTimer();
-  setFlushTimer(setTimeout(() => {
-    setFlushTimer(0 as any);
+  setFlushTimer(window.setTimeout(() => {
+    setFlushTimer(0);
     log.info("VIEWPORT flush-start", { pendingCount: getPendingAlignmentCount() });
     const modified = flushPendingAlignments(app);
     for (const path of modified) invalidateImageRowIndex(path);

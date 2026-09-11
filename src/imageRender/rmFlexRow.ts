@@ -8,7 +8,7 @@ import { logger } from "../logger";
 const log = logger.channel("rmFlexRow");
 import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
-import { storePendingAlignment, AlignValue } from "./rmAlignStore";
+import { storePendingAlignment } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
@@ -16,7 +16,7 @@ export function getFileNameFromEmbed(embed: HTMLElement): string {
   const img = embed.querySelector<HTMLImageElement>("img");
   if (!img) return "";
   const src = img.src || img.getAttribute("src") || "";
-  const match = src.match(/\/([^\/\?]+\.\w+)(?:\?|$)/);
+  const match = src.match(/\/([^/?]+\.\w+)(?:\?|$)/);
   return match ? decodeURIComponent(match[1]) : "";
 }
 
@@ -72,7 +72,7 @@ export function applyStandaloneAlignment(
   if (!blockHasText) {
     // Pure image block: align the block itself (original behavior).
     block.style.setProperty("text-align", textAlign, "important");
-    embed.style.setProperty("display", "inline-block", "important");
+    embed.addClass(CLASSES.rowInline);
     return;
   }
 
@@ -97,10 +97,10 @@ export function applyStandaloneAlignment(
   const nextBr = embed.nextElementSibling;
   if (nextBr?.tagName === "BR") nextBr.remove();
 
-  const wrapper = document.createElement("div");
+  const wrapper = createDiv();
   wrapper.setAttribute("data-diaa-standalone", "true");
   wrapper.style.setProperty("text-align", textAlign, "important");
-  embed.style.setProperty("display", "inline-block", "important");
+  embed.addClass(CLASSES.rowInline);
   wrapper.appendChild(embed);
 
   if (textBefore) {
@@ -215,10 +215,10 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     for (let i = 0; i < embeds.length; i++) grows[i] = 1;
   }
 
-  const row = document.createElement("div");
+  const row = createDiv();
   row.className = CLASSES.row;
   row.setAttribute("data-diaa-group", "true");
-  const { justifyContent, objectPosition } = alignmentToCSS(
+  const { justifyContent } = alignmentToCSS(
     embeds.length === 1 ? (alignments[0] ?? options.alignment) : options.alignment
   );
   row.style.cssText = [
@@ -248,14 +248,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     const perImageAlign = alignments[i] ?? options.alignment;
     const { justifyContent: ji, objectPosition: oi } = alignmentToCSS(perImageAlign);
     embed.style.setProperty("flex", `${flexGrow} 1 0%`, "important");
-    embed.style.setProperty("overflow", "hidden", "important");
-    embed.style.setProperty("min-width", "50px", "important");
-    embed.style.setProperty("position", "relative", "important");
-    embed.style.setProperty("margin", "0", "important");
-    embed.style.setProperty("padding", "0", "important");
-    embed.style.setProperty("display", "flex", "important");
     embed.style.setProperty("justify-content", ji, "important");
-    embed.style.setProperty("align-items", "flex-start", "important");
 
     log.debug("RM wrapAsFlexRow item-style", {
       i,
@@ -270,12 +263,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     const embedImgs = Array.from(embed.querySelectorAll<HTMLImageElement>("img"));
     for (const img of embedImgs) {
       stripObsidianClasses(img);
-      img.style.setProperty("width", "100%", "important");
-      img.style.setProperty("height", "100%", "important");
-      img.style.setProperty("object-fit", "contain", "important");
       img.style.setProperty("object-position", oi, "important");
-      img.style.setProperty("display", "block", "important");
-      img.style.setProperty("margin", "0", "important");
 
       const styleGuard = new MutationObserver((mutations, obs) => {
         for (const m of mutations) {
@@ -296,28 +284,25 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           if (heightMismatch) {
             target.style.setProperty("height", itemH, "important");
           }
-          if (target.style.margin) {
-            target.style.setProperty("margin", "0", "important");
-          }
           obs.observe(target, { attributes: true, attributeFilter: ["class", "style"] });
         }
       });
       styleGuard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
 
-      (img as any).__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
-      (img as any).__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+      img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
+      img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
         if (newAlign) {
           embed.setAttribute("data-diaa-alignment", newAlign);
         } else {
           embed.removeAttribute("data-diaa-alignment");
         }
-        (img as any).__diaa_alignment = newAlign;
+        img.__diaa_alignment = newAlign;
         const align = newAlign ?? options.alignment;
         const { justifyContent: j2, objectPosition: o2 } = alignmentToCSS(align);
         embed.style.setProperty("justify-content", j2, "important");
         img.style.setProperty("object-position", o2, "important");
         if (app && sourcePath) {
-          const effectiveAlign = (newAlign ?? options.alignment) as AlignValue;
+          const effectiveAlign = newAlign ?? options.alignment;
           const fn = getFileNameFromEmbed(embed);
           if (fn) storePendingAlignment(sourcePath, fn, effectiveAlign);
         }
@@ -368,7 +353,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     try {
     const containerWidth = row.getBoundingClientRect().width;
     if (containerWidth === 0) {
-      if (row.isConnected) requestAnimationFrame(() => applySizes());
+      if (row.isConnected) window.requestAnimationFrame(() => applySizes());
       return;
     }
     const currentMetas = imgs.map((img) => ({
@@ -377,7 +362,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     }));
     const allReady = currentMetas.every((m) => m.naturalWidth > 0);
     if (!allReady) {
-      if (row.isConnected) requestAnimationFrame(() => applySizes());
+      if (row.isConnected) window.requestAnimationFrame(() => applySizes());
       return;
     }
 
@@ -426,8 +411,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         if (embedImg) {
           stripObsidianClasses(embedImg);
           embedImg.style.setProperty("height", hPx, "important");
-          embedImg.style.setProperty("width", "auto", "important");
-          embedImg.style.setProperty("margin", "0", "important");
+          embedImg.addClass(CLASSES.imgAuto);
         }
       }
       row.style.height = `${maxH}px`;
@@ -451,8 +435,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         if (embedImg) {
           stripObsidianClasses(embedImg);
           embedImg.style.setProperty("height", `${rowHeightPx}px`, "important");
-          embedImg.style.setProperty("width", "auto", "important");
-          embedImg.style.setProperty("margin", "0", "important");
+          embedImg.addClass(CLASSES.imgAuto);
         }
       }
     }
@@ -498,9 +481,9 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         log.warn("RM ROW render diagnostic error", { error: String(e) });
       }
     };
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       rowDiagnostic();
-      requestAnimationFrame(() => rowDiagnostic());
+      window.requestAnimationFrame(() => rowDiagnostic());
     });
 
     if (embeds.length === 3 && imgs[0]?.isConnected) {
@@ -531,9 +514,9 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           inlineWidth: img.style.width,
         });
       };
-      requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         trackImage0();
-        requestAnimationFrame(() => trackImage0());
+        window.requestAnimationFrame(() => trackImage0());
       });
     }
 
@@ -564,7 +547,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   }
 
   if (allLoaded) {
-    requestAnimationFrame(() => applySizes());
+    window.requestAnimationFrame(() => applySizes());
   }
 
   let remainingLoads = metas.filter((m) => m.naturalWidth === 0).length;
@@ -574,7 +557,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       const onLoad = () => {
         remainingLoads--;
         if (remainingLoads <= 0) {
-          requestAnimationFrame(() => applySizes());
+          window.requestAnimationFrame(() => applySizes());
         }
       };
       if (img.complete) {
@@ -584,7 +567,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       }
     }
     if (remainingLoads === 0) {
-      requestAnimationFrame(() => applySizes());
+      window.requestAnimationFrame(() => applySizes());
     }
   }
   } catch (e) {
@@ -632,7 +615,7 @@ export function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOp
       observers.push(obs);
     }
 
-    setTimeout(() => {
+    window.setTimeout(() => {
       for (const o of observers) o.disconnect();
       if (embeds.some((e) => e.querySelector("img"))) {
         wrapAsFlexRow(embeds, options, app, sourcePath);
@@ -688,14 +671,12 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
       const rect = block.getBoundingClientRect();
       const midX = rect.left + rect.width / 2;
 
-      const indicator = document.createElement("div");
+      const indicator = createDiv();
       indicator.className = "diaa-drop-indicator";
-      indicator.style.cssText =
-        "position:absolute;top:0;bottom:0;width:3px;background:#4a9eff;z-index:10;pointer-events:none;";
       if (e.clientX < midX) {
-        indicator.style.left = "0";
+        indicator.setCssStyles({ left: "0" });
       } else {
-        indicator.style.right = "0";
+        indicator.setCssStyles({ right: "0" });
       }
       block.style.position = block.style.position || "relative";
       block.appendChild(indicator);
@@ -711,7 +692,7 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
       removeAllDropIndicators();
       if (!dragSrcEl || dragSrcEl === block) return;
 
-      handleImageDrop(
+      void handleImageDrop(
         app,
         sourcePath,
         dragSrcEl,

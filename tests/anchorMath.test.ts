@@ -147,14 +147,14 @@ describe('ledgerYForLine', () => {
   });
   it('returns -1 on unusable shapes', () => {
     expect(ledgerYForLine([], 0)).toBe(-1);
-    expect(ledgerYForLine([{ height: 'x' } as any], 5)).toBe(-1);
+    expect(ledgerYForLine([{ height: 'x' } as unknown as LedgerSection], 5)).toBe(-1);
   });
   it('tolerates gap/spacer entries without lineEnd', () => {
     const secs: LedgerSection[] = [
       { lineStart: 0, lineEnd: 2, height: 100 },
-      { height: 20 } as any,                         // gap — no lineEnd
+      { height: 20 },                                // gap — no lineEnd
       { lineStart: 4, lineEnd: 4, height: 50 },
-      { height: 30 } as any,                         // gap — no lineEnd
+      { height: 30 },                                // gap — no lineEnd
       { lineStart: 6, lineEnd: 10, height: 300 },
     ];
     // Line in first section (before any gap)
@@ -206,7 +206,7 @@ describe('ledgerLineForY', () => {
   it('tolerates gap entries without lineStart/lineEnd', () => {
     const gapped: LedgerSection[] = [
       { lineStart: 0, lineEnd: 2, height: 100 },
-      { height: 20 } as any,
+      { height: 20 },
       { lineStart: 4, lineEnd: 4, height: 50 },
     ];
     // Y in the gap (110): maps to first line of next section (line 5)
@@ -228,7 +228,7 @@ describe('ledgerTotalHeight', () => {
       { lineStart: 0, lineEnd: 1, height: -5 },
       { lineStart: 2, lineEnd: 3, height: 50 },
     ])).toBe(50);
-    expect(ledgerTotalHeight([{ lineStart: 0, lineEnd: 1 } as any])).toBe(-1);
+    expect(ledgerTotalHeight([{ lineStart: 0, lineEnd: 1 }])).toBe(-1);
     expect(ledgerTotalHeight([])).toBe(0);
   });
 });

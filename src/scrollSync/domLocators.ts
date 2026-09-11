@@ -6,6 +6,7 @@
 // another leaf).
 
 import type { App } from "obsidian";
+import { activeMarkdownView } from "../utils";
 
 /** The reading-mode preview scroller class. Kept as a named constant so every
  *  locator targets the exact same element. */
@@ -24,13 +25,13 @@ export function queryPreviewViewIn(container: HTMLElement | undefined | null): H
  *  mid-switch stub, which silently makes all RM geometry read 0 and degrades
  *  cross-mode sync to LP-only. Scoping to the active view's contentEl fixes it. */
 export function getRMPreviewEl(app: App): HTMLElement | null {
-  const view = app.workspace.activeLeaf?.view as any;
-  const container = (view?.contentEl ?? view?.containerEl) as HTMLElement | undefined;
+  const view = activeMarkdownView(app);
+  const container = view?.contentEl ?? view?.containerEl;
   return queryPreviewViewIn(container);
 }
 
 /** Locate a rendered image embed by its source-line marker (data-diaa-line),
  *  scoped to a preview root. Returns null when no such embed is laid out yet. */
 export function findEmbedByLine(root: ParentNode, line: number | string): HTMLElement | null {
-  return root.querySelector(`.internal-embed[data-diaa-line="${line}"]`) as HTMLElement | null;
+  return root.querySelector(`.internal-embed[data-diaa-line="${line}"]`);
 }

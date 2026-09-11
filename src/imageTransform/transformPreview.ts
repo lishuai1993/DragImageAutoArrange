@@ -55,5 +55,5 @@ export function applyOrientationPreview(
 }
 
 export function clearOrientationPreview(img: HTMLImageElement): void {
-    img.style.transform = '';
+    img.setCssStyles({ transform: '' });
 }

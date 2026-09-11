@@ -58,6 +58,10 @@ npm test        # unit tests
 
 Releases are built and published by the workflow in `.github/workflows/release.yml`, which runs on any pushed tag and attaches `main.js`, `manifest.json`, and `styles.css` to the created Release.
 
+## Acknowledgements
+
+The right-click menu's file operations, resize presets, and clipboard image copy are adapted from **Pixel Perfect Image** by Johan Sanneblad ([johansan/pixel-perfect-image](https://github.com/johansan/pixel-perfect-image)), used under the MIT License. Those capabilities were rewritten and integrated into this plugin's own architecture — no third-party source is vendored.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -123,6 +127,10 @@ npm test        # 单元测试
 ```
 
 发布由 `.github/workflows/release.yml` 中的工作流完成：推送任意 Tag 即触发构建，并把 `main.js`、`manifest.json`、`styles.css` 作为附件上传到新建的 Release。
+
+## 致谢
+
+右键菜单中的文件操作、尺寸预设与「复制图像到剪贴板」等能力改编自 Johan Sanneblad 的 **Pixel Perfect Image**（[johansan/pixel-perfect-image](https://github.com/johansan/pixel-perfect-image)），依据 MIT 许可使用。相关能力已重写并融入本插件自身的架构，不再内联任何第三方源码。
 
 ## 许可
 

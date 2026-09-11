@@ -25,17 +25,17 @@ export function attachDiaImageMarkers(
     img: HTMLImageElement,
     opts: DiaImageMarkerOptions
 ): void {
-    (img as any).__diaa_resizeEnabled = opts.resizeEnabled === true;
-    (img as any).__diaa_naturalWidth = () => opts.naturalWidth();
-    (img as any).__diaa_manualSingle = () => opts.manualSingle();
-    (img as any).__diaa_singleRow = () => opts.singleRow();
-    (img as any).__diaa_resetTargetWidth = () => opts.resetTargetWidth();
+    img.__diaa_resizeEnabled = opts.resizeEnabled === true;
+    img.__diaa_naturalWidth = () => opts.naturalWidth();
+    img.__diaa_manualSingle = () => opts.manualSingle();
+    img.__diaa_singleRow = () => opts.singleRow();
+    img.__diaa_resetTargetWidth = () => opts.resetTargetWidth();
     const resize = opts.onResize ?? (() => undefined);
-    (img as any).__diaa_onResize = (pct: number): void => {
+    img.__diaa_onResize = (pct: number): void => {
         resize(pct);
     };
     const reset = opts.resetSingleManual ?? (() => undefined);
-    (img as any).__diaa_resetSingleManual = (): void => {
+    img.__diaa_resetSingleManual = (): void => {
         reset();
     };
 }

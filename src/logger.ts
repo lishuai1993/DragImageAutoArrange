@@ -84,7 +84,7 @@ class Logger {
   private _adapter: DataAdapter | null = null;
   private _logPath = "";
   private _buffer: LogEntry[] = [];
-  private _flushTimer: ReturnType<typeof setInterval> | null = null;
+  private _flushTimer: number | null = null;
   private _flushing = false;
   private _fileOutputFilter: string[] | null = null;
   /** Minimum severity emitted to either sink. Default DEBUG = emit everything,
@@ -99,11 +99,11 @@ class Logger {
     this._adapter = adapter;
     this._logPath = logPath;
     try { await adapter.write(logPath, ""); } catch { /* ignore */ }
-    this._flushTimer = setInterval(() => this.flush(), 5000);
+    this._flushTimer = window.setInterval(() => void this.flush(), 5000);
   }
 
   async dispose(): Promise<void> {
-    if (this._flushTimer) clearInterval(this._flushTimer);
+    if (this._flushTimer) window.clearInterval(this._flushTimer);
     await this.flush();
     if (this._adapter) {
       try { await this._adapter.write(this._logPath, ""); } catch { /* ignore */ }
@@ -228,7 +228,9 @@ class Logger {
     }
     if (toConsole) {
       const dataStr = data !== undefined ? ` ${JSON.stringify(data)}` : "";
-      console.log(`[DragImg] [${level}] ${message}${dataStr}`);
+      // console.debug, not console.log: this is a diagnostics channel, and the
+      // Obsidian review guideline only allows warn / error / debug.
+      console.debug(`[DragImg] [${level}] ${message}${dataStr}`);
     }
   }
 
@@ -250,8 +252,8 @@ class Logger {
       );
       const newContent = lines.join("\n") + "\n";
       let existing = "";
-      try { existing = await this._adapter!.read(this._logPath); } catch { /* ignore */ }
-      await this._adapter!.write(this._logPath, existing + newContent);
+      try { existing = await this._adapter.read(this._logPath); } catch { /* ignore */ }
+      await this._adapter.write(this._logPath, existing + newContent);
     } catch (e) {
       console.error("[DragImg] Failed to flush log:", e);
     } finally {

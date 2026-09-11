@@ -207,9 +207,9 @@ const log = logger.channel("scrollAnchor");
 export const state: {
   _rmDeferredRestoreId: number | null;
   _rmLoopGuardActive: boolean;
-  _accuracyTimer: ReturnType<typeof setTimeout> | null;
+  _accuracyTimer: number | null;
   _restoreGuardDepth: number;
-  _restoreGuardTimeoutId: ReturnType<typeof setTimeout> | null;
+  _restoreGuardTimeoutId: number | null;
   _lastGuardExitMs: number;
   _rmTrackedEl: HTMLElement | null;
   _rmScrollCleanup: (() => void) | null;
@@ -334,10 +334,11 @@ export function applySnapshotLineDelta(
   // Iterate backwards — splicing while iterating is safe this way.
   for (let i = snap.length - 1; i >= 0; i--) {
     const sec = snap[i];
-    if (sec.lineStart > editLine) {
-      sec.lineStart += delta;
-      sec.lineEnd += delta;
-    } else if (sec.lineEnd >= editLine) {
+    const { lineStart, lineEnd } = sec;
+    if (lineStart !== undefined && lineStart > editLine) {
+      sec.lineStart = lineStart + delta;
+      if (lineEnd !== undefined) sec.lineEnd = lineEnd + delta;
+    } else if (lineEnd !== undefined && lineEnd >= editLine) {
       snap.splice(i, 1);
     }
   }
@@ -376,8 +377,8 @@ export function rmLoopExitGuard(): void {
 
 export function enterRestoreGuard(): void {
   state._restoreGuardDepth++;
-  if (state._restoreGuardTimeoutId) clearTimeout(state._restoreGuardTimeoutId);
-  state._restoreGuardTimeoutId = setTimeout(() => {
+  if (state._restoreGuardTimeoutId) window.clearTimeout(state._restoreGuardTimeoutId);
+  state._restoreGuardTimeoutId = window.setTimeout(() => {
     log.warn("RESTORE_GUARD safety timeout — force-released");
     state._restoreGuardDepth = 0;
     state._lastGuardExitMs = performance.now();
@@ -400,7 +401,7 @@ export function setSectionSnapshot(file: string, secs: LedgerSection[], totalLin
 export function exitRestoreGuard(): void {
   state._restoreGuardDepth = Math.max(0, state._restoreGuardDepth - 1);
   if (state._restoreGuardDepth === 0 && state._restoreGuardTimeoutId) {
-    clearTimeout(state._restoreGuardTimeoutId);
+    window.clearTimeout(state._restoreGuardTimeoutId);
     state._restoreGuardTimeoutId = null;
     state._lastGuardExitMs = performance.now();
   }

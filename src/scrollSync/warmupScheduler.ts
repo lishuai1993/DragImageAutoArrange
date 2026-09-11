@@ -3,6 +3,7 @@ import { logger } from "../logger";
 const log = logger.channel("warmupScheduler");
 import { ENABLE_WARMUP_PROBE, cancelWarmupProbe } from "./warmupProbe";
 import { applySnapshotLineDelta } from "./scrollAnchor";
+import { viewInternals } from "../obsidianInternals";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -11,7 +12,6 @@ const FINE_IDLE_MS = 5_000;          // 5s idle → full re-warmup
 const USER_ACTIVE_WINDOW_MS = 500;   // considered "active" if interacted within this window
 const USER_BUSY_BACKOFF_MS = 2000;   // wait 2s before retrying when user is busy
 const P0_DELAY_MS = 500;             // P0: wait for LP editor to stabilise
-const P1_DELAY_MS = 1000;            // P1/P2: LP editor already settled in background
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -43,9 +43,9 @@ let _warmedFiles = new Set<string>();
 let _queue: WarmupTask[] = [];
 let _p0RetryQueue: string[] = [];
 let _activeAbort: { aborted: boolean } | null = null;
-let _schedulerTimer: ReturnType<typeof setTimeout> | null = null;
-let _coarseTimers = new Map<string, ReturnType<typeof setTimeout>>();
-let _fineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let _schedulerTimer: number | null = null;
+let _coarseTimers = new Map<string, number>();
+let _fineTimers = new Map<string, number>();
 let _lastUserActivity = 0;
 let _running = false;
 
@@ -78,7 +78,7 @@ export function installUserActivityListener(): () => void {
 function findLeafForFile(app: App, file: string): WorkspaceLeaf | null {
   let found: WorkspaceLeaf | null = null;
   app.workspace.iterateAllLeaves((leaf) => {
-    if (!found && (leaf.view as any)?.file?.path === file) found = leaf;
+    if (!found && viewInternals(leaf.view)?.file?.path === file) found = leaf;
   });
   return found;
 }
@@ -99,7 +99,7 @@ function collectAllLeaves(app: App): { leaf: WorkspaceLeaf; file: string; idx: n
   const result: { leaf: WorkspaceLeaf; file: string; idx: number }[] = [];
   let idx = 0;
   app.workspace.iterateAllLeaves((leaf) => {
-    const file = (leaf.view as any)?.file?.path as string | undefined;
+    const file = viewInternals(leaf.view)?.file?.path;
     if (file && file.endsWith(".md")) {
       result.push({ leaf, file, idx: idx++ });
     }
@@ -151,14 +151,14 @@ async function runP0Warmup(app: App, file: string): Promise<void> {
   if (_activeAbort && _queue.length > 0 && _queue[0]?.priority >= 1) {
     _activeAbort.aborted = true;
     _activeAbort = null;
-    if (_schedulerTimer) { clearTimeout(_schedulerTimer); _schedulerTimer = null; }
+    if (_schedulerTimer) { window.clearTimeout(_schedulerTimer); _schedulerTimer = null; }
     log.debug("WARMUP background task preempted for P0", { file });
   }
 
   // Remove just-warmed flag so idle re-warmups aren't blocked
   _warmedFiles.delete(file);
 
-  await new Promise(r => setTimeout(r, P0_DELAY_MS));
+  await new Promise(r => window.setTimeout(r, P0_DELAY_MS));
 
   // Guard: file still open and active
   const activeFile = app.workspace.getActiveFile()?.path ?? "";
@@ -192,17 +192,17 @@ async function processNext(app: App): Promise<void> {
       if (retryFile === activeFile && isFileOpen(app, retryFile)) {
         log.info("WARMUP P0 retry", { file: retryFile });
         _running = false;
-        runP0Warmup(app, retryFile);
+        void runP0Warmup(app, retryFile);
         return; // runP0Warmup is async; the scheduler will resume naturally
       }
     }
 
     // ── Defer if user is actively interacting ──
     if (isUserActive()) {
-      _schedulerTimer = setTimeout(() => {
+      _schedulerTimer = window.setTimeout(() => {
         _schedulerTimer = null;
         _running = false;
-        processNext(app);
+        void processNext(app);
       }, USER_BUSY_BACKOFF_MS);
       _running = false;
       return;
@@ -232,7 +232,7 @@ async function processNext(app: App): Promise<void> {
 
     // ── Yield to event loop before next task ──
     if (_queue.length > 0) {
-      await new Promise<void>(r => { _schedulerTimer = setTimeout(r, 0); });
+      await new Promise<void>(r => { _schedulerTimer = window.setTimeout(r, 0); });
       _schedulerTimer = null;
     }
   }
@@ -259,8 +259,8 @@ export function scheduleIdleWarmup(
 
   // ── 1s coarse timer: line-number delta on existing snapshot ──
   const oldCoarse = _coarseTimers.get(file);
-  if (oldCoarse) clearTimeout(oldCoarse);
-  _coarseTimers.set(file, setTimeout(() => {
+  if (oldCoarse) window.clearTimeout(oldCoarse);
+  _coarseTimers.set(file, window.setTimeout(() => {
     _coarseTimers.delete(file);
     const activeFile = app.workspace.getActiveFile()?.path ?? "";
     if (activeFile !== file) return;
@@ -270,15 +270,15 @@ export function scheduleIdleWarmup(
 
   // ── 5s fine timer: full re-warmup ──
   const oldFine = _fineTimers.get(file);
-  if (oldFine) clearTimeout(oldFine);
-  _fineTimers.set(file, setTimeout(() => {
+  if (oldFine) window.clearTimeout(oldFine);
+  _fineTimers.set(file, window.setTimeout(() => {
     _fineTimers.delete(file);
     const c = _coarseTimers.get(file);
-    if (c) { clearTimeout(c); _coarseTimers.delete(file); }
+    if (c) { window.clearTimeout(c); _coarseTimers.delete(file); }
     const activeFile = app.workspace.getActiveFile()?.path ?? "";
     if (activeFile !== file) return;
     log.info("WARMUP idle trigger", { file });
-    runP0Warmup(app, file);
+    void runP0Warmup(app, file);
   }, FINE_IDLE_MS));
 }
 
@@ -287,7 +287,7 @@ export function scheduleIdleWarmup(
 export function requestP0Warmup(app: App, file: string): void {
   if (!ENABLE_WARMUP_PROBE || !file) return;
   log.debug("WARMUP P0 requested", { file });
-  runP0Warmup(app, file);
+  void runP0Warmup(app, file);
 }
 
 /** Build the background queue (P1/P2) and start processing.
@@ -295,17 +295,17 @@ export function requestP0Warmup(app: App, file: string): void {
 export function requestGlobalWarmup(app: App): void {
   if (!ENABLE_WARMUP_PROBE) return;
   buildQueue(app);
-  if (_queue.length > 0) processNext(app);
+  if (_queue.length > 0) void processNext(app);
 }
 
 /** Clear all scheduler state. Called on plugin unload. */
 export function cancelAllWarmups(): void {
   if (_activeAbort) _activeAbort.aborted = true;
   _activeAbort = null;
-  if (_schedulerTimer) { clearTimeout(_schedulerTimer); _schedulerTimer = null; }
-  for (const t of _coarseTimers.values()) clearTimeout(t);
+  if (_schedulerTimer) { window.clearTimeout(_schedulerTimer); _schedulerTimer = null; }
+  for (const t of _coarseTimers.values()) window.clearTimeout(t);
   _coarseTimers.clear();
-  for (const t of _fineTimers.values()) clearTimeout(t);
+  for (const t of _fineTimers.values()) window.clearTimeout(t);
   _fineTimers.clear();
   _queue = [];
   _p0RetryQueue = [];

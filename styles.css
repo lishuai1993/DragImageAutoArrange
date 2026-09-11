@@ -140,20 +140,61 @@
 
 /* When images are in a flex row, remove default Obsidian margins */
 .markdown-preview-view .drag-img-row p,
-.markdown-reading-view .drag-img-row p,
-.markdown-preview-view .drag-img-row .internal-embed,
-.markdown-reading-view .drag-img-row .internal-embed {
+.markdown-reading-view .drag-img-row p {
   margin: 0;
   padding: 0;
 }
 
-/* Ensure images in the row fill their containers */
+/* Flex items in the row. Obsidian's own embed rules also set several of these
+   properties, so they carry !important and are declared here instead of being
+   written inline by rmFlexRow. justify-content / flex / object-position stay
+   inline because their values are computed per row. */
+.markdown-preview-view .drag-img-row .internal-embed,
+.markdown-reading-view .drag-img-row .internal-embed {
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  min-width: 50px !important;
+  position: relative !important;
+  display: flex !important;
+  align-items: flex-start !important;
+}
+
+/* Ensure images in the row fill their containers. Reading-Mode scoped: the
+   Live Preview widget sets its own image sizes inline. */
 .markdown-preview-view .drag-img-row img,
 .markdown-reading-view .drag-img-row img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  display: block !important;
+  margin: 0 !important;
+}
+
+/* Size-by-height rows (explicit flex-grow or scale): the image keeps its
+   natural aspect ratio instead of filling the item width. Specificity must
+   exceed the fill-the-container rule above. */
+.markdown-preview-view .drag-img-row img.drag-img-img-auto,
+.markdown-reading-view .drag-img-row img.drag-img-img-auto {
+  width: auto !important;
+}
+
+/* Image extracted out of a mixed text+image block: shrink-wrap it so the
+   text-align set on its block can position it. */
+.drag-img-row-inline {
+  display: inline-block !important;
+}
+
+/* Single image Zoomed past the container width: pin the crop to the centre.
+   Applied by resizeHandleController in zoom mode only. */
+.drag-img-zoom-pos {
+  object-position: center !important;
+}
+
+/* Obsidian's intermediate wrappers (e.g. .image-resize-container) between an
+   img and its boundary are neutralized so the img is a direct flex child. */
+.drag-img-row .drag-img-contents {
+  display: contents !important;
 }
 
 /* Draggable standalone images in Reading Mode */
@@ -177,6 +218,12 @@
 
 /* Drop indicator for drag-to-merge in Reading Mode */
 .diaa-drop-indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #4a9eff;
+  z-index: 10;
   pointer-events: none;
   animation: diaa-pulse 0.6s ease-in-out infinite alternate;
 }
@@ -503,4 +550,18 @@
   height: 1px;
   margin: 2px 4px;
   background: var(--background-modifier-border);
+}
+
+/* ── Reading-Mode warm-up probe ──────────────────────────────────────────
+   A warm-up pre-renders the Reading Mode view inside a leaf that is kept
+   layout-capable but invisible, so the first Live Preview → Reading Mode
+   switch takes the hot path. These classes are applied only while a warm-up
+   is in flight (see src/scrollSync/warmupProbe.ts). */
+.diaa-warmup-container,
+.diaa-warmup-probe {
+  display: block !important;
+  visibility: hidden !important;
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
 }

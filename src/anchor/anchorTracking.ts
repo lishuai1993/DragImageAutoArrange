@@ -1,102 +1,24 @@
-import { App, MarkdownView } from "obsidian";
+import { App } from "obsidian";
 import { logger } from "../logger";
-import {
-  getPendingAlignmentCount, clearFlushTimer, setFlushTimer, getFlushTimer, flushPendingAlignments,
-} from "../imageRender/rmAlignStore";
-import {
-  classifyCenter, ImageRowIndex, Line1, asLine1, buildImageRowIndex,
-} from "./viewportAnchor";
-import {
-  clamp01, intraRowRatio, gapRatioFromGeom, imageRowTargetY, gapJunction, gapTargetY, textTargetY,
-  nearestIndexBy, ledgerYForLine, ledgerTotalHeight, extrapolateLedgerY, sectionIndexEstimateY,
-  LedgerSection, clientTopToDocY, scrollTopToPct, pctToScrollTop,
-} from "./anchorMath";
-import { assertNever } from "../utils";
-import { getRMPreviewEl, queryPreviewViewIn, findEmbedByLine } from "../scrollSync/domLocators";
-import { normalizeAnchorText } from "./textAnchor";
-import {
-  ViewportAnchor, setImageRowIndex, getImageRowIndex, invalidateImageRowIndex,
-  getActiveAnchor, setActiveAnchor, getFallbackPct, setFallbackPct, getLastFallbackPct,
-  setLastFallbackPct, setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor,
-  getLastMode, setLastMode, getLastDocH, setLastDocH, getImageLineRe,
-  setRMLastAnchorList, getRMLastAnchorList,
-  state,
-  MIN_ANCHOR_TEXT_LEN,
-  TABLE_ROW_RE,
-  TABLE_SPLIT_RE,
-  BOX_DRAWING_RE,
-  _sectionSnapshot,
-  _snapshotLineCount,
-  LEDGER_DOCH_TOLERANCE,
-  LEDGER_PARK_TOL_MIN,
-  LEDGER_PARK_TOL_FRAC,
-  RATIO_GATE_TOL,
-  ENABLE_NATIVE_SCROLL,
-  SILENCE_WINDOW_MS,
-  RM_RESTORE_TIMEOUT_MS,
-  NATIVE_RETRY_INTERVAL,
-  RM_EMBED_WAIT_MS,
-  RM_HOLD_TIMEOUT_MS,
-  RM_HOLD_CALM_FRAMES,
-  EARLY_RESTORE_MAX_FRAMES,
-  RM_EARLY_HOLD_FRAMES,
-  getRMDeferredRestoreId,
-  rmLoopEnterGuard,
-  cancelAllRestoreChains,
-  applySnapshotLineDelta,
-  setLastAnchor,
-  rmLoopExitGuard,
-  enterRestoreGuard,
-  setSectionSnapshot,
-  exitRestoreGuard,
-  isRestoreGuardActive,
-  isInSilenceWindow,
-  cancelRMHoldChain,
-  getScrollAnchor,
-  cancelRMDeferredRestore,
-} from "./anchorStore";
+
+
+
+import { activeMarkdownView, assertNever } from "../utils";
+import { getRMPreviewEl } from "../scrollSync/domLocators";
+
+import { ViewportAnchor, getActiveAnchor, setActiveAnchor, getFallbackPct, setFallbackPct, setLastFallbackPct, setRMLastAnchor, getRMLastAnchor, setLPLastAnchor, getLPLastAnchor, state, RM_RESTORE_TIMEOUT_MS, NATIVE_RETRY_INTERVAL, RM_EMBED_WAIT_MS, RM_HOLD_TIMEOUT_MS, RM_HOLD_CALM_FRAMES, rmLoopEnterGuard, cancelAllRestoreChains, rmLoopExitGuard, enterRestoreGuard, exitRestoreGuard, isRestoreGuardActive, isInSilenceWindow } from "./anchorStore";
 import { runRestoreLoop } from "./anchorRestoreSession";
 import { whenEmbedPresent } from "./anchorSignals";
 
 const log = logger.channel("scrollAnchor");
 
 
-import {
-  ensureImageRowIndexFromCM,
-  clampRatioWarn,
-  lineBlockByNumber,
-  lpInset,
-  nearestImgRowsByLine,
-  rmTextBlocks,
-  imgIndexToSelector,
-  computeScrollPct,
-  captureContentAnchor,
-  extractCandidates,
-  captureAnchorLP,
-  captureAnchorRM,
-  nearestImgRowsRM,
-  rmRowBounds,
-  captureImageRowRM,
-  findBestTextLine,
-  rmLedgerYForLine,
-  anchorTargetLine,
-  computeDocH,
-} from "./anchorCapture";
+import { computeScrollPct, captureContentAnchor, anchorTargetLine } from "./anchorCapture";
 
-import {
-  scheduleRestoreAccuracyCheck,
-  restoreContentAnchor,
-  restoreImageRowInLP,
-  restoreImageRowInRM,
-  restoreImageGapInLP,
-  restoreImageGapInRM,
-  restoreTextInLP,
-  restoreTextInRM,
-  nativeScrollToLine,
-  restoreScrollPct,
-} from "./anchorRestore";
+import { restoreContentAnchor, nativeScrollToLine, restoreScrollPct } from "./anchorRestore";
 
 import { driveViewportTransition } from "./anchorModeSwitch";
+import { editorCmOf, viewInternals } from "../obsidianInternals";
 
 // ── anchorTracking (extracted from scrollAnchor.ts in P3 split) ──
 
@@ -104,7 +26,7 @@ export function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: Vie
   const now = Date.now();
   if (now - state._lastScrollLogTs < 150) return;
   state._lastScrollLogTs = now;
-  const info: Record<string, any> = { scrollTop: Math.round(el.scrollTop), kind: anchor?.kind ?? "none" };
+  const info: Record<string, unknown> = { scrollTop: Math.round(el.scrollTop), kind: anchor?.kind ?? "none" };
   if (anchor) {
     switch (anchor.kind) {
       case "text":
@@ -133,7 +55,7 @@ export function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: Vie
   if (side === "RM") {
     const cands = [".markdown-reading-view", ".markdown-preview-view", ".markdown-preview-sizer", ".markdown-preview-section"];
     info.scrollTops = cands
-      .map(s => { const e = document.querySelector(s) as HTMLElement | null; return e ? `${s}=${Math.round(e.scrollTop)}` : `${s}=n/a`; })
+      .map(s => { const e = document.querySelector(s); return e ? `${s}=${Math.round(e.scrollTop)}` : `${s}=n/a`; })
       .join(" ");
   }
   if (side === "RM") {
@@ -157,7 +79,7 @@ export function logScrollCapture(side: "RM" | "LP", el: HTMLElement, anchor: Vie
 
 
 export function ensureRMScrollTracking(app: App): void {
-  const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+  const previewEl = getRMPreviewEl(app);
   if (!previewEl || previewEl.clientHeight === 0) return;
   if (state._rmTrackedEl === previewEl) return;
 
@@ -172,7 +94,7 @@ export function ensureRMScrollTracking(app: App): void {
     if (isInSilenceWindow()) { state._rmSilenceCount++; return; }
     const anchor = captureContentAnchor(app);
     if (anchor) {
-      setRMLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
+      setRMLastAnchor(anchor, activeMarkdownView(app)?.file?.path ?? "");
     } else {
       // No anchor at this position — drop any stale one so a later mode switch
       // falls back to the fresh scroll percentage instead of jumping to an
@@ -209,9 +131,9 @@ export function ensureRMScrollTracking(app: App): void {
 
 export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
   cancelAllRestoreChains();
-  const view = app.workspace.activeLeaf?.view as any;
+  const view = activeMarkdownView(app);
   const file = view?.file?.path ?? "";
-  let hookedEl = getRMPreviewEl(app) as HTMLElement | null;
+  let hookedEl = getRMPreviewEl(app);
   if (!hookedEl || !file) return;
 
   // Hold the scroll-capture guard across the whole hold: our corrective
@@ -279,7 +201,7 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
 
   const tick = () => {
     state._rmHoldId = null;
-    const v = app.workspace.activeLeaf?.view as any;
+    const v = activeMarkdownView(app);
     if ((v?.getMode?.() ?? "") !== "preview" || (v?.file?.path ?? "") !== file) {
       finish("view-changed", false);
       return;
@@ -288,7 +210,7 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
       finish("user-input", false);
       return;
     }
-    const el = getRMPreviewEl(app) as HTMLElement | null;
+    const el = getRMPreviewEl(app);
     if (!el) {
       finish("preview-gone", false);
       return;
@@ -316,7 +238,7 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
         lastTop = el.scrollTop;
         lastDocH = el.scrollHeight;
         calm++;
-        state._rmHoldId = requestAnimationFrame(tick);
+        state._rmHoldId = window.requestAnimationFrame(tick);
         return;
       }
     }
@@ -352,12 +274,12 @@ export function startRMSettleHold(app: App, seedAnchor: ViewportAnchor): void {
 
     if (calm >= RM_HOLD_CALM_FRAMES) { finish("stable", true); return; }
     if (performance.now() - start > RM_HOLD_TIMEOUT_MS) { finish("timeout", true); return; }
-    state._rmHoldId = requestAnimationFrame(tick);
+    state._rmHoldId = window.requestAnimationFrame(tick);
   };
   log.debug("VIEWPORT settle-hold start", {
     scrollTop: Math.round(lastTop), docH: lastDocH,
   });
-  state._rmHoldId = requestAnimationFrame(tick);
+  state._rmHoldId = window.requestAnimationFrame(tick);
 }
 
 
@@ -378,7 +300,7 @@ export function scheduleRMDeferredRestore(app: App): void {
   let _rmStableDegraded = 0;
   let _rmLastSeenScrollTop = -1;
   const STABLE_DEGRADED_EXIT = 8;
-  const targetFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+  const targetFile = activeMarkdownView(app)?.file?.path ?? "";
 
   const enterGuardOnce = rmLoopEnterGuard;
   const exitGuardOnce = rmLoopExitGuard;
@@ -395,11 +317,11 @@ export function scheduleRMDeferredRestore(app: App): void {
     setId: (id) => { state._rmDeferredRestoreId = id; },
     firstFrameSync: true,
     onFrame: async () => {
-      const mode = (app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
+      const mode = activeMarkdownView(app)?.getMode?.() ?? "";
       if (mode !== "preview") { exitGuardOnce(); return "stop"; }
 
       // Abort if the user switched documents during the retry window.
-      const curFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+      const curFile = activeMarkdownView(app)?.file?.path ?? "";
       if (curFile !== targetFile) {
         state._rmNativeTried = false;
         exitGuardOnce();
@@ -408,7 +330,7 @@ export function scheduleRMDeferredRestore(app: App): void {
         return "stop";
       }
 
-      const previewEl = getRMPreviewEl(app) as HTMLElement | null;
+      const previewEl = getRMPreviewEl(app);
       if (!previewEl || previewEl.clientHeight === 0) {
         return "continue";
       }
@@ -510,7 +432,7 @@ export function scheduleRMDeferredRestore(app: App): void {
 
       const anchor = captureContentAnchor(app);
       if (anchor) {
-        setRMLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
+        setRMLastAnchor(anchor, activeMarkdownView(app)?.file?.path ?? "");
       } else {
         setRMLastAnchor(null, getRMLastAnchor().file);
       }
@@ -527,8 +449,8 @@ export function scheduleRMDeferredRestore(app: App): void {
 
 
 export function ensureLPScrollTracking(app: App): void {
-  const cm = (app.workspace.activeLeaf?.view as any)?.editor?.cm;
-  const sd = cm?.scrollDOM as HTMLElement | null;
+  const cm = editorCmOf(activeMarkdownView(app));
+  const sd = cm?.scrollDOM;
   if (!sd) return;
   if (state._lpTrackedEl === sd) return;
 
@@ -543,7 +465,7 @@ export function ensureLPScrollTracking(app: App): void {
     if (isInSilenceWindow()) { state._lpSilenceCount++; return; }
     const anchor = captureContentAnchor(app);
     if (anchor) {
-      setLPLastAnchor(anchor, (app.workspace.activeLeaf?.view as any)?.file?.path ?? "");
+      setLPLastAnchor(anchor, activeMarkdownView(app)?.file?.path ?? "");
     } else {
       setLPLastAnchor(null, getLPLastAnchor().file);
     }
@@ -570,7 +492,7 @@ export function scheduleLPDeferredRestore(app: App): void {
     cancelAnimationFrame(state._lpDeferredRestoreId);
     state._lpDeferredRestoreId = null;
   }
-  const targetFile = (app.workspace.activeLeaf?.view as any)?.file?.path ?? "";
+  const targetFile = activeMarkdownView(app)?.file?.path ?? "";
   let _lpNativeTried = false;
   let _lpGuardActive = false;
 
@@ -594,7 +516,7 @@ export function scheduleLPDeferredRestore(app: App): void {
     setId: (id) => { state._lpDeferredRestoreId = id; },
     firstFrameSync: true,
     onFrame: () => {
-      const view = (app.workspace.activeLeaf?.view as any);
+      const view = viewInternals(activeMarkdownView(app));
       const mode = view?.getMode?.() ?? "";
       if (mode !== "source") { exitGuardOnce(); return "stop"; }
 
@@ -608,7 +530,7 @@ export function scheduleLPDeferredRestore(app: App): void {
         return "stop";
       }
 
-      const sd = view.editor?.cm?.scrollDOM as HTMLElement | null;
+      const sd = view?.editor?.cm?.scrollDOM;
       if (!sd || sd.clientHeight === 0) {
         return "continue";
       }
@@ -651,7 +573,7 @@ export function scheduleLPDeferredRestore(app: App): void {
       } else {
         setLPLastAnchor(null, getLPLastAnchor().file);
       }
-      setTimeout(() => exitRestoreGuard(), 50);
+      window.setTimeout(() => exitRestoreGuard(), 50);
       const pct = computeScrollPct(app);
       if (pct >= 0) setLastFallbackPct(pct);
       driveViewportTransition(app, "lp-after-restore");
@@ -671,11 +593,11 @@ export function scheduleLPDeferredRestore(app: App): void {
 
 
 export function probeSwitchScroll(app: App, framesLeft: number, total: number): void {
-  const view = app.workspace.activeLeaf?.view as any;
+  const view = activeMarkdownView(app);
   const mode = view?.getMode?.() ?? "";
   let scroller: HTMLElement | null = null;
   if (mode === "preview") scroller = getRMPreviewEl(app);
-  else if (mode === "source") scroller = (view?.editor?.cm?.scrollDOM ?? null) as HTMLElement | null;
+  else if (mode === "source") scroller = editorCmOf(view)?.scrollDOM ?? null;
   if (scroller) {
     log.debug("SWITCH probe", {
       mode,
@@ -685,7 +607,7 @@ export function probeSwitchScroll(app: App, framesLeft: number, total: number): 
       viewportH: scroller.clientHeight,
     });
   }
-  if (framesLeft > 1) requestAnimationFrame(() => probeSwitchScroll(app, framesLeft - 1, total));
+  if (framesLeft > 1) window.requestAnimationFrame(() => probeSwitchScroll(app, framesLeft - 1, total));
 }
 
 // ── Early mode-switch restore (Approach X) + Step-3.1 ordering probe ──

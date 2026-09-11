@@ -1,118 +1,126 @@
-import type { App, EventRef, PluginManifest } from 'obsidian';
-import { ImageService } from '../vendor/pixelPerfectImage/core/ImageService';
-import { LinkService } from '../vendor/pixelPerfectImage/core/LinkService';
-import { FileService } from '../vendor/pixelPerfectImage/core/FileService';
-import { MenuService } from '../vendor/pixelPerfectImage/ui/MenuService';
-import type { PixelPerfectImageHost } from '../vendor/pixelPerfectImage/PixelPerfectImageHost';
+import type { App } from 'obsidian';
+import { logger } from '../logger';
 import {
-    DEFAULT_SETTINGS,
-    reconcileFileOperations,
-    sanitizeResizeSizes,
-    type PixelPerfectImageSettings
-} from '../vendor/pixelPerfectImage/ui/settings';
+  coerceSettings,
+  type PixelPerfectImageSettings,
+} from './ppSettingsModel';
 
-/** Storage key inside the DragImageAutoArrange plugin data object that owns the
- *  Pixel Perfect Image settings, keeping them out of the top-level DIA keys. */
+const log = logger.channel('ppHost');
+
+/** DIA 数据对象里承载图片菜单设置的那把键，与顶层 DIA 设置互不干扰。 */
 export const PP_DATA_KEY = 'pixelPerfectImage';
 
-/** The minimal DragImageAutoArrange surface that the PP host needs to talk to. */
+/** 设置存储需要的最小插件表面。 */
 export interface PixelPerfectOwner {
-    app: App;
-    manifest: PluginManifest;
-    registerEvent(eventRef: EventRef): void;
-    loadData(): Promise<any>;
-    saveData(data: any): Promise<void>;
+  app: App;
+  loadData(): Promise<unknown>;
+  saveData(data: unknown): Promise<void>;
 }
 
 /**
- * In-process host that lets the vendored Pixel Perfect Image services run inside
- * DragImageAutoArrange without instantiating PP's own `Plugin` lifecycle. PP
- * settings are persisted in the DIA data object under {@link PP_DATA_KEY}.
+ * 图片菜单设置的内存 + 持久化载体。
+ *
+ * 设置住在 DIA 的数据对象里、单独占一把键，因此保存时必须「读出-改键-写回」
+ * 而不是整体覆盖：顶层还存着 DIA 自己的设置，覆盖会把它们抹掉。写盘串成一
+ * 条队列，落盘顺序即调用顺序，避免并发写相互覆盖。
  */
-export class PixelPerfectHostImpl implements PixelPerfectImageHost {
-    app: App;
-    manifest: PluginManifest;
-    settings!: PixelPerfectImageSettings;
-    imageService!: ImageService;
-    linkService!: LinkService;
-    fileService!: FileService;
+class SettingsStore {
+  settings!: PixelPerfectImageSettings;
 
-    private saveQueue: Promise<void> = Promise.resolve();
-    private debounceTimer: number | null = null;
-    private debouncedPromise: Promise<void> | null = null;
-    private debouncedResolve: (() => void) | null = null;
+  private saveQueue: Promise<void> = Promise.resolve();
+  private debounceTimer: number | null = null;
+  private debouncedPromise: Promise<void> | null = null;
+  private debouncedResolve: (() => void) | null = null;
 
-    constructor(private owner: PixelPerfectOwner) {
-        this.app = owner.app;
-        this.manifest = owner.manifest;
+  constructor(private readonly owner: PixelPerfectOwner) {}
+
+  async load(): Promise<void> {
+    const data = await this.owner.loadData();
+    const stored =
+      data && typeof data === 'object' && !Array.isArray(data)
+        ? (data as Record<string, unknown>)[PP_DATA_KEY]
+        : undefined;
+    this.settings = coerceSettings(stored);
+  }
+
+  save(): Promise<void> {
+    return this.enqueueSave();
+  }
+
+  /**
+   * 延迟落盘：设置页里连续输入（如尺寸预设逐字符敲）时，只在停下 250ms 后
+   * 写一次。返回的 Promise 在本次落盘完成后兑现，调用方可 await。
+   */
+  requestSave(debounceMs = 250): Promise<void> {
+    if (!this.debouncedPromise) {
+      this.debouncedPromise = new Promise<void>(resolve => {
+        this.debouncedResolve = resolve;
+      });
     }
+    if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
+    this.debounceTimer = window.setTimeout(() => {
+      this.debounceTimer = null;
+      void this.enqueueSave()
+        .then(() => this.debouncedResolve?.())
+        .finally(() => {
+          this.debouncedPromise = null;
+          this.debouncedResolve = null;
+        });
+    }, debounceMs);
+    return this.debouncedPromise;
+  }
 
-    registerEvent(eventRef: EventRef): void {
-        this.owner.registerEvent(eventRef);
-    }
-
-    /** Load PP settings from the shared DIA data namespace and wire services. */
-    async load(): Promise<void> {
-        const data = await this.owner.loadData();
-        const stored =
-            data && typeof data === 'object' && !Array.isArray(data)
-                ? (data as Record<string, unknown>)[PP_DATA_KEY]
-                : undefined;
-        const settings = Object.assign({}, DEFAULT_SETTINGS, (stored ?? {}) as Partial<PixelPerfectImageSettings>);
-        settings.fileOperations = reconcileFileOperations(settings.fileOperations);
-        settings.customResizeSizes = sanitizeResizeSizes(
-            Array.isArray(settings.customResizeSizes) ? settings.customResizeSizes : []
-        );
-        this.settings = settings;
-
-        this.imageService = new ImageService(this);
-        this.linkService = new LinkService(this);
-        this.fileService = new FileService(this);
-    }
-
-    saveSettings(): Promise<void> {
-        return this.enqueueSave();
-    }
-
-    requestSaveSettings(debounceMs = 250): Promise<void> {
-        if (!this.debouncedPromise) {
-            this.debouncedPromise = new Promise<void>(resolve => {
-                this.debouncedResolve = resolve;
-            });
-        }
-        if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
-        this.debounceTimer = window.setTimeout(() => {
-            this.debounceTimer = null;
-            void this.enqueueSave()
-                .then(() => this.debouncedResolve?.())
-                .finally(() => {
-                    this.debouncedPromise = null;
-                    this.debouncedResolve = null;
-                });
-        }, debounceMs);
-        return this.debouncedPromise;
-    }
-
-    private enqueueSave(): Promise<void> {
-        this.saveQueue = this.saveQueue
-            .catch(() => undefined)
-            .then(async () => {
-                const data = (await this.owner.loadData()) ?? {};
-                (data as Record<string, unknown>)[PP_DATA_KEY] = this.settings;
-                await this.owner.saveData(data);
-            });
-        return this.saveQueue;
-    }
+  private enqueueSave(): Promise<void> {
+    this.saveQueue = this.saveQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const data = (await this.owner.loadData()) ?? {};
+        (data as Record<string, unknown>)[PP_DATA_KEY] = this.settings;
+        await this.owner.saveData(data);
+      })
+      .catch(error => {
+        log.error('LOG_PP_SETTINGS_SAVE_FAILED', { error: String(error) });
+      });
+    return this.saveQueue;
+  }
 }
 
-/** Everything the unified menu needs from the vendored PP runtime. */
-export interface PixelPerfectFacade {
-    host: PixelPerfectHostImpl;
-    menuService: MenuService;
+/**
+ * 图片菜单能力的入口：拿着它就能读设置、改设置，并把 app 交给各个操作函数。
+ * 所有具体能力（复制、缩放、文件操作、链接改写）都是无状态的纯函数，按需
+ * 传入 `app` 与 `settings` 调用。
+ */
+export class PixelPerfectFacade {
+  readonly app: App;
+
+  private readonly store: SettingsStore;
+
+  constructor(owner: PixelPerfectOwner) {
+    this.app = owner.app;
+    this.store = new SettingsStore(owner);
+  }
+
+  get settings(): PixelPerfectImageSettings {
+    return this.store.settings;
+  }
+
+  saveSettings(): Promise<void> {
+    return this.store.save();
+  }
+
+  requestSaveSettings(debounceMs?: number): Promise<void> {
+    return this.store.requestSave(debounceMs);
+  }
+
+  /** 载入持久化设置并返回可用门面。 */
+  static async create(owner: PixelPerfectOwner): Promise<PixelPerfectFacade> {
+    const facade = new PixelPerfectFacade(owner);
+    await facade.store.load();
+    return facade;
+  }
 }
 
-export async function createPixelPerfectFacade(owner: PixelPerfectOwner): Promise<PixelPerfectFacade> {
-    const host = new PixelPerfectHostImpl(owner);
-    await host.load();
-    return { host, menuService: new MenuService(host) };
+/** 创建并载入图片菜单门面。 */
+export function createPixelPerfectFacade(owner: PixelPerfectOwner): Promise<PixelPerfectFacade> {
+  return PixelPerfectFacade.create(owner);
 }

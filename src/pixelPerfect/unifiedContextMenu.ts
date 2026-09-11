@@ -1,12 +1,22 @@
 import { FileSystemAdapter, Notice, Platform, type App, type Editor, type TFile } from 'obsidian';
-import { strings } from '../vendor/pixelPerfectImage/i18n';
-import { parseResizeSize } from '../vendor/pixelPerfectImage/ui/settings';
+import { MENU_TEXT, NOTICE_DONE, NOTICE_FAILED, NOTICE_TEMPLATE } from './menuTexts';
+import { parseResizeSize } from './ppSettingsModel';
 import {
     findMarkdownViewForElement,
     getBestHttpImageSource,
-    getImageSourceCandidates,
-    isRemoteImage
-} from '../vendor/pixelPerfectImage/utils/utils';
+    isRemoteImage,
+    isSvgSource,
+} from './imageSourceUtils';
+import { copyImageToClipboard, getCurrentImageWidth } from './imageOps';
+import { resolveImageFile } from './fileOps';
+import {
+    addDimensionsMenuItem,
+    addFileOperationMenuItems,
+    addInfoMenuItem,
+    addMenuItem,
+    addRemoteResizeMenuItems,
+    addResizeMenuItems,
+} from './ppMenuBuilder';
 import { DomMenu, closeAllMenus, createMenuRowEl, attachHoverSubmenu } from './menuUi';
 import type { PixelPerfectFacade } from './pixelPerfectHost';
 import {
@@ -54,51 +64,42 @@ export interface UnifiedMenuContext {
 let buildSeq = 0;
 
 function isDiaManaged(img: HTMLImageElement): boolean {
-    return Boolean((img as any).__diaa_onAlign);
-}
-
-function isSvgSource(img: HTMLImageElement): boolean {
-    return getImageSourceCandidates(img).some(src => {
-        const normalized = src.trim().toLowerCase();
-        if (!normalized) return false;
-        if (normalized.startsWith('data:image/svg+xml') || normalized.includes('image/svg+xml')) return true;
-        return normalized.split(/[?#]/, 1)[0].endsWith('.svg');
-    });
+    return Boolean(img.__diaa_onAlign);
 }
 
 /** Current per-image alignment + the DIA callback that persists it. */
 function diaaAlignment(img: HTMLImageElement): { alignment: AlignValue | undefined; onAlign?: (a: AlignValue | undefined) => void } {
-    const alignment = (img as any).__diaa_alignment as AlignValue | undefined;
-    const onAlign = (img as any).__diaa_onAlign as ((a: AlignValue | undefined) => void) | undefined;
+    const alignment = img.__diaa_alignment;
+    const onAlign = img.__diaa_onAlign ?? undefined;
     return { alignment, onAlign };
 }
 
 /** True when the DIA Live Preview renderer attached a resize surface to img. */
 function diaResizeEnabled(img: HTMLImageElement): boolean {
-    return (img as any).__diaa_resizeEnabled === true && typeof (img as any).__diaa_onResize === 'function';
+    return img.__diaa_resizeEnabled === true && typeof img.__diaa_onResize === 'function';
 }
 
 /** Natural pixel width of a DIA-managed image, read live (0 when unknown). */
 function diaNaturalWidth(img: HTMLImageElement): number {
-    const fn = (img as any).__diaa_naturalWidth;
+    const fn = img.__diaa_naturalWidth;
     if (typeof fn === 'function') return Number(fn()) || 0;
     return img.naturalWidth || 0;
 }
 
 function diaIsManualSingle(img: HTMLImageElement): boolean {
-    const fn = (img as any).__diaa_manualSingle;
+    const fn = img.__diaa_manualSingle;
     return typeof fn === 'function' ? Boolean(fn()) : false;
 }
 
 /** True when the image is the sole member of a single-image row. */
 function diaIsSingleRow(img: HTMLImageElement): boolean {
-    const fn = (img as any).__diaa_singleRow;
+    const fn = img.__diaa_singleRow;
     return typeof fn === 'function' ? Boolean(fn()) : true;
 }
 
 /** Pixel width a manual single row adopts when reset to the size setting. */
 function diaResetTargetWidth(img: HTMLImageElement): number {
-    const fn = (img as any).__diaa_resetTargetWidth;
+    const fn = img.__diaa_resetTargetWidth;
     return typeof fn === 'function' ? Math.round(Number(fn()) || 0) : 0;
 }
 
@@ -151,17 +152,17 @@ function addAlignSubmenu(menu: DomMenu, img: HTMLImageElement): void {
     });
 }
 
-// ── PP-style action items driven through MenuService (native PP semantics) ──
-function addCopyImage(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement): void {
-    facade.menuService.addMenuItem(
+// ── PP-style action items driven through the menu builders ─────────────────
+function addCopyImage(menu: DomMenu, img: HTMLImageElement): void {
+    addMenuItem(
         menu,
-        strings.menu.copyImage,
+        MENU_TEXT.copyImage,
         'copy',
         async () => {
-            await facade.host.imageService.copyImageToClipboard(img);
-            new Notice(strings.notices.imageCopied);
+            await copyImageToClipboard(img);
+            new Notice(NOTICE_DONE.imageCopied);
         },
-        strings.notices.failedToCopyImage
+        NOTICE_FAILED.failedToCopyImage
     );
 }
 
@@ -181,7 +182,7 @@ function addCutImageItem(
     target: { imgFile: TFile; noteFile: TFile; editor: Editor | null },
     disabled: boolean
 ): void {
-    facade.menuService.addMenuItem(
+    addMenuItem(
         menu,
         CUT_IMAGE_TITLE,
         CUT_IMAGE_ICON,
@@ -196,8 +197,8 @@ function addCutImageItem(
  * vault-relative path, and absolute filesystem path. The Obsidian URL is built
  * by hand because Obsidian exposes no `getObsidianUrl` API.
  */
-function addCopyPathSubmenu(menu: DomMenu, app: App, facade: PixelPerfectFacade, imgFile: TFile): void {
-    const parentRow = createMenuRowEl(strings.menu.copyLocalPath, 'link', true);
+function addCopyPathSubmenu(menu: DomMenu, app: App, imgFile: TFile): void {
+    const parentRow = createMenuRowEl(MENU_TEXT.copyLocalPath, 'link', true);
     menu.appendRowEl(parentRow);
 
     attachHoverSubmenu(parentRow, () => {
@@ -205,40 +206,40 @@ function addCopyPathSubmenu(menu: DomMenu, app: App, facade: PixelPerfectFacade,
         const vaultEncoded = encodeURIComponent(app.vault.getName());
         const fileEncoded = encodeURIComponent(imgFile.path);
 
-        facade.menuService.addMenuItem(
+        addMenuItem(
             sub,
             'Obsidian URL',
             'lucide-globe',
             async () => {
                 await navigator.clipboard.writeText(`obsidian://open?vault=${vaultEncoded}&file=${fileEncoded}`);
-                new Notice(strings.notices.imageUrlCopied);
+                new Notice(NOTICE_DONE.imageUrlCopied);
             },
-            strings.notices.failedToCopyUrl
+            NOTICE_FAILED.failedToCopyUrl
         );
-        facade.menuService.addMenuItem(
+        addMenuItem(
             sub,
             '基于库的相对路径',
             'lucide-file-text',
             async () => {
                 await navigator.clipboard.writeText(imgFile.path);
-                new Notice(strings.notices.filePathCopied);
+                new Notice(NOTICE_DONE.filePathCopied);
             },
-            strings.notices.failedToCopyPath
+            NOTICE_FAILED.failedToCopyPath
         );
-        facade.menuService.addMenuItem(
+        addMenuItem(
             sub,
             '绝对路径',
             'lucide-hard-drive',
             async () => {
                 const adapter = app.vault.adapter;
                 if (!(adapter instanceof FileSystemAdapter)) {
-                    new Notice(strings.notices.cannotCopyPath);
+                    new Notice(NOTICE_FAILED.cannotCopyPath);
                     return;
                 }
                 await navigator.clipboard.writeText(adapter.getFullPath(imgFile.path));
-                new Notice(strings.notices.filePathCopied);
+                new Notice(NOTICE_DONE.filePathCopied);
             },
-            strings.notices.failedToCopyPath
+            NOTICE_FAILED.failedToCopyPath
         );
         return sub;
     });
@@ -265,7 +266,7 @@ function addDiaResizeSizesSubmenu(
     if (!diaResizeEnabled(img)) return false;
     const natural = diaNaturalWidth(img);
     const singleRow = diaIsSingleRow(img);
-    const amounts = facade.host.settings.customResizeSizes
+    const amounts = facade.settings.customResizeSizes
         .map(parseResizeSize)
         .filter((parsed): parsed is NonNullable<typeof parsed> => parsed !== null && parsed.unit === '%')
         .map(parsed => parsed.amount);
@@ -282,7 +283,7 @@ function addDiaResizeSizesSubmenu(
         const sub = new DomMenu();
         const rectW = img.getBoundingClientRect().width;
         const shownPct = natural > 0 && rectW > 0 ? Math.round((rectW / natural) * 100) : null;
-        const resize = (img as any).__diaa_onResize as ((pct: number) => unknown) | undefined;
+        const resize = img.__diaa_onResize ?? undefined;
         for (const amount of amounts) {
             sub.addItem(item => {
                 if (shownPct !== null && shownPct === amount) item.setDisabled(true);
@@ -291,7 +292,7 @@ function addDiaResizeSizesSubmenu(
                     if (typeof resize !== 'function') return;
                     Promise.resolve()
                         .then(() => resize(amount))
-                        .catch(() => new Notice(strings.notices.failedToResizeTo.replace('{size}', `${amount}%`)));
+                        .catch(() => new Notice(NOTICE_TEMPLATE.failedToResizeTo.replace('{size}', `${amount}%`)));
                 });
             });
         }
@@ -306,30 +307,30 @@ function addDiaResizeSizesSubmenu(
  * enabled only when the image is a manual single row in Live Preview and a reset
  * target width is known — every other case renders greyed and does nothing.
  */
-function addDiaResetToSettingItem(menu: DomMenu, facade: PixelPerfectFacade, img: HTMLImageElement, modeDisabled: boolean): void {
-    if (typeof (img as any).__diaa_resetSingleManual !== 'function') return;
+function addDiaResetToSettingItem(menu: DomMenu, img: HTMLImageElement, modeDisabled: boolean): void {
+    if (typeof img.__diaa_resetSingleManual !== 'function') return;
     const target = diaResetTargetWidth(img);
     const enabled = !modeDisabled && diaIsManualSingle(img) && target > 0;
-    facade.menuService.addMenuItem(
+    addMenuItem(
         menu,
         `重置为设置宽度 ${target}`,
         'reset',
-        async () => (img as any).__diaa_resetSingleManual(),
+        async () => { img.__diaa_resetSingleManual?.(); },
         '重置宽度失败',
         !enabled
     );
 }
 
-function addCopyUrl(menu: DomMenu, facade: PixelPerfectFacade, url: string): void {
-    facade.menuService.addMenuItem(
+function addCopyUrl(menu: DomMenu, url: string): void {
+    addMenuItem(
         menu,
-        strings.menu.copyImageUrl,
+        MENU_TEXT.copyImageUrl,
         'link',
         async () => {
             await navigator.clipboard.writeText(url);
-            new Notice(strings.notices.imageUrlCopied);
+            new Notice(NOTICE_DONE.imageUrlCopied);
         },
-        strings.notices.failedToCopyUrl
+        NOTICE_FAILED.failedToCopyUrl
     );
 }
 
@@ -435,27 +436,27 @@ export async function openUnifiedImageMenu(
     if (remote) {
         if (!activeFile) return;
         const url = getBestHttpImageSource(img);
-        facade.menuService.addInfoMenuItem(menu, strings.menu.remoteImage, 'globe');
-        if (!isSvgSource(img)) addCopyImage(menu, facade, img);
-        addCopyUrl(menu, facade, url);
+        addInfoMenuItem(menu, MENU_TEXT.remoteImage, 'globe');
+        if (!isSvgSource(img)) addCopyImage(menu, img);
+        addCopyUrl(menu, url);
         menu.addSeparator();
-        await facade.menuService.addRemoteResizeMenuItems(menu, img, activeFile, url, isReadingMode);
+        await addRemoteResizeMenuItems(menu, app, img, activeFile, url, facade.settings, isReadingMode);
     } else {
         const resolved = activeFile
-            ? await facade.host.fileService.getImageFileWithErrorHandling(img, false, activeFile)
+            ? await resolveImageFile(app, img, false, activeFile)
             : null;
         const currentWidth = resolved
-            ? facade.host.imageService.getCurrentImageWidth(resolved.activeFile, resolved.imgFile)
+            ? getCurrentImageWidth(app, resolved.activeFile, resolved.imgFile)
             : null;
 
         // Group 1 — identity + clipboard at the very top: filename / dimensions
         // info (setting-gated), then for DIA-managed images "copy image" and
         // "copy local path". All image operations live in group 2, so the four of
         // them stay in one contiguous block with a single divider above it.
-        if (resolved && facade.host.settings.showFileInfo) {
-            await facade.menuService.addDimensionsMenuItem(menu, img, resolved, currentWidth);
+        if (resolved && facade.settings.showFileInfo) {
+            await addDimensionsMenuItem(menu, app, img, resolved, currentWidth, facade.settings);
         }
-        let hadGroup1 = resolved !== null && facade.host.settings.showFileInfo;
+        let hadGroup1 = resolved !== null && facade.settings.showFileInfo;
         if (resolved && managed) {
             const svg = resolved.imgFile.extension.toLowerCase() === 'svg' || isSvgSource(img);
             if (!svg) {
@@ -466,10 +467,10 @@ export async function openUnifiedImageMenu(
                     { imgFile: resolved.imgFile, noteFile: resolved.activeFile, editor: cutEditor },
                     cutDisabled
                 );
-                addCopyImage(menu, facade, img);
+                addCopyImage(menu, img);
                 hadGroup1 = true;
             }
-            addCopyPathSubmenu(menu, app, facade, resolved.imgFile);
+            addCopyPathSubmenu(menu, app, resolved.imgFile);
             hadGroup1 = true;
         }
 
@@ -488,7 +489,7 @@ export async function openUnifiedImageMenu(
             if (resolved) {
                 addTransformGroup(menu, { img, resolved, activeFile }, transformDisabled);
                 addDiaResizeSizesSubmenu(menu, facade, img, isReadingMode);
-                addDiaResetToSettingItem(menu, facade, img, isReadingMode);
+                addDiaResetToSettingItem(menu, img, isReadingMode);
             }
         } else if (resolved) {
             // Non-DIA images: rotate / flip, then the PP resize items (their copy
@@ -514,10 +515,10 @@ export async function openUnifiedImageMenu(
                     cutDisabled
                 );
             }
-            await facade.menuService.addResizeMenuItems(menu, img, resolved, currentWidth, isReadingMode);
+            await addResizeMenuItems(menu, app, img, resolved, currentWidth, facade.settings, isReadingMode);
         }
         if (resolved && !Platform.isMobile) {
-            facade.menuService.addFileOperationMenuItems(menu, resolved.imgFile);
+            addFileOperationMenuItems(menu, app, resolved.imgFile, facade.settings);
         }
     }
 

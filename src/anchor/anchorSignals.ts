@@ -15,7 +15,7 @@ import { findEmbedByLine } from "../scrollSync/domLocators";
 /** Resolve on the next animation frame. The single primitive every other
  *  signal is built on. */
 export function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
 /** Step frames until `pred()` is true, or until `maxFrames` elapse.
@@ -51,11 +51,11 @@ export function whenEmbedPresent(
 
   return new Promise((resolve) => {
     const timeoutMs = opts.timeoutMs ?? 5000;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
 
     const cleanup = () => {
       obs.disconnect();
-      if (timer !== null) clearTimeout(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
     const obs = new MutationObserver(() => {
       const el = findEmbedByLine(root, line);
@@ -67,7 +67,7 @@ export function whenEmbedPresent(
     obs.observe(root, { childList: true, subtree: true });
 
     if (timeoutMs > 0) {
-      timer = setTimeout(() => {
+      timer = window.setTimeout(() => {
         cleanup();
         resolve(null);
       }, timeoutMs);

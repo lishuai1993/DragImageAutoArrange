@@ -16,6 +16,14 @@ export const CLASSES = {
   itemSnap: `${CSS_PREFIX}-snap`,
   topBar: `${CSS_PREFIX}-top-bar`,
   resizing: `${CSS_PREFIX}-resizing`,
+  /** Reading-Mode row image sized by height, keeping its aspect ratio. */
+  imgAuto: `${CSS_PREFIX}-img-auto`,
+  /** Standalone image extracted from a text block, shrink-wrapped. */
+  rowInline: `${CSS_PREFIX}-row-inline`,
+  /** Obsidian wrapper element neutralized to `display: contents`. */
+  contents: `${CSS_PREFIX}-contents`,
+  /** Zoomed single image pinned to `object-position: center`. */
+  zoomPos: `${CSS_PREFIX}-zoom-pos`,
 } as const;
 
 export type Alignment = "left" | "center" | "right";

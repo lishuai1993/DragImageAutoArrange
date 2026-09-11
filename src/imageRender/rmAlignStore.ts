@@ -1,5 +1,6 @@
 import { App } from "obsidian";
 import { logger } from "../logger";
+import { editorCmOf, viewInternals, type ObsidianEditorView } from "../obsidianInternals";
 const log = logger.channel("rmAlignStore");
 
 // ── Pending alignment store ─────────────────────────────────────────
@@ -31,38 +32,29 @@ export function getPendingAlignmentCount(): number {
 
 // ── Flush timer ──────────────────────────────────────────────────────
 
-let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+let _flushTimer: number | null = null;
 
 export function clearFlushTimer(): void {
   if (_flushTimer) {
-    clearTimeout(_flushTimer);
+    window.clearTimeout(_flushTimer);
     _flushTimer = null;
   }
 }
 
-export function setFlushTimer(id: ReturnType<typeof setTimeout>): void {
+export function setFlushTimer(id: number): void {
   _flushTimer = id;
 }
 
-export function getFlushTimer(): ReturnType<typeof setTimeout> | null {
+export function getFlushTimer(): number | null {
   return _flushTimer;
 }
 
-// ── Flush to markdown ───────────────────────────────────────────────
-
-function isImageEmbedLine(line: string): boolean {
-  const re = /^\s*!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|webp|svg|bmp|avif))(?:\|\d+)?\]\]\s*$/i;
-  return re.test(line);
-}
-
 /** Find the CodeMirror EditorView for a given file path, if one is open. */
-function findEditorViewForFile(app: App, sourcePath: string): { dispatch: (tr: any) => void; state: { doc: { lines: number; line: (n: number) => { from: number; text: string } } } } | null {
+function findEditorViewForFile(app: App, sourcePath: string): ObsidianEditorView | null {
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
-    const view = leaf.view as any;
-    if (view.file?.path === sourcePath) {
-      const cm = view.editor?.cm;
-      if (cm?.dispatch) return cm;
-    }
+    if (viewInternals(leaf.view)?.file?.path !== sourcePath) continue;
+    const cm = editorCmOf(leaf.view);
+    if (cm) return cm;
   }
   return null;
 }
@@ -117,7 +109,9 @@ export function flushPendingAlignments(app: App): Set<string> {
     if (changes.length > 0) {
       changes.sort((a, b) => b.from - a.from);
       editorView.dispatch({ changes });
-      app.vault.adapter.write(sourcePath, editorView.state.doc.toString());
+      // Fire-and-forget: the caller is a sync flush, and a disk write failure
+      // must not block the in-memory editor change that already landed.
+      void app.vault.adapter.write(sourcePath, editorView.state.doc.toString());
       modified.add(sourcePath);
       // Only clear entries that were successfully written
       for (const { key } of entries) {

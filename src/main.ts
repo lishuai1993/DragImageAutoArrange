@@ -1,4 +1,6 @@
-import { Plugin, MarkdownView, TFile } from "obsidian";
+import { App, Plugin, MarkdownView, TFile } from "obsidian";
+import { activeMarkdownView } from "./utils";
+import { viewInternals, editorCmOf } from "./obsidianInternals";
 import {
   DragImageSettings,
   DragImageSettingTab,
@@ -16,12 +18,12 @@ import {
 import { createLivePreviewPlugin, createStandaloneDropPlugin, settingsChanged, resetSingleImageManualFlags, resetImageAlignmentFlags } from "./imageRender/livePreview";
 import { installReadingModeImageDoubleClickZoom } from "./imageRender/rmImageDoubleClick";
 import { setEditorDirty } from "./anchor/anchorStore";
-import { exportPreservedSizes, importPreservedSizes } from "./imageRender/imageRowWidget";
+import { exportPreservedSizes, importPreservedSizes, type MultiImageSizeData } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
 import { openUnifiedImageMenu } from "./pixelPerfect/unifiedContextMenu";
 import { closeAllMenus, setMenuScale } from "./pixelPerfect/menuUi";
 import { createPixelPerfectFacade, type PixelPerfectFacade } from "./pixelPerfect/pixelPerfectHost";
-import { findMarkdownViewForElement } from "./vendor/pixelPerfectImage/utils/utils";
+import { findMarkdownViewForElement } from "./pixelPerfect/imageSourceUtils";
 import { logger } from "./logger";
 import {
   listPendingTransforms,
@@ -30,11 +32,19 @@ import {
 import { writeOrientationToFile } from "./imageTransform/transformWriter";
 const log = logger.channel("main");
 
+/** The plugin's own slice of `data.json`. Other modules (the pixelPerfect
+ *  host) own additional top-level keys, so every field here is optional and
+ *  writes merge into the loaded object rather than replacing it. */
+interface PersistedPluginData {
+  settings?: DragImageSettings;
+  preservedSizes?: Record<string, MultiImageSizeData>;
+}
+
 /** Vault paths of every markdown note currently open in a workspace leaf. */
-function openMarkdownNotePaths(app: any): Set<string> {
+function openMarkdownNotePaths(app: App): Set<string> {
   const paths = new Set<string>();
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
-    const path = leaf.view?.file?.path;
+    const path = viewInternals(leaf.view)?.file?.path;
     if (typeof path === "string" && path) paths.add(path);
   }
   return paths;
@@ -51,7 +61,7 @@ let _flushChain: Promise<void> = Promise.resolve();
  * write (deleted source, decode error) clears the entry so a closed note can't
  * leave a phantom transform retrying on every layout event.
  */
-async function runDepartedFlush(app: any): Promise<void> {
+async function runDepartedFlush(app: App): Promise<void> {
   const openNotes = openMarkdownNotePaths(app);
   for (const entry of listPendingTransforms()) {
     if (openNotes.has(entry.notePath)) continue;
@@ -65,13 +75,13 @@ async function runDepartedFlush(app: any): Promise<void> {
   }
 }
 
-function flushDepartedTransforms(app: any): Promise<void> {
+function flushDepartedTransforms(app: App): Promise<void> {
   _flushChain = _flushChain.then(() => runDepartedFlush(app));
   return _flushChain;
 }
 
 /** Bake every pending orientation — called on plugin unload. */
-async function flushAllTransforms(app: any): Promise<void> {
+async function flushAllTransforms(app: App): Promise<void> {
   _flushChain = _flushChain.then(async () => {
     for (const entry of listPendingTransforms()) {
       const abstract = app.vault.getAbstractFileByPath(entry.imagePath);
@@ -171,7 +181,7 @@ export default class DragImageAutoArrangePlugin
     );
 
     // Restore preserved per-image sizes from previous session
-    const rawData = await this.loadData();
+    const rawData = (await this.loadData()) as PersistedPluginData | null;
     if (rawData?.preservedSizes) {
       importPreservedSizes(rawData.preservedSizes);
       log.info("Preserved multi-image sizes restored from previous session");
@@ -234,7 +244,7 @@ export default class DragImageAutoArrangePlugin
       const file = this.app.workspace.getActiveFile()?.path ?? "";
       requestP0Warmup(this.app, file);
       // P1/P2: queue the remaining tabs after a short delay (let P0 settle first).
-      setTimeout(() => requestGlobalWarmup(this.app), 3000);
+      window.setTimeout(() => requestGlobalWarmup(this.app), 3000);
     });
 
     // P0: warm every newly-opened file immediately.
@@ -247,7 +257,7 @@ export default class DragImageAutoArrangePlugin
     // Track RM switch frequency for P1 prioritisation.
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
-        const mode = (this.app.workspace.activeLeaf?.view as any)?.getMode?.() ?? "";
+        const mode = activeMarkdownView(this.app)?.getMode?.() ?? "";
         const file = this.app.workspace.getActiveFile()?.path ?? "";
         if (mode === "preview" && file) recordRMSwitch(file);
       })
@@ -262,7 +272,7 @@ export default class DragImageAutoArrangePlugin
     const _lastEditorLineCount = new Map<string, number>();
     this.registerEvent(
       this.app.workspace.on("editor-change", (editor, info) => {
-        const path = (info as any)?.file?.path;
+        const path = info.file?.path;
         if (!path) return;
         setEditorDirty(true);
         const newLineCount = editor.lineCount();
@@ -316,48 +326,51 @@ export default class DragImageAutoArrangePlugin
 
     log.info("Plugin loaded successfully");
 
-    // ── Merge Pixel Perfect Image into the unified context menu ──────
-    // Loads PP settings into the DIA data namespace and wires PP services
-    // (ImageService / FileService / MenuService) against our in-process host.
+    // ── 图片右键菜单能力 ────────────────────────────────────────────
+    // 载入图片菜单设置（住在 DIA 数据对象的 pixelPerfectImage 键下），并把
+    // 门面交给右键菜单与设置页使用。
     this.pixelPerfect = await createPixelPerfectFacade(this);
-    log.info("Pixel Perfect Image feature set merged", {
-      customResizeSizes: this.pixelPerfect.host.settings.customResizeSizes,
+    log.info("Image context menu feature set ready", {
+      customResizeSizes: this.pixelPerfect.settings.customResizeSizes,
     });
 
-    // The settings tab edits PP-owned options (file info / resize presets /
-    // delete confirmation / file operations), so it is registered only after
-    // the merged host is ready and its settings object can be handed over.
+    // 设置页要编辑图片菜单的设置项（文件信息 / 尺寸预设 / 删除确认 / 文件
+    // 操作），因此等门面就绪后再注册，把设置读写面交给它。
     this.addSettingTab(
       new DragImageSettingTab(
         this.app,
-        this as IDragImagePlugin,
-        this.pixelPerfect.host
+        this,
+        this.pixelPerfect
       )
     );
   }
 
-  async onunload(): Promise<void> {
+  onunload(): void {
     log.info("Plugin unloading");
     // Drop any open menu and its transient document listeners so a disable→enable
     // toggle reload leaves no leaked global handlers behind.
     closeAllMenus();
-    // Bake any orientation still pending so a note closed without a layout event
-    // (window teardown, plugin disable) doesn't lose the user's rotation.
-    await flushAllTransforms(this.app);
-    await logger.dispose();
+    // Plugin.onunload is typed void, so the teardown sequence runs in a detached
+    // async IIFE instead of making this method itself async.
+    void (async () => {
+      // Bake any orientation still pending so a note closed without a layout event
+      // (window teardown, plugin disable) doesn't lose the user's rotation.
+      await flushAllTransforms(this.app);
+      await logger.dispose();
+    })();
   }
 
   async saveSettings(): Promise<void> {
     // Merge instead of replacing so the PP settings namespace
     // (pixelPerfectImage) written by the pixelPerfect host is never dropped.
-    const data = (await this.loadData()) ?? {};
+    const data = ((await this.loadData()) ?? {}) as PersistedPluginData;
     data.settings = this.settings;
     data.preservedSizes = exportPreservedSizes();
     await this.saveData(data);
     // Notify both Live Preview and Reading Mode views so they rebuild with fresh options
     this.app.workspace.iterateAllLeaves((leaf) => {
       // Live Preview / Source mode: dispatch settingsChanged annotation to rebuild decorations
-      const cm = (leaf.view as any)?.editor?.cm;
+      const cm = editorCmOf(leaf.view);
       if (cm?.dispatch) {
         cm.dispatch({ annotations: [settingsChanged.of(true)] });
       }
@@ -375,7 +388,7 @@ export default class DragImageAutoArrangePlugin
    */
   resetAllSingleImages(): void {
     this.app.workspace.iterateAllLeaves((leaf) => {
-      const cm = (leaf.view as any)?.editor?.cm;
+      const cm = editorCmOf(leaf.view);
       if (cm?.dispatch) {
         resetSingleImageManualFlags(
           cm,
@@ -392,7 +405,7 @@ export default class DragImageAutoArrangePlugin
 
   resetAllImageAlignments(): void {
     this.app.workspace.iterateAllLeaves((leaf) => {
-      const cm = (leaf.view as any)?.editor?.cm;
+      const cm = editorCmOf(leaf.view);
       if (cm?.dispatch) {
         resetImageAlignmentFlags(
           cm,

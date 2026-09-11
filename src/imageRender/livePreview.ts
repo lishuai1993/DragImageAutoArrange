@@ -295,7 +295,7 @@ class StaticImageRowWidget extends WidgetType {
   private options: ImageRowOptions;
   private innerWidget: ImageRowWidget | null = null;
   private editorView: EditorView | null = null;
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistTimer: number | null = null;
 
   constructor(group: RowGroup, options: ImageRowOptions) {
     super();
@@ -422,7 +422,7 @@ class StaticImageRowWidget extends WidgetType {
           scales,
           imageCount: images.length,
         });
-        applyFlexGrowChanges(this.editorView!, images, grows, scales, this.options.alignment);
+        applyFlexGrowChanges(this.editorView, images, grows, scales, this.options.alignment);
       });
 
       return el;
@@ -441,8 +441,8 @@ class StaticImageRowWidget extends WidgetType {
           lineEnd: this.group.lineEnd,
         },
       });
-      const fallback = document.createElement("span");
-      fallback.textContent = "(image row render error)";
+      const fallback = createSpan();
+      fallback.textContent = "(Image row render error)";
       return fallback;
     }
   }
@@ -509,7 +509,7 @@ class StaticImageRowWidget extends WidgetType {
 
     // Diagnostic: check DOM for leaked Obsidian image embeds after reorder
     const capturedView = view;
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       try {
         const allEmbeds = capturedView.dom.querySelectorAll(
           ".internal-embed.image-embed"
@@ -762,7 +762,7 @@ class StaticImageRowWidget extends WidgetType {
       lineStart: this.group.lineStart,
       imageCount: this.group.images.length,
     });
-    if (this.persistTimer) clearTimeout(this.persistTimer);
+    if (this.persistTimer) window.clearTimeout(this.persistTimer);
     // Persist flex-grows and scale ratios for multi-image rows.
     if (this.editorView && this.innerWidget && this.group.images.length > 1) {
       const view = this.editorView;
@@ -780,7 +780,7 @@ class StaticImageRowWidget extends WidgetType {
         try {
           applyFlexGrowChanges(view, images, grows, scales, this.options.alignment);
         } catch {
-          this.persistTimer = setTimeout(() => {
+          this.persistTimer = window.setTimeout(() => {
             applyFlexGrowChanges(view, images, grows, scales, this.options.alignment);
           }, 0);
         }
@@ -1124,6 +1124,22 @@ export function createLivePreviewPlugin(
   return [layoutVersionField, Prec.highest(field)];
 }
 
+/** A resolved drag/drop target under the cursor. `findDropTarget` always
+ *  produces the full shape, with the row-specific fields set to null for a
+ *  non-row target (and vice versa). */
+interface DropTarget {
+  /** CodeMirror document position of the target element. */
+  pos: number;
+  /** 0-based source line of the target. */
+  line: number;
+  isImageLine: boolean;
+  isFlexRow: boolean;
+  rowLineStart: number | null;
+  rowLineEnd: number | null;
+  element: HTMLElement;
+  cmLine: HTMLElement | null;
+}
+
 /**
  * ViewPlugin that orchestrates cross-row drag operations at the capture phase
  * on .cm-editor (above .cm-content in the DOM). This ensures our handlers fire
@@ -1172,18 +1188,18 @@ export function createStandaloneDropPlugin(
       private clearDropIndicator() {
         if (this.dropIndicatorEl) {
           this.dropIndicatorEl.classList.remove("diaa-drop-target-line", "diaa-drop-left", "diaa-drop-right");
-          this.dropIndicatorEl.style.boxShadow = "";
+          this.dropIndicatorEl.setCssStyles({ boxShadow: "" });
           this.dropIndicatorEl = null;
         }
         this.dropSide = null;
       }
 
-      private findDropTarget(clientX: number, clientY: number) {
+      private findDropTarget(clientX: number, clientY: number): DropTarget | null {
         const targetEl = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
         if (!targetEl || !this.view.dom.contains(targetEl)) return null;
 
         // Detect flex row widgets (our custom DOM, spans multiple lines)
-        const flexRow = targetEl.closest(".drag-img-row") as HTMLElement | null;
+        const flexRow = targetEl.closest<HTMLElement>(".drag-img-row");
         if (flexRow) {
           const ls = parseInt(flexRow.dataset.lineStart || "", 10);
           const le = parseInt(flexRow.dataset.lineEnd || "", 10);
@@ -1204,8 +1220,8 @@ export function createStandaloneDropPlugin(
           }
         }
 
-        const embed = targetEl.closest(".internal-embed.image-embed") as HTMLElement | null;
-        const cmLine = targetEl.closest(".cm-line") as HTMLElement | null;
+        const embed = targetEl.closest<HTMLElement>(".internal-embed.image-embed");
+        const cmLine = targetEl.closest<HTMLElement>(".cm-line");
         const domEl = cmLine || embed;
         if (!domEl) return null;
 
@@ -1226,20 +1242,19 @@ export function createStandaloneDropPlugin(
         };
       }
 
-      private showDropIndicator(targetInfo: any, clientX?: number) {
+      private showDropIndicator(targetInfo: DropTarget, clientX?: number) {
         this.clearDropIndicator();
-        if (!targetInfo) return;
 
         // Flex row target: highlight the entire row
         if (targetInfo.isFlexRow) {
-          const rowEl = targetInfo.element as HTMLElement;
+          const rowEl = targetInfo.element;
           const rect = rowEl.getBoundingClientRect();
           const mid = rect.left + rect.width / 2;
           if (clientX !== undefined && clientX < mid) {
-            rowEl.style.boxShadow = "inset 3px 0 0 #4a9eff";
+            rowEl.setCssStyles({ boxShadow: "inset 3px 0 0 #4a9eff" });
             this.dropSide = "left";
           } else {
-            rowEl.style.boxShadow = "inset -3px 0 0 #4a9eff";
+            rowEl.setCssStyles({ boxShadow: "inset -3px 0 0 #4a9eff" });
             this.dropSide = "right";
           }
           this.dropIndicatorEl = rowEl;
@@ -1272,10 +1287,10 @@ export function createStandaloneDropPlugin(
         // ── dragstart: capture on WINDOW. Store exact source line via posAtDOM.
         this.onDragStart = (e: DragEvent) => {
           const target = e.target as HTMLElement;
-          const embed = target?.closest?.(".internal-embed.image-embed") as HTMLElement | null;
+          const embed = target?.closest?.<HTMLElement>(".internal-embed.image-embed");
           if (!embed) {
             // Check if this is a flex row item drag (should not be intercepted here)
-            const flexItem = target?.closest?.(".drag-img-item") as HTMLElement | null;
+            const flexItem = target?.closest?.<HTMLElement>(".drag-img-item");
             log.info("SD dragstart: not an obsidian embed", {
               targetTag: target?.tagName,
               targetClass: target?.className?.substring?.(0, 60) || "",
@@ -1285,13 +1300,13 @@ export function createStandaloneDropPlugin(
           }
 
           const root = embed.getRootNode();
-          const domNode: Element = root instanceof ShadowRoot ? root.host : embed;
+          const domNode: Element = root.instanceOf(ShadowRoot) ? root.host : embed;
 
-          const pos = this.view.posAtDOM(domNode as Node);
+          const pos = this.view.posAtDOM(domNode);
           if (pos < 0) {
             log.info("SD dragstart: posAtDOM failed", {
               tag: domNode.tagName,
-              shadowRoot: root instanceof ShadowRoot,
+              shadowRoot: root.instanceOf(ShadowRoot),
             });
             return;
           }
@@ -1301,11 +1316,11 @@ export function createStandaloneDropPlugin(
 
           // Configurable opacity on the original image during drag
           embed.style.opacity = String(1 - getSettings().dragOpacity / 100);
-          const restoreOpacity = () => { embed.style.opacity = ""; };
+          const restoreOpacity = () => { embed.setCssStyles({ opacity: "" }); };
           embed.addEventListener("dragend", restoreOpacity, { once: true });
 
           // Custom fully-opaque ghost that follows cursor via dragover
-          const img = embed.querySelector("img") as HTMLImageElement | null;
+          const img = embed.querySelector("img");
           const cleanupGhost = createDragGhost(img, e, getSettings().ghostImageWidth);
           embed.addEventListener("dragend", cleanupGhost, { once: true });
 
@@ -1404,7 +1419,7 @@ export function createStandaloneDropPlugin(
           // Skip if target is inside a flex row (widget handles merge)
           if ((e.target as HTMLElement)?.closest?.(".drag-img-row")) return;
 
-          const srcLine = parseInt(e.dataTransfer!.getData("application/diaa-source"), 10);
+          const srcLine = parseInt(e.dataTransfer.getData("application/diaa-source"), 10);
           if (isNaN(srcLine)) {
             log.info("SD drop: could not parse source line from diaa-source");
             return;

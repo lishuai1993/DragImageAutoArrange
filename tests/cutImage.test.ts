@@ -7,7 +7,7 @@ import {
   normalizeRowAfterRemoval,
   sourceLineFromMarkers,
 } from '../src/pixelPerfect/cutImage';
-import { LinkService } from '../src/vendor/pixelPerfectImage/core/LinkService';
+import { planImageLinkRemoval, removeImageLinkOccurrences } from '../src/pixelPerfect/imageLinkOps';
 import { lineStartOffset, minimalTextChange } from '../src/pixelPerfect/noteEdit';
 
 const IMG = 'assets/a.png';
@@ -202,31 +202,28 @@ describe('lineStartOffset', () => {
   });
 });
 
-// ── LinkService.planImageLinkRemoval ───────────────────────────────────────
+// ── imageLinkOps: planImageLinkRemoval / removeImageLinkOccurrences ────────
 
-function makeLinkService(files: Record<string, string>, activePath = NOTE) {
+function makeApp(files: Record<string, string>, activePath = NOTE) {
   const paths = Object.keys(files);
-  const host = {
-    app: {
-      workspace: { getActiveFile: () => ({ path: activePath }) },
-      vault: {
-        process: async (file: { path: string }, fn: (data: string) => string) => {
-          const next = fn(files[file.path]);
-          files[file.path] = next;
-          return next;
-        },
+  return {
+    workspace: { getActiveFile: () => ({ path: activePath }) },
+    vault: {
+      process: async (file: { path: string }, fn: (data: string) => string) => {
+        const next = fn(files[file.path]);
+        files[file.path] = next;
+        return next;
       },
-      metadataCache: {
-        getFirstLinkpathDest: (linkPath: string) => {
-          const hit = paths.find(
-            p => p === linkPath || p.split('/').pop() === linkPath || p.endsWith(`/${linkPath}`)
-          );
-          return hit ? { path: hit } : null;
-        },
+    },
+    metadataCache: {
+      getFirstLinkpathDest: (linkPath: string) => {
+        const hit = paths.find(
+          p => p === linkPath || p.split('/').pop() === linkPath || p.endsWith(`/${linkPath}`)
+        );
+        return hit ? { path: hit } : null;
       },
     },
   };
-  return new LinkService(host as never);
 }
 
 const note = (text: string) => ({ 'notes/here.md': text, 'assets/a.png': '', 'assets/b.png': '' });
@@ -240,7 +237,7 @@ type RemovalOpts = {
 };
 
 const plan = (files: Record<string, string>, opts: RemovalOpts = {}) =>
-  makeLinkService(files).planImageLinkRemoval(files[NOTE], image, noteFile, opts);
+  planImageLinkRemoval(makeApp(files), files[NOTE], image, noteFile, opts);
 
 describe('planImageLinkRemoval', () => {
   it('removes one of several identical references and reports the counts', () => {
@@ -312,7 +309,7 @@ describe('planImageLinkRemoval', () => {
 describe('removeImageLinkOccurrences (vault fallback)', () => {
   it('writes the planned text through vault.process', async () => {
     const files = note('![[a.png]]\n![[a.png]]');
-    const result = await makeLinkService(files).removeImageLinkOccurrences(image);
+    const result = await removeImageLinkOccurrences(makeApp(files), image);
 
     expect(result).toEqual({ found: 2, removed: 1 });
     expect(files[NOTE]).toBe('\n![[a.png]]');
@@ -320,7 +317,7 @@ describe('removeImageLinkOccurrences (vault fallback)', () => {
 
   it('does nothing when the active file is the image itself', async () => {
     const files = note('![[a.png]]');
-    const result = await makeLinkService(files, IMG).removeImageLinkOccurrences(image);
+    const result = await removeImageLinkOccurrences(makeApp(files, IMG), image);
 
     expect(result).toEqual({ found: 0, removed: 0 });
     expect(files[NOTE]).toBe('![[a.png]]');

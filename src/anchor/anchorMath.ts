@@ -74,11 +74,15 @@ export function nearestIndexBy(keys: number[], target: number): number {
 }
 
 /** Minimal shape of an Obsidian preview-renderer height-ledger entry
- *  (renderer.sections). Line numbers are 0-based, matching getSectionInfo. */
+ *  (renderer.sections). Line numbers are 0-based, matching getSectionInfo.
+ *  Every field is optional: the ledger fills in incrementally, so a section
+ *  can carry a height but no line range. Kept structurally compatible with
+ *  `PreviewSection` in obsidianInternals.ts, which is where the live ledger
+ *  is typed — this module stays dependency-free. */
 export interface LedgerSection {
-  lineStart: number;
-  lineEnd: number;
-  height: number;
+  lineStart?: number;
+  lineEnd?: number;
+  height?: number;
 }
 
 /** Cumulative ledger Y (document-space top offset) for a 0-based source line:

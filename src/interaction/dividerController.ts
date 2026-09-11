@@ -28,21 +28,21 @@ export class DividerController {
   constructor(private host: DividerHost) {}
 
   build(leftIndex: number): HTMLElement {
-    const divider = document.createElement("div");
+    const divider = createDiv();
     divider.className = CLASSES.divider;
-    divider.style.flex = "0 0 auto";
+    divider.setCssStyles({ flex: "0 0 auto" });
     divider.style.width = `${DIVIDER_WIDTH}px`;
-    divider.style.cursor = "col-resize";
-    divider.style.alignSelf = "stretch";
-    divider.style.backgroundColor = "transparent";
-    divider.style.transition = "background-color 0.15s";
+    divider.setCssStyles({ cursor: "col-resize" });
+    divider.setCssStyles({ alignSelf: "stretch" });
+    divider.setCssStyles({ backgroundColor: "transparent" });
+    divider.setCssStyles({ transition: "background-color 0.15s" });
     divider.dataset.leftIndex = String(leftIndex);
 
     divider.onmouseenter = () => {
-      divider.style.backgroundColor = "#4a9eff";
+      divider.setCssStyles({ backgroundColor: "#4a9eff" });
     };
     divider.onmouseleave = () => {
-      divider.style.backgroundColor = "transparent";
+      divider.setCssStyles({ backgroundColor: "transparent" });
     };
 
     // Double-click divider → snap to equal heights

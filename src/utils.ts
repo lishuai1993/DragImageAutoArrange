@@ -1,3 +1,5 @@
+import { MarkdownView, type App, type TAbstractFile } from "obsidian";
+
 /**
  * Compile-time exhaustiveness guard for discriminated unions. Put it in the
  * `default` branch of a `switch` over a union's discriminant: if a new variant
@@ -5,6 +7,19 @@
  * fails to type-check. At runtime it throws, converting any missed case into a
  * loud failure instead of a silent fall-through.
  */
+/**
+ * The Markdown view in the active leaf, or null when the active leaf is not a
+ * Markdown view.
+ *
+ * `Workspace.activeLeaf` is deprecated; `getActiveViewOfType` is the supported
+ * replacement and matches every caller's intent here — they all bail out as
+ * soon as the active view is not a Markdown view, which is exactly what a null
+ * return expresses.
+ */
+export function activeMarkdownView(app: App): MarkdownView | null {
+  return app.workspace.getActiveViewOfType(MarkdownView);
+}
+
 export function assertNever(x: never): never {
   throw new Error(`Unexpected variant: ${JSON.stringify(x)}`);
 }
@@ -44,18 +59,18 @@ export function displayNameFromPath(fileName: string): string {
 /**
  * Throttle a function call — fire at most once per `delay` ms.
  */
-export function throttle<T extends (...args: any[]) => void>(
-  fn: T,
+export function throttle<A extends unknown[]>(
+  fn: (...args: A) => void,
   delay: number
-): T {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  return ((...args: any[]) => {
+): (...args: A) => void {
+  let timer: number | null = null;
+  return (...args: A): void => {
     if (timer) return;
-    timer = setTimeout(() => {
+    timer = window.setTimeout(() => {
       fn(...args);
       timer = null;
     }, delay);
-  }) as T;
+  };
 }
 
 /**
@@ -89,4 +104,38 @@ export function alignmentToCSS(alignment: "left" | "center" | "right"): {
   if (alignment === "center") return { justifyContent: "center", objectPosition: "center top" };
   if (alignment === "right") return { justifyContent: "flex-end", objectPosition: "right top" };
   return { justifyContent: "flex-start", objectPosition: "left top" };
+}
+
+/**
+ * FileManager.trashFile 在 Obsidian 1.6.6 才出现，而本插件 minAppVersion 为
+ * 1.5.0；在更早的版本上只有 Vault.trash。两个成员都按能力探测访问——这里的
+ * 结构类型是必须的，直接写 app.fileManager.trashFile 会让 1.5.0 上的用户
+ * 一删除就崩，直接写 app.vault.trash 又会踩到已废弃 API。
+ */
+interface TrashCapableFileManager {
+  trashFile?(file: TAbstractFile): Promise<void>;
+}
+
+interface TrashCapableVault {
+  trash?(file: TAbstractFile, system: boolean): Promise<void>;
+}
+
+/**
+ * 删除文件，并尊重用户的「删除 / 移到回收站」偏好：新版走 FileManager，旧版
+ * 退回 Vault（system = true 表示按系统方式移到回收站）。
+ */
+export async function trashFile(app: App, file: TAbstractFile): Promise<void> {
+  const fileManager = app.fileManager as unknown as TrashCapableFileManager;
+  if (typeof fileManager.trashFile === "function") {
+    await fileManager.trashFile(file);
+    return;
+  }
+
+  const vault = app.vault as unknown as TrashCapableVault;
+  if (typeof vault.trash === "function") {
+    await vault.trash(file, true);
+    return;
+  }
+
+  throw new Error("当前 Obsidian 版本不支持删除文件");
 }
