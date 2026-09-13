@@ -1,22 +1,28 @@
 /**
  * Shared attachment of the context-menu image surface markers.
  *
- * Live Preview's `ImageRowWidget.buildImageItem` passes real closures so the
- * unified menu can drive resize/persist; Reading Mode has no persist channel,
- * so readingMode.ts / rmFlexRow.ts pass `null` for the action callbacks and the
- * rows render greyed-out but inert (menu assembly disables them in RM anyway).
+ * Live Preview's `ImageRowWidget.buildImageItem` passes a real closure so the
+ * unified menu can reset a manual width; Reading Mode has no persist channel, so
+ * readingMode.ts / rmFlexRow.ts pass `null` and the row renders greyed-out but
+ * inert (menu assembly disables it in RM anyway).
  */
 
+import type { SingleImageSizeMode } from "../constants";
+
+/** What the size setting currently resolves to, for the reset-width row's label.
+ *  `mode` decides what the row reads as: fixed names the width, natural names
+ *  the mode instead — its reset result is a per-image pixel count, so no single
+ *  number could stand for it. */
+export interface SingleResetTarget {
+    mode: SingleImageSizeMode;
+    width: number;
+}
+
 export interface DiaImageMarkerOptions {
-    resizeEnabled: boolean;
-    naturalWidth: () => number;
+    /** True when this image is the sole member of a manually-sized single row. */
     manualSingle: () => boolean;
-    /** True when the image belongs to a single-image row (vs a multi-member row). */
-    singleRow: () => boolean;
-    /** Pixel width a manual single row adopts when reset to the size setting. */
-    resetTargetWidth: () => number;
-    /** Real resize closure (LP), or null for a read-only surface (RM). */
-    onResize: ((pct: number) => void) | null;
+    /** The size setting's mode and width. */
+    resetTarget: () => SingleResetTarget;
     /** Real remove-custom-size closure (LP), or null for read-only (RM). */
     resetSingleManual: (() => void) | null;
 }
@@ -25,15 +31,8 @@ export function attachDiaImageMarkers(
     img: HTMLImageElement,
     opts: DiaImageMarkerOptions
 ): void {
-    img.__diaa_resizeEnabled = opts.resizeEnabled === true;
-    img.__diaa_naturalWidth = () => opts.naturalWidth();
     img.__diaa_manualSingle = () => opts.manualSingle();
-    img.__diaa_singleRow = () => opts.singleRow();
-    img.__diaa_resetTargetWidth = () => opts.resetTargetWidth();
-    const resize = opts.onResize ?? (() => undefined);
-    img.__diaa_onResize = (pct: number): void => {
-        resize(pct);
-    };
+    img.__diaa_resetTarget = () => opts.resetTarget();
     const reset = opts.resetSingleManual ?? (() => undefined);
     img.__diaa_resetSingleManual = (): void => {
         reset();

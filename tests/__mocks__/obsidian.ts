@@ -34,7 +34,7 @@ export const editorLivePreviewField = {};
 
 // Extra surface used by the image-menu modules and the settings tab.
 export const getLanguage = () => 'en';
-export const Platform = { isMacOS: true, isMobile: false };
+export const Platform = { isMacOS: true, isMobile: false, isDesktopApp: true };
 export const setIcon = () => {};
 export const addIcon = () => {};
 export const getIcon = () => null;

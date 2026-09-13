@@ -8,7 +8,7 @@ import {
   TextComponent,
 } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
-import { renderPixelPerfectSettings, type PixelPerfectBridge } from "./pixelPerfect/ppSettingsUi";
+import { renderImageMenuSettings, type ImageMenuBridge } from "./imageMenu/menuSettingsUi";
 import { logger, type LogLevel } from "./logger";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
@@ -61,9 +61,9 @@ export async function loadSettings(plugin: { loadData(): Promise<unknown> }): Pr
 
 export class DragImageSettingTab extends PluginSettingTab {
   plugin: IDragImagePlugin;
-  private bridge: PixelPerfectBridge | null;
+  private bridge: ImageMenuBridge | null;
 
-  constructor(app: App, plugin: IDragImagePlugin, bridge?: PixelPerfectBridge | null) {
+  constructor(app: App, plugin: IDragImagePlugin, bridge?: ImageMenuBridge | null) {
     super(app, plugin);
     this.plugin = plugin;
     this.bridge = bridge ?? null;
@@ -398,10 +398,10 @@ export class DragImageSettingTab extends PluginSettingTab {
           });
       });
 
-    // Pixel Perfect settings (merged features only) — surfaced as two groups at
-    // the tail of the page once the merged host is available.
+    // 图片右键菜单设置（文件信息 / 删除前确认 / 文件操作）——门面就绪后追加到
+    // 页面末尾。
     if (this.bridge) {
-      renderPixelPerfectSettings(containerEl, this.bridge);
+      renderImageMenuSettings(containerEl, this.bridge);
     }
 
     this.renderLogSettings(containerEl);

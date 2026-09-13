@@ -6,9 +6,9 @@ import {
   decideCut,
   normalizeRowAfterRemoval,
   sourceLineFromMarkers,
-} from '../src/pixelPerfect/cutImage';
-import { planImageLinkRemoval, removeImageLinkOccurrences } from '../src/pixelPerfect/imageLinkOps';
-import { lineStartOffset, minimalTextChange } from '../src/pixelPerfect/noteEdit';
+} from '../src/imageMenu/cutImage';
+import { planImageLinkRemoval, removeImageLinkOccurrences } from '../src/imageMenu/noteLinks';
+import { lineStartOffset, minimalTextChange } from '../src/imageMenu/noteEdit';
 
 const IMG = 'assets/a.png';
 const NOTE = 'notes/here.md';
@@ -202,7 +202,7 @@ describe('lineStartOffset', () => {
   });
 });
 
-// ── imageLinkOps: planImageLinkRemoval / removeImageLinkOccurrences ────────
+// ── noteLinks: planImageLinkRemoval / removeImageLinkOccurrences ───────────
 
 function makeApp(files: Record<string, string>, activePath = NOTE) {
   const paths = Object.keys(files);

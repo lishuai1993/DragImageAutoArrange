@@ -1,7 +1,7 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode } from "../constants";
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
 import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
-import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
+import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth } from "../imageLayout/layoutEngine";
 import { alignmentToCSS } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
@@ -324,70 +324,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
     // layoutSingleImage schedules a deferred write; persist synchronously too so
     // the |1|W still lands even if the widget is torn down before that frame.
-    this.persistCallback?.();
-  }
-
-  /** The pixel width a manual single row adopts when reset to the size setting:
-   *  fixed mode → the settings width; natural mode → the image's natural width. */
-  private singleResetTargetWidthPx(): number {
-    if (this.options.singleImageSizeMode === "fixed") {
-      return this.options.singleImageWidth;
-    }
-    const meta = this.loadedMetas.get(0);
-    return meta?.naturalWidth ?? this.imageEls[0]?.naturalWidth ?? 0;
-  }
-
-  /**
-   * Context-menu "resize to X% of natural pixel width" for the image at index.
-   * Single rows become manual-width (`S=1`, `W = natural*pct`).  Multi-member
-   * rows rebalance the whole row's flex weights so the target image's laid-out
-   * pixel width approaches `natural*pct` at the current container width, while
-   * the other members scale proportionally to fill the remainder — the same
-   * relative/weighted semantics a divider drag produces.  No-op until the image
-   * is loaded (natural dimensions unknown).
-   */
-  resizeToNaturalPercent(index: number, pct: number): void {
-    if (!(pct > 0)) return;
-    const natural = this.loadedMetas.get(index)?.naturalWidth
-      ?? this.imageEls[index]?.naturalWidth
-      ?? 0;
-    if (!(natural > 0)) return;
-
-    const target = Math.round((natural * pct) / 100);
-    if (this.isSingleRow()) {
-      this.setSingleImageWidth(target);
-      return;
-    }
-
-    const n = this.group.images.length;
-    if (index < 0 || index >= n) return;
-    const itemWidths = this.itemEls.map((el) => el.getBoundingClientRect().width);
-    const avail = itemWidths.reduce((s, w) => s + w, 0);
-    if (!(avail > 0)) return; // row not laid out yet
-
-    // A member can at most claim the available width minus room for the others
-    // (each flex item keeps a minimum column). Overshoot is pushed back here.
-    const minColumn = 50;
-    const capped = Math.max(minColumn, Math.min(target, avail - (n - 1) * minColumn));
-    const othersSum = avail - itemWidths[index];
-    const othersScale = othersSum > 0 && avail - capped > 0 ? (avail - capped) / othersSum : 1;
-
-    const widthsPx: number[] = [];
-    for (let i = 0; i < n; i++) {
-      widthsPx.push(i === index ? capped : Math.max(1, Math.round(itemWidths[i] * othersScale)));
-    }
-    const grows = computeFlexGrowsFromWidths(widthsPx);
-    for (let i = 0; i < n; i++) {
-      const g = grows[i] ?? 1;
-      const img = this.group.images[i];
-      if (img.display.kind === "multi") img.display.share = g;
-      img.hasSizing = true;
-      const el = this.itemEls[i];
-      if (el) el.style.flexGrow = String(g);
-    }
-    // Re-run the flex band height for the new weights (mirrors the divider-drag
-    // path), then persist the vector through the renderer's normal chain.
-    this.recalculateRowHeight();
     this.persistCallback?.();
   }
 
@@ -873,18 +809,15 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       this.persistCallback?.();
     };
 
-    // Context-menu resize surface. Natural width stays live so the unified menu
-    // can read it after load. Live Preview drives real persistence through the
-    // widget methods; Reading Mode attaches a read-only surface via the shared
-    // helper so its rows render greyed out.
+    // Context-menu reset-width surface. Live Preview drives real persistence
+    // through the widget method; Reading Mode attaches a read-only surface via
+    // the shared helper so its row renders greyed out.
     attachDiaImageMarkers(img, {
-      resizeEnabled: this.options.enableResize,
-      naturalWidth: () =>
-        this.loadedMetas.get(index)?.naturalWidth ?? img.naturalWidth ?? 0,
       manualSingle: () => this.isSingleManual(),
-      singleRow: () => this.isSingleRow(),
-      resetTargetWidth: () => this.singleResetTargetWidthPx(),
-      onResize: (pct) => this.resizeToNaturalPercent(index, pct),
+      resetTarget: () => ({
+        mode: this.options.singleImageSizeMode,
+        width: this.options.singleImageWidth,
+      }),
       resetSingleManual: () => this.resetSingleManualWidth(),
     });
 

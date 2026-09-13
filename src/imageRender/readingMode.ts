@@ -263,19 +263,18 @@ export function createReadingModeProcessor(
               if (fn) storePendingAlignment(ctx.sourcePath, fn, effectiveAlign);
             }
           };
-          // Read-only resize surface so RM renders the size rows greyed-out.
+          // Read-only reset surface so RM renders the reset row greyed-out.
           // manualSingle comes straight from the typed parse (matches[i] is the
           // RowImage this embed matched), not from re-reading a data-diaa-scale
           // attr — single rows carry no scale slot under the unified model.
           const parsed = matches[i];
           attachDiaImageMarkers(img, {
-            resizeEnabled: options.enableResize,
-            naturalWidth: () => img.naturalWidth || 0,
             manualSingle: () =>
               parsed != null && parsed.display.kind === "single-manual",
-            singleRow: () => true,
-            resetTargetWidth: () => img.naturalWidth || 0,
-            onResize: null,
+            resetTarget: () => ({
+              mode: options.singleImageSizeMode,
+              width: options.singleImageWidth,
+            }),
             resetSingleManual: null,
           });
         }

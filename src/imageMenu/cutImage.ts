@@ -3,9 +3,11 @@ import { logger } from '../logger';
 import { parseEmbedParams, stripEmbedParams } from '../imageParse/embedRaw';
 import { trashFile } from '../utils';
 import { lineStartOffset, minimalTextChange } from './noteEdit';
-import { copyImageToClipboard } from './imageOps';
-import { planImageLinkRemoval, removeImageLinkOccurrences } from './imageLinkOps';
-import type { PixelPerfectFacade } from './pixelPerfectHost';
+import { copyImageToClipboard } from './clipboard';
+import { forgetReference } from './nativeClipboard';
+import { planImageLinkRemoval, removeImageLinkOccurrences } from './noteLinks';
+import { confirmDelete } from './imageFile';
+import type { ImageMenuFacade } from './imageMenuHost';
 
 const log = logger.channel('cutImage');
 
@@ -22,12 +24,27 @@ export function cutImageKeptNotice(remaining: number): string {
   return `仅剪切图像引用（文件仍被 ${remaining} 处引用）`;
 }
 
+export const DELETE_IMAGE_FAILED = '删除图像引用失败';
+/** The last reference is gone, so the image file went to the trash. */
+export const DELETE_IMAGE_DONE = '已删除图像引用（文件已移入回收站）';
+/** The note has no link we could remove — nothing was changed. */
+export const DELETE_IMAGE_NO_REF = '未在当前笔记中找到该图像引用，未做任何更改';
+/** The reference went, but other references (or a declined prompt) kept the file. */
+export function deleteImageKeptNotice(remaining: number): string {
+  return `仅已删除当前引用（文件保留，仍被 ${remaining} 处引用）`;
+}
+/** The reference went but the user declined the file deletion. */
+export const DELETE_IMAGE_CANCELLED = '已删除当前引用（文件保留）';
+
 /**
- * Whether the 「剪切图像」 row may act. Cut rewrites the note, so it is confined
- * to the one case where both the target line is knowable and editing is allowed:
- * a DIA-managed image in Live Preview, whose row anchors give the exact source
- * line. Reading Mode must not touch note content at all, and a non-DIA image has
- * no anchor to resolve — both render the row greyed instead.
+ * Whether a reference-removing row may act. Removing a reference rewrites the
+ * note, so it is confined to the one case where both the target line is knowable
+ * and editing is allowed: a DIA-managed image in Live Preview, whose row anchors
+ * give the exact source line. Reading Mode must not touch note content at all,
+ * and a non-DIA image has no anchor to resolve — both render greyed instead.
+ *
+ * Shared by 「剪切图像」 and the 「删除」 file-operation row, which differ only in
+ * what happens around the removal.
  */
 export function cutMenuItemEnabled(managed: boolean, readingMode: boolean): boolean {
   return managed && !readingMode;
@@ -175,7 +192,7 @@ export function normalizeRowAfterRemoval(content: string, removedLine: number | 
  * removal, where the image used to sit.
  */
 async function removeReferenceFromNote(
-  facade: PixelPerfectFacade,
+  facade: ImageMenuFacade,
   imgFile: TFile,
   noteFile: TFile,
   editor: Editor | null,
@@ -203,46 +220,32 @@ async function removeReferenceFromNote(
   return { found: planned.found, removed: planned.removed };
 }
 
+interface ReferenceOutcome {
+  found: number;
+  removed: number;
+  remaining: number;
+  deleteFile: boolean;
+}
+
 /**
- * Cut = copy the bitmap to the clipboard, then drop exactly one reference to
- * the image (the clicked one when its source line is known, otherwise the
- * note's first). The file is trashed only when no reference anywhere survives.
- *
- * Ordering is load-bearing: the copy runs first and a failed copy aborts the
- * whole operation, so a delete can never outrun a clipboard that never got the
- * image.
+ * The part 「剪切图像」 and 「删除」 have in common: remove exactly one reference —
+ * the clicked one when its source line is known, otherwise the note's first —
+ * and report how many references the vault still holds, so the caller can decide
+ * whether the file survives.
  */
-export async function cutImage(
-  facade: PixelPerfectFacade,
+async function removeOneReference(
+  facade: ImageMenuFacade,
   img: HTMLImageElement,
   imgFile: TFile,
   noteFile: TFile,
   editor: Editor | null
-): Promise<void> {
-  try {
-    await copyImageToClipboard(img);
-  } catch {
-    new Notice(CUT_IMAGE_FAILED);
-    return;
-  }
-
-  const app = facade.app;
+): Promise<ReferenceOutcome> {
   const line = resolveClickedSourceLine(img);
-  const other = countOtherRefs(app.metadataCache.resolvedLinks, imgFile.path, noteFile.path);
-
-  let found = 0;
-  let removed = 0;
-  try {
-    const result = await removeReferenceFromNote(facade, imgFile, noteFile, editor, line);
-    found = result.found;
-    removed = result.removed;
-  } catch {
-    new Notice(CUT_IMAGE_FAILED);
-    return;
-  }
-
+  const other = countOtherRefs(facade.app.metadataCache.resolvedLinks, imgFile.path, noteFile.path);
+  const { found, removed } = await removeReferenceFromNote(facade, imgFile, noteFile, editor, line);
   const { remaining, deleteFile } = decideCut({ other, liveInCurrent: found, removed });
-  log.debug('LOG_CUT_REFS', {
+
+  log.debug('LOG_REFERENCE_REMOVAL', {
     img: imgFile.path,
     note: noteFile.path,
     line,
@@ -252,16 +255,103 @@ export async function cutImage(
     remaining,
     deleteFile,
   });
+  return { found, removed, remaining, deleteFile };
+}
 
-  if (removed === 0) {
+/**
+ * Cut = copy the bitmap to the clipboard, then drop exactly one reference to
+ * the image. The file is trashed only when no reference anywhere survives.
+ *
+ * Ordering is load-bearing: the copy runs first and a failed copy aborts the
+ * whole operation, so a delete can never outrun a clipboard that never got the
+ * image.
+ *
+ * The copy carries the reference like 「复制图像」 does, so a paste back into a
+ * vault lands as a link and a paste anywhere else as an attachment. That is only
+ * sound because paste re-checks the vault: the file survives the common case
+ * (other references remain), and where it does not, the link has nothing left to
+ * resolve to and the paste degrades to an attachment on its own.
+ */
+export async function cutImage(
+  facade: ImageMenuFacade,
+  img: HTMLImageElement,
+  imgFile: TFile,
+  noteFile: TFile,
+  editor: Editor | null
+): Promise<void> {
+  try {
+    await copyImageToClipboard(img, {
+      reference: `![[${imgFile.path}]]`,
+      vaultSource: { app: facade.app, file: imgFile },
+    });
+  } catch {
+    new Notice(CUT_IMAGE_FAILED);
+    return;
+  }
+
+  let outcome: ReferenceOutcome;
+  try {
+    outcome = await removeOneReference(facade, img, imgFile, noteFile, editor);
+  } catch {
+    new Notice(CUT_IMAGE_FAILED);
+    return;
+  }
+
+  if (outcome.removed === 0) {
     new Notice(CUT_IMAGE_NO_REF);
     return;
   }
-  if (!deleteFile) {
-    new Notice(cutImageKeptNotice(remaining));
+  if (!outcome.deleteFile) {
+    new Notice(cutImageKeptNotice(outcome.remaining));
     return;
   }
 
-  await trashFile(app, imgFile);
+  // The file is about to leave the vault, so the reference the copy armed now
+  // names nothing: drop it rather than leave it for a paste to find.
+  forgetReference();
+  await trashFile(facade.app, imgFile);
   new Notice(CUT_IMAGE_DONE);
+}
+
+/**
+ * Delete = drop exactly one reference to the image, then trash the file when
+ * that was the vault's last one. Same removal as 「剪切图像」, minus the clipboard
+ * and plus a confirmation: the native delete prompt is asked right before the
+ * file would go, so declining it leaves the file in place while the removal the
+ * user asked for still stands.
+ */
+export async function deleteImageReference(
+  facade: ImageMenuFacade,
+  img: HTMLImageElement,
+  imgFile: TFile,
+  noteFile: TFile,
+  editor: Editor | null
+): Promise<void> {
+  let outcome: ReferenceOutcome;
+  try {
+    outcome = await removeOneReference(facade, img, imgFile, noteFile, editor);
+  } catch {
+    new Notice(DELETE_IMAGE_FAILED);
+    return;
+  }
+
+  if (outcome.removed === 0) {
+    new Notice(DELETE_IMAGE_NO_REF);
+    return;
+  }
+  if (!outcome.deleteFile) {
+    new Notice(deleteImageKeptNotice(outcome.remaining));
+    return;
+  }
+
+  if (facade.settings.confirmDelete) {
+    const confirmed = await confirmDelete(facade.app, imgFile);
+    if (!confirmed) {
+      new Notice(DELETE_IMAGE_CANCELLED);
+      return;
+    }
+  }
+
+  await trashFile(facade.app, imgFile);
+  new Notice(DELETE_IMAGE_DONE);
 }

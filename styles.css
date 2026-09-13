@@ -470,7 +470,7 @@
   font-weight: 600;
 }
 
-/* === Unified right-click menu (DIA align top / rotate-flip middle / PP bottom) ===
+/* === Unified right-click menu (identity top / image ops middle / file ops last) ===
    DOM-based with Obsidian's native look, because the native Menu API exposes no
    submenu support for the alignment hover layer. Driven by theme CSS variables
    so it tracks the active theme. */

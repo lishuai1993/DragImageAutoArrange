@@ -20,10 +20,11 @@ import { installReadingModeImageDoubleClickZoom } from "./imageRender/rmImageDou
 import { setEditorDirty } from "./anchor/anchorStore";
 import { exportPreservedSizes, importPreservedSizes, type MultiImageSizeData } from "./imageRender/imageRowWidget";
 import { ImageRowOptions } from "./types";
-import { openUnifiedImageMenu } from "./pixelPerfect/unifiedContextMenu";
-import { closeAllMenus, setMenuScale } from "./pixelPerfect/menuUi";
-import { createPixelPerfectFacade, type PixelPerfectFacade } from "./pixelPerfect/pixelPerfectHost";
-import { findMarkdownViewForElement } from "./pixelPerfect/imageSourceUtils";
+import { openUnifiedImageMenu } from "./imageMenu/unifiedContextMenu";
+import { closeAllMenus, setMenuScale } from "./imageMenu/menuUi";
+import { createImageMenuFacade, type ImageMenuFacade } from "./imageMenu/imageMenuHost";
+import { findMarkdownViewForElement } from "./imageMenu/imageSource";
+import { installReferencePaste } from "./imageMenu/referencePaste";
 import { logger } from "./logger";
 import {
   listPendingTransforms,
@@ -32,9 +33,9 @@ import {
 import { writeOrientationToFile } from "./imageTransform/transformWriter";
 const log = logger.channel("main");
 
-/** The plugin's own slice of `data.json`. Other modules (the pixelPerfect
- *  host) own additional top-level keys, so every field here is optional and
- *  writes merge into the loaded object rather than replacing it. */
+/** The plugin's own slice of `data.json`. Other modules (the image-menu host)
+ *  own additional top-level keys, so every field here is optional and writes
+ *  merge into the loaded object rather than replacing it. */
 interface PersistedPluginData {
   settings?: DragImageSettings;
   preservedSizes?: Record<string, MultiImageSizeData>;
@@ -120,8 +121,8 @@ export default class DragImageAutoArrangePlugin
     logToFile: false,
   };
 
-  /** Merged Pixel Perfect Image runtime (PP settings + services + menu builder). */
-  private pixelPerfect: PixelPerfectFacade | null = null;
+  /** Image right-click menu runtime (settings store + facade). */
+  private imageMenu: ImageMenuFacade | null = null;
 
   async onload(): Promise<void> {
     // Init the file logger inside this plugin's own folder. `manifest.dir` is
@@ -140,7 +141,7 @@ export default class DragImageAutoArrangePlugin
 
     log.info("Plugin loading", { version: this.manifest.version });
 
-    // ── Unified image context menu (DIA + Pixel Perfect Image) ────────
+    // ── Unified image context menu ────────────────────────────────────
     // Registered at document level in capture phase so it runs BEFORE any
     // other plugin's contextmenu handler. Routes every image inside a markdown
     // note to the unified menu; everything else keeps Obsidian's native menu.
@@ -155,7 +156,7 @@ export default class DragImageAutoArrangePlugin
       const img = (target.tagName === "IMG" ? target : target.closest?.("img")) as
         | HTMLImageElement
         | null;
-      if (!img || !this.pixelPerfect) return;
+      if (!img || !this.imageMenu) return;
       // Only notes we can write into — canvas/other surfaces keep the native menu.
       if (!findMarkdownViewForElement(this.app, img)) return;
 
@@ -168,7 +169,7 @@ export default class DragImageAutoArrangePlugin
       e.stopPropagation();
       e.stopImmediatePropagation();
       setMenuScale(this.settings.menuScalePercent / 100);
-      void openUnifiedImageMenu(e, img, { app: this.app, facade: this.pixelPerfect });
+      void openUnifiedImageMenu(e, img, { app: this.app, facade: this.imageMenu });
     }, true);
 
     // Reading Mode image preview gesture: single-click → double-click, covering
@@ -327,22 +328,18 @@ export default class DragImageAutoArrangePlugin
     log.info("Plugin loaded successfully");
 
     // ── 图片右键菜单能力 ────────────────────────────────────────────
-    // 载入图片菜单设置（住在 DIA 数据对象的 pixelPerfectImage 键下），并把
-    // 门面交给右键菜单与设置页使用。
-    this.pixelPerfect = await createPixelPerfectFacade(this);
-    log.info("Image context menu feature set ready", {
-      customResizeSizes: this.pixelPerfect.settings.customResizeSizes,
-    });
+    // 载入图片菜单设置（住在 DIA 数据对象的 imageMenu 键下，首次载入会把旧键
+    // 迁移过来），并把门面交给右键菜单与设置页使用。
+    const imageMenu = await createImageMenuFacade(this);
+    this.imageMenu = imageMenu;
+    log.info("Image context menu feature set ready");
 
-    // 设置页要编辑图片菜单的设置项（文件信息 / 尺寸预设 / 删除确认 / 文件
-    // 操作），因此等门面就绪后再注册，把设置读写面交给它。
-    this.addSettingTab(
-      new DragImageSettingTab(
-        this.app,
-        this,
-        this.pixelPerfect
-      )
-    );
+    // 设置页要编辑图片菜单的设置项（文件信息 / 删除前确认 / 文件操作），因此
+    // 等门面就绪后再注册，把设置读写面交给它。
+    this.addSettingTab(new DragImageSettingTab(this.app, this, imageMenu));
+
+    // 库内粘贴一张「复制图像」得到的图时，落成引用而不是新建附件。
+    this.register(installReferencePaste(this.app));
   }
 
   onunload(): void {
@@ -361,8 +358,8 @@ export default class DragImageAutoArrangePlugin
   }
 
   async saveSettings(): Promise<void> {
-    // Merge instead of replacing so the PP settings namespace
-    // (pixelPerfectImage) written by the pixelPerfect host is never dropped.
+    // Merge instead of replacing so the image-menu settings namespace
+    // (imageMenu) written by the image-menu host is never dropped.
     const data = ((await this.loadData()) ?? {}) as PersistedPluginData;
     data.settings = this.settings;
     data.preservedSizes = exportPreservedSizes();

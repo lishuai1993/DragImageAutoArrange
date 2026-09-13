@@ -307,14 +307,13 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           if (fn) storePendingAlignment(sourcePath, fn, effectiveAlign);
         }
       };
-      // Read-only resize surface so RM renders the size rows greyed-out.
+      // Read-only reset surface so RM renders the reset row greyed-out.
       attachDiaImageMarkers(img, {
-        resizeEnabled: options.enableResize,
-        naturalWidth: () => img.naturalWidth || 0,
         manualSingle: () => false,
-        singleRow: () => false,
-        resetTargetWidth: () => img.naturalWidth || 0,
-        onResize: null,
+        resetTarget: () => ({
+          mode: options.singleImageSizeMode,
+          width: options.singleImageWidth,
+        }),
         resetSingleManual: null,
       });
     }

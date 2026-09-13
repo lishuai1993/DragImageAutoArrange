@@ -12,7 +12,7 @@ Automatically arrange consecutive image embeds into side-by-side rows — like F
 - **Per-image resize** — resize a standalone image, or pick a percentage of its natural width from the right-click menu.
 - **Alignment** — align an image left, center, or right within its row.
 - **Rotate / flip** — rotate by 90° / 180° and flip horizontally or vertically. The preview is applied live; the file is rewritten once, when the note is closed.
-- **Right-click menu** — one unified menu for alignment, rotation, resizing, copy, cut, and file operations. Cut copies the bitmap to the clipboard, removes that one reference, and deletes the local file only when nothing else in the vault points at it.
+- **Right-click menu** — one unified menu for alignment, rotation, resizing, copy, cut, and file operations. Copy and cut put the bitmap on the clipboard together with the image's in-vault reference: pasting inside this vault lands as a `![[…]]` link instead of minting a duplicate attachment, while pasting into another vault or app yields the image itself — PNG and JPEG files go over byte-for-byte, lossy formats are re-encoded as JPEG. Cut additionally removes that one reference, and deletes the local file only when nothing else in the vault points at it.
 - **Reading Mode support** — rows render in Reading Mode too, with editing operations greyed out.
 
 ## Installation
@@ -58,10 +58,6 @@ npm test        # unit tests
 
 Releases are built and published by the workflow in `.github/workflows/release.yml`, which runs on any pushed tag and attaches `main.js`, `manifest.json`, and `styles.css` to the created Release.
 
-## Acknowledgements
-
-The right-click menu's file operations, resize presets, and clipboard image copy are adapted from **Pixel Perfect Image** by Johan Sanneblad ([johansan/pixel-perfect-image](https://github.com/johansan/pixel-perfect-image)), used under the MIT License. Those capabilities were rewritten and integrated into this plugin's own architecture — no third-party source is vendored.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -82,7 +78,7 @@ MIT — see [LICENSE](LICENSE).
 - **单图缩放**：可缩放独立图片，也可在右键菜单中按原图宽度的百分比选择尺寸。
 - **对齐**：可将图片在所在行内左对齐、居中或右对齐。
 - **旋转 / 翻转**：支持 90° / 180° 旋转与水平、垂直翻转。预览实时生效，图片文件在关闭笔记时统一重写一次。
-- **右键菜单**：对齐、旋转、缩放、复制、剪切与文件操作收敛在同一个菜单中。剪切会把位图复制到剪贴板、移除该处引用，并且仅当全库再无其他引用时才删除本地文件。
+- **右键菜单**：对齐、旋转、缩放、复制、剪切与文件操作收敛在同一个菜单中。复制与剪切会把位图写入剪贴板，并一并带上该图在库内的引用：在本库粘贴落成 `![[…]]` 链接，而不是另存出一份重复附件；粘到其它仓库或 App 则落成图像本身 —— png / jpg 原样写入，webp、avif 等有损格式转码为 JPEG。剪切还会移除该处引用，并且仅当全库再无其他引用时才删除本地文件。
 - **阅读模式支持**：多图行在阅读模式下同样渲染，编辑类操作置灰。
 
 ## 安装
@@ -127,10 +123,6 @@ npm test        # 单元测试
 ```
 
 发布由 `.github/workflows/release.yml` 中的工作流完成：推送任意 Tag 即触发构建，并把 `main.js`、`manifest.json`、`styles.css` 作为附件上传到新建的 Release。
-
-## 致谢
-
-右键菜单中的文件操作、尺寸预设与「复制图像到剪贴板」等能力改编自 Johan Sanneblad 的 **Pixel Perfect Image**（[johansan/pixel-perfect-image](https://github.com/johansan/pixel-perfect-image)），依据 MIT 许可使用。相关能力已重写并融入本插件自身的架构，不再内联任何第三方源码。
 
 ## 许可
 
