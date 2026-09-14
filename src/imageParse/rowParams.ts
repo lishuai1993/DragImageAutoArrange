@@ -9,9 +9,21 @@
 // read()/write() below.  Consumers get a discriminated RowImage whose `display`
 // already declares which quantity each number is (kind = multi/single-follow/
 // single-manual), so they never branch on group size or sniff numeric sentinels.
+//
+// A leading rotate/flip word (see ORIENTATION_WORDS) may open the params of
+// either kind.  It must precede every number — Obsidian's own renderer reads the
+// LAST numeric as the width, so the word can never sit between numbers.
 
 import { buildImageLineRe } from "../constants";
-import { stripEmbedParams } from "./embedRaw";
+import { embedParamString, stripEmbedParams } from "./embedRaw";
+import {
+  IDENTITY_STATE,
+  isIdentityOrientation,
+  isOrientationWord,
+  orientationWord,
+  parseOrientationWord,
+  type OrientationState,
+} from "../imageTransform/orientation";
 
 export type Alignment = "left" | "center" | "right";
 export type RowKind = "multi" | "single";
@@ -27,6 +39,9 @@ export interface RowImage {
   raw: string;
   fileName: string;
   alignment?: Alignment;
+  /** Displayed rotate/flip orientation, read from the row's leading word.
+   *  Identity both when the word is absent and when it reads `orig`. */
+  orientation: OrientationState;
   /** Whether the persisted embed line carries explicit numeric sizing for this
    *  row kind (a multi share code, or the single `|S|W` tail).  Bare / legacy /
    *  alignment-only lines are false so layout may auto-backfill from natural
@@ -54,18 +69,28 @@ function splitTokens(paramStr: string): string[] {
   return paramStr.split("|");
 }
 
-/** Multi alignment: a leading align word only counts when a `|` follows it.
+/** Multi alignment: the align word only counts when a `|` follows it.
  *  `left|120` → left, a lone `left` → undefined. */
-function multiAlign(paramStr: string): Alignment | undefined {
-  const m = paramStr.match(/^(left|center|right)\|/);
-  return m ? (m[1] as Alignment) : undefined;
+function multiAlign(tokens: string[], offset: number): Alignment | undefined {
+  const tok = tokens[offset];
+  return tok !== undefined && ALIGN_WORDS.has(tok) && tokens.length > offset + 1
+    ? (tok as Alignment)
+    : undefined;
 }
 
-/** Single alignment: leading align word regardless of trailing params. */
-function singleAlign(tokens: string[]): Alignment | undefined {
-  return tokens.length > 0 && ALIGN_WORDS.has(tokens[0])
-    ? (tokens[0] as Alignment)
-    : undefined;
+/** Single alignment: the align word regardless of trailing params. */
+function singleAlign(tokens: string[], offset: number): Alignment | undefined {
+  const tok = tokens[offset];
+  return tok !== undefined && ALIGN_WORDS.has(tok) ? (tok as Alignment) : undefined;
+}
+
+/** Offset of the first numeric slot, past the orientation word and the align
+ *  word. The two are positionally ordered (orientation, then alignment) and
+ *  each may be absent, so the offset is a two-step prefix — never a fixed 1. */
+function slotOffset(tokens: string[]): number {
+  let offset = isOrientationWord(tokens[0]) ? 1 : 0;
+  if (ALIGN_WORDS.has(tokens[offset])) offset += 1;
+  return offset;
 }
 
 function parseMultiDisplay(paramStr: string): ImageDisplay {
@@ -107,8 +132,11 @@ function parseLine(
   const paramStr = match[2] ?? "";
   const tokens = splitTokens(paramStr);
 
-  const alignment = kind === "multi" ? multiAlign(paramStr) : singleAlign(tokens);
-  const offset = alignment ? 1 : 0;
+  const orientation = parseOrientationWord(paramStr) ?? IDENTITY_STATE;
+  const oriOffset = isOrientationWord(tokens[0]) ? 1 : 0;
+  const alignment =
+    kind === "multi" ? multiAlign(tokens, oriOffset) : singleAlign(tokens, oriOffset);
+  const offset = oriOffset + (alignment ? 1 : 0);
   const display =
     kind === "multi"
       ? parseMultiDisplay(paramStr)
@@ -123,7 +151,7 @@ function parseLine(
       : tokens.length >= offset + 2 &&
         (tokens[offset] === "0" || tokens[offset] === "1");
 
-  return { line, raw, fileName, alignment, hasSizing, display };
+  return { line, raw, fileName, alignment, orientation, hasSizing, display };
 }
 
 /**
@@ -152,13 +180,24 @@ function storedFollowWidth(raw: string): number | null {
   const m = raw.match(/\|([^\]]*)\]\]/);
   if (!m) return null;
   const tokens = m[1].split("|");
-  let offset = 0;
-  if (tokens.length > 0 && ALIGN_WORDS.has(tokens[0])) offset = 1;
+  const offset = slotOffset(tokens);
   if (tokens.length >= offset + 2 && (tokens[offset] === "0" || tokens[offset] === "1")) {
     const w = parseInt(tokens[offset + 1], 10);
     if (isFinite(w) && w > 0) return w;
   }
   return null;
+}
+
+/**
+ * The orientation params to prepend. Written when the row is rotated, and also
+ * when it already carries the slot — so resetting a rotated image lands on an
+ * explicit `orig` instead of silently dropping the slot, while a line that never
+ * had one stays untouched. See the emission policy in the design doc (§8.2).
+ */
+function orientationParams(img: RowImage): string[] {
+  const had = isOrientationWord(embedParamString(img.raw).split("|", 1)[0]);
+  if (!had && isIdentityOrientation(img.orientation)) return [];
+  return [orientationWord(img.orientation)];
 }
 
 function serializeMulti(img: RowImage): string {
@@ -167,7 +206,7 @@ function serializeMulti(img: RowImage): string {
   const { share, fill } = img.display;
 
   const shareCode = Math.round(share * 100);
-  const params: string[] = [];
+  const params: string[] = orientationParams(img);
   if (img.alignment) params.push(img.alignment);
   // A default share of 1.0 (code 100) is omitted — unless a scale needs a
   // numeric placeholder before it so the fill code stays last.
@@ -191,8 +230,10 @@ function serializeSingle(
 ): string {
   const base = stripEmbedParams(img.raw);
   const w = Math.max(1, Math.round(widthPx));
-  const alignPart = img.alignment ? `|${img.alignment}` : "";
-  return base.replace(/\]\]/, `${alignPart}|${sFlag}|${w}]]`);
+  const params = orientationParams(img);
+  if (img.alignment) params.push(img.alignment);
+  params.push(sFlag, String(w));
+  return base.replace(/\]\]/, `|${params.join("|")}]]`);
 }
 
 /** Serialise a RowImage back to its `![[file|...]]` line text. */

@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
     composeOrientation,
     isIdentityOrientation,
+    isOrientationWord,
     orientationToCss,
+    orientationWord,
     orientedSize,
+    parseOrientationWord,
     stateToMatrix,
     type OrientationState,
 } from '../src/imageTransform/orientation';
@@ -95,5 +98,56 @@ describe('orientation algebra', () => {
         const fh = composeOrientation(identity(), 'flipHorizontal');
         const m = stateToMatrix(fh);
         expect(m[0] * m[3] - m[1] * m[2]).toBe(-1);
+    });
+});
+
+describe('orientation words', () => {
+    const ALL_WORDS = ['orig', 'r90', 'r180', 'r270', 'fh', 'fv', 'r90fh', 'r270fh'] as const;
+
+    it('spells each of the eight states with its own word', () => {
+        const start = identity();
+        const seen = new Map<string, string>();
+        const stack: OrientationState[] = [start];
+        const closed = new Map<string, OrientationState>([[JSON.stringify(start), start]]);
+        while (stack.length) {
+            const s = stack.pop()!;
+            for (const op of ['rotate90cw', 'flipHorizontal', 'flipVertical'] as const) {
+                const next = composeOrientation(s, op);
+                const key = JSON.stringify(next);
+                if (!closed.has(key)) {
+                    closed.set(key, next);
+                    stack.push(next);
+                }
+            }
+        }
+        expect(closed.size).toBe(ALL_WORDS.length);
+        for (const state of closed.values()) {
+            const word = orientationWord(state);
+            expect(seen.has(word)).toBe(false);
+            seen.set(word, word);
+            expect(parseOrientationWord(word)).toEqual(state);
+        }
+        expect([...seen.keys()].sort()).toEqual([...ALL_WORDS].sort());
+    });
+
+    it('reads the word a param string opens with, ignoring what follows', () => {
+        expect(parseOrientationWord('r90|left|120|48')).toEqual({ turns: 1, mirror: false });
+        expect(parseOrientationWord('orig')).toEqual({ turns: 0, mirror: false });
+        expect(parseOrientationWord('r270fh|0|400')).toEqual({ turns: 3, mirror: true });
+    });
+
+    it('reports no word for an absent or unrecognised slot', () => {
+        expect(parseOrientationWord('')).toBeNull();
+        expect(parseOrientationWord('left|120')).toBeNull();
+        expect(parseOrientationWord('120|50')).toBeNull();
+        expect(parseOrientationWord('r45')).toBeNull();
+        expect(parseOrientationWord('constructor')).toBeNull();
+    });
+
+    it('recognises only the eight words', () => {
+        expect(isOrientationWord('fv')).toBe(true);
+        expect(isOrientationWord('left')).toBe(false);
+        expect(isOrientationWord('100')).toBe(false);
+        expect(isOrientationWord(undefined)).toBe(false);
     });
 });

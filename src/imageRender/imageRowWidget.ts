@@ -7,10 +7,11 @@ import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { parseEmbedParams } from "../imageParse/embedRaw";
+import { isOrientationWord } from "../imageTransform/orientation";
+import * as scrollDiag from "../scrollSync/scrollDiag";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { attachDiaImageMarkers } from "./imageMarkers";
-import { getPendingState, pendingTransformCount } from "../imageTransform/transformStore";
-import { applyOrientationPreview } from "../imageTransform/transformPreview";
+import { applyOrientationPreview, displayedImageSize } from "../imageTransform/transformPreview";
 import { DividerController, DividerHost } from "../interaction/dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "../interaction/resizeHandleController";
 import { DragReorderController, DragReorderHost } from "../interaction/dragReorderController";
@@ -89,6 +90,9 @@ export const preservedMultiImageSizes = new Map<string, MultiImageSizeData>();
 const lastRenderedSizes = new Map<string, {
   containerH: string;
   itemHs: string[];
+  /** Item widths, which a quarter-turned lone row sets to the drawing rather
+   *  than leaving to the image box. */
+  itemWs: string[];
   imgHs: string[];
   imgWs: string[];
   atWidth: number;
@@ -115,9 +119,6 @@ export interface ImageRowOptions {
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
   sourcePath: string;
-  /** Resolve a markdown embed name to its vault file path (or null). Used to
-   *  replay a pending rotate/flip orientation on rebuilt widget <img> nodes. */
-  getImageVaultPath?: (fileName: string) => string | null;
 }
 
 /**
@@ -148,8 +149,6 @@ export function sanitizeOptions(options: ImageRowOptions): ImageRowOptions {
     ),
     getResourcePath: typeof o.getResourcePath === "function" ? o.getResourcePath : (fileName: string) => fileName,
     sourcePath: typeof o.sourcePath === "string" ? o.sourcePath : "",
-    getImageVaultPath:
-      typeof o.getImageVaultPath === "function" ? o.getImageVaultPath : () => null,
   };
 }
 
@@ -159,6 +158,42 @@ export interface MultiImageSizeData {
   containerStyleH: string;
   /** file path + lineStart uniquely identify the row across sessions */
   filePath: string;
+}
+
+/** A rectangle, as the browser and `getImageContentRect` report them. */
+export interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The rect the resize handles hug: the content rect normally, and the img's own
+ * measured rect after a quarter turn.
+ *
+ * A quarter turn swaps the drawn content's width and height (and a fit scale
+ * shrinks it back inside the layout box), so `contentRect` — computed from the
+ * box with no transform in mind — would have the handles wrap the un-rotated
+ * image: a portrait handle frame around a landscape picture. The img's own rect
+ * already has the transform applied, and the drawn content fills that box (it
+ * is sized to the image's aspect), so measuring it is both exact and free of
+ * any second guess at the transform. It is returned in item coordinates, the
+ * space the handles are placed in.
+ */
+export function handleRect(
+  contentRect: Rect,
+  imgRect: Rect,
+  itemRect: Rect,
+  turned: boolean
+): Rect {
+  if (!turned) return contentRect;
+  return {
+    left: imgRect.left - itemRect.left,
+    top: imgRect.top - itemRect.top,
+    width: imgRect.width,
+    height: imgRect.height,
+  };
 }
 
 export type ReorderCallback = (fromIndex: number, toIndex: number) => void;
@@ -199,6 +234,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    *  single-follow model carries no width (it follows the setting) yet the
    *  persisted `|0|W` still needs the derived width that layoutSingleImage chose. */
   private singleWidthPx = 0;
+  /** A quarter-turned single row's layout-box height and the fit scale its
+   *  drawing carries, both as laid out by `layoutSingleImage`.  Kept so the
+   *  transform replay, the mutation observer and the resize drag can reproduce
+   *  the same drawing without re-measuring a box the turn itself obscures. */
+  private singleImgBoxH = 0;
+  private singleScale = 1;
   onLayoutChange: (() => void) | null = null;
   /** Per-image indices whose scale ratios have been updated and need persistence. */
   _scaleDirtyImages: Set<number> = new Set();
@@ -252,6 +293,15 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   /** This group is a single-image row (model declares the kind). */
   private isSingleRow(): boolean {
     return this.group.kind === "single";
+  }
+  /** True when a member's orientation is an odd quarter turn, i.e. its drawn
+   *  image has swapped width and height. */
+  isTurnedImage(index: number): boolean {
+    return (this.group.images[index]?.orientation.turns ?? 0) % 2 === 1;
+  }
+  /** Current container width in px, or 0 when it cannot be measured. */
+  private containerWidthPx(): number {
+    return this.container ? Math.round(this.container.getBoundingClientRect().width) : 0;
   }
   /** The manual flag of a single row, by type not sentinel. */
   private isSingleManual(): boolean {
@@ -393,11 +443,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     for (let i = 0; i < this.imageEls.length; i++) {
       const img = this.imageEls[i];
       const item = this.itemEls[i];
-      // Level 1: position img element within item
+      // Level 1: position img element within item.  A quarter-turned single row
+      // is centred instead: its item is already exactly the drawn picture, so
+      // the un-rotated box has to sit centred inside it regardless of alignment.
+      const turned = this.isSingleRow() && this.isTurnedImage(i);
       if (item) {
         item.setCssStyles({ display: "flex" });
-        item.style.setProperty("justify-content", css.justifyContent, "important");
-        item.setCssStyles({ alignItems: "flex-start" });
+        item.style.setProperty("justify-content", turned ? "center" : css.justifyContent, "important");
+        item.setCssStyles({ alignItems: turned ? "center" : "flex-start" });
       }
       // Level 2: position image content within img element
       img.style.setProperty("object-position", css.objectPosition, "important");
@@ -410,6 +463,19 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       ? (this.group.images[index]?.alignment ?? this.options.alignment)
       : this.options.alignment;
     return alignmentToCSS(align).objectPosition;
+  }
+
+  /** The height the img's layout box should carry, for the mutation observer to
+   *  restore when Obsidian writes its own inline style, or null when there is
+   *  nothing to police.  Normally it is the item's height — item and img box are
+   *  the same rectangle.  A quarter-turned single row is the exception: its item
+   *  hugs the *drawn* picture while the img keeps the un-rotated box, so the box
+   *  height is the one layout recorded. */
+  private expectedImgBoxHeight(index: number): string | null {
+    if (this.isSingleRow() && this.isTurnedImage(index) && this.singleImgBoxH > 0) {
+      return `${this.singleImgBoxH}px`;
+    }
+    return this.itemEls[index]?.style.height || null;
   }
 
   /**
@@ -449,8 +515,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // Level 1: position img element within its item via flex
       if (item) {
         item.setCssStyles({ display: "flex" });
-        item.style.setProperty("justify-content", css.justifyContent, "important");
-        item.setCssStyles({ alignItems: "flex-start" });
+        // A quarter-turned picture is drawn smaller than its layout box, so the
+        // row's item is sized to the drawing itself and the box — which still
+        // holds the un-rotated bitmap — is centred inside it. Alignment has no
+        // say there: the item is already exactly the picture. Only single rows
+        // do this; a multi-image member's item is the row's shared height.
+        const turned = this.isSingleRow() && this.isTurnedImage(i);
+        item.style.setProperty("justify-content", turned ? "center" : css.justifyContent, "important");
+        item.setCssStyles({ alignItems: turned ? "center" : "flex-start" });
       }
       // Level 2: position image content within img element
       img.setCssStyles({ objectFit: "contain" });
@@ -618,8 +690,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // Cap width to the container so a cached (wide-editor) height restored on
       // scroll-in rebuild can never overflow a narrow editor and get left-right
       // clipped; object-fit:contain then degrades it to a vertical letterbox
-      // until recalc lands the exact height.
-      this.imageEls[0].setCssStyles({ maxWidth: "100%" });
+      // until recalc lands the exact height. A quarter turn is exempt: there the
+      // item is sized to the drawing, so the box is legitimately wider than it.
+      this.imageEls[0].setCssStyles({ maxWidth: this.isTurnedImage(0) ? "none" : "100%" });
       this.itemEls[0].setCssStyles({ flex: "0 0 auto" });
       this.itemEls[0].setCssStyles({ height: "" });
       this.itemEls[0].setCssStyles({ maxWidth: "100%" });
@@ -670,6 +743,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           if (cached.imgHs[i]) this.imageEls[i].style.height = scaleH(cached.imgHs[i]);
           if (cached.imgWs[i]) this.imageEls[i].style.width = cached.imgWs[i];
           this.itemEls[i].style.height = scaleH(cached.itemHs[i]);
+          // Widths ride along for the same reason: a quarter-turned lone item is
+          // sized to the drawing, and letting it rebuild at the image box's width
+          // would put the picture off-centre for the one frame before layout.
+          if (cached.itemWs?.[i]) this.itemEls[i].style.width = cached.itemWs[i];
         }
         this.container.style.height = scaleH(cached.containerH);
         log.debug("ImageRowWidget restored cached rendered sizes", {
@@ -855,16 +932,16 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         }
         if (m.attributeName === "style") {
           // Obsidian may set inline styles (e.g. height) on the img.
-          // Restore the correct height from the item element.
+          // Restore the height the layout chose for the img's layout box.
           const imgEl = t as HTMLImageElement;
-          const itemH = item.style.height;
-          if (itemH && imgEl.style.height !== itemH) {
-            log.debug("MutationObserver restoring img height from item", {
+          const expectedH = this.expectedImgBoxHeight(index);
+          if (expectedH && imgEl.style.height !== expectedH) {
+            log.debug("MutationObserver restoring img height", {
               index,
               obsidianSet: imgEl.style.height,
-              restored: itemH,
+              restored: expectedH,
             });
-            imgEl.style.height = itemH;
+            imgEl.style.height = expectedH;
             imgEl.setCssStyles({ width: "auto" });
             imgEl.setCssStyles({ objectFit: "contain" });
             imgEl.style.setProperty("object-position", this.getObjectPosition(index), "important");
@@ -1011,9 +1088,67 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     return result;
   }
 
+  /**
+   * The rect the resize handles hug. Same as `getImageContentRect` except on an
+   * odd quarter turn, where the drawn image has swapped width and height — see
+   * `handleRect`.
+   *
+   * The drag math keeps reading `getImageContentRect`: it resizes the layout
+   * box, which is always the un-rotated one, so the handles' rect is only for
+   * placing the handles.
+   */
+  getHandleRect(index: number): Rect | null {
+    const contentRect = this.getImageContentRect(index);
+    const item = this.itemEls[index];
+    const img = this.imageEls[index];
+    if (!contentRect || !item || !img) return null;
+    return handleRect(
+      contentRect,
+      img.getBoundingClientRect(),
+      item.getBoundingClientRect(),
+      this.isTurnedImage(index)
+    );
+  }
+
+  /**
+   * Replay the orientation of a lone image and re-fit its item to what is
+   * drawn, as `layoutSingleImage` does — for a resize drag, where the layout
+   * pass that would normally do this only runs at the end.
+   *
+   * The item is sized to the drawing, so a step that changes the box has to
+   * re-derive both the drawing's size and the fit scale from the new box before
+   * either is written; the box height is read straight off the inline style the
+   * drag just set. The handles then sit on the drawing, because `getHandleRect`
+   * measures the transformed img.
+   */
+  syncItemToDrawing(index: number): void {
+    const img = this.imageEls[index];
+    const item = this.itemEls[index];
+    if (!img || !item) return;
+    const member = this.group.images[index];
+    if (!member || !this.isSingleRow() || !this.isTurnedImage(index)) {
+      if (member) applyOrientationPreview(img, member.orientation);
+      item.setCssStyles({ width: "", height: "" });
+      return;
+    }
+    const boxH = parseFloat(img.style.height || "0");
+    const meta = this.loadedMetas.get(index);
+    const aspect = meta && meta.naturalHeight > 0 ? meta.naturalWidth / meta.naturalHeight : 1;
+    const boxW = Math.max(1, Math.round(boxH * aspect));
+    const shown = displayedImageSize(boxW, boxH, member.orientation, this.containerWidthPx());
+    applyOrientationPreview(img, member.orientation, { scale: shown.scale });
+    this.singleImgBoxH = boxH;
+    this.singleScale = shown.scale;
+    this.rowHeight = Math.max(1, Math.round(shown.height));
+    item.setCssStyles({
+      width: `${Math.max(1, Math.round(shown.width))}px`,
+      height: `${Math.max(1, Math.round(shown.height))}px`,
+    });
+  }
+
   /** Reposition resize handles to match the actual image content rect. */
   updateHandlePositions(index: number): void {
-    const rect = this.getImageContentRect(index);
+    const rect = this.getHandleRect(index);
     const defs = this.handleDefs[index];
     if (!rect || !defs) return;
 
@@ -1120,14 +1255,39 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     renderWidth = Math.max(1, renderWidth);
     const imageH = Math.max(1, Math.round(renderWidth / aspect));
 
+    // The item is meant to be the picture, not the box around it. Normally the
+    // two are the same; a quarter turn swaps the drawing's width and height, so
+    // the item takes the swapped size and, when that width would overrun the
+    // page, a uniform fit scale brings the whole picture back to page width.
+    // The img keeps the un-rotated box — it has to, it holds the un-rotated
+    // bitmap — and is centred in the item by applyAlignmentToAll.
+    const turned = this.isTurnedImage(0);
+    const state = this.group.images[0].orientation;
+    const shown = displayedImageSize(
+      renderWidth,
+      imageH,
+      state,
+      Math.max(1, Math.round(containerWidth))
+    );
+
     this.imageEls[0].setCssStyles({ objectFit: "contain" });
     this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(0), "important");
     this.imageEls[0].style.height = `${imageH}px`;
     this.imageEls[0].setCssStyles({ width: "auto" });
-    this.imageEls[0].setCssStyles({ maxWidth: "100%" });
-    this.itemEls[0].setCssStyles({ height: "" });
+    // With the item sized to the drawing, the layout box may legitimately be
+    // wider than the item; letting max-width clamp it would re-letterbox the
+    // bitmap and change what is drawn.
+    this.imageEls[0].setCssStyles({ maxWidth: turned ? "none" : "100%" });
     this.itemEls[0].setCssStyles({ flex: "0 0 auto" });
     this.itemEls[0].setCssStyles({ maxWidth: "100%" });
+    this.itemEls[0].setCssStyles({
+      width: turned ? `${Math.max(1, Math.round(shown.width))}px` : "",
+      height: turned ? `${Math.max(1, Math.round(shown.height))}px` : "",
+    });
+    // Hand the drawing's own numbers to the transform replay and the observer,
+    // so neither has to measure a box the turn has already obscured.
+    this.singleImgBoxH = imageH;
+    this.singleScale = shown.scale;
     if (this.container) this.container.setCssStyles({ height: "" });
 
     // Update the data model and materialize `|S|W` into markdown when it drifts.
@@ -1144,8 +1304,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       window.requestAnimationFrame(() => this.persistCallback?.());
     }
 
-    this.rowHeight = imageH;
-    return imageH;
+    // The row is as tall as the picture is drawn, which a quarter turn swaps.
+    this.rowHeight = Math.max(1, Math.round(shown.height));
+    return this.rowHeight;
   }
 
   /**
@@ -1180,6 +1341,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       if (this.group.images.length > 1) {
         const key = mkRowKey(this.options.sourcePath, this.group.lineStart, this.group.images.map(i => i.fileName));
         const preserved = preservedMultiImageSizes.get(key);
+        scrollDiag.note("preserved 缓存查询", {
+          hit: !!preserved,
+          savedImages: preserved?.images.length ?? 0,
+          metas: metas.length,
+          savedContainerH: preserved?.containerStyleH ?? "-",
+        });
         if (preserved && preserved.images.length === metas.length) {
           // Skip stale entries saved before applyLayout ever ran (all images
           // still at the "100%" default from build()).  Without this guard
@@ -1188,12 +1355,19 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           const isStale = preserved.images.every(
             (pi) => pi.styleW === "100%" && pi.styleH === "100%"
           );
+          if (isStale) {
+            scrollDiag.note("preserved 判为 stale（全 100%），跳过复用");
+          }
           if (!isStale) {
           // When scale data exists in markdown, the scale branch in
           // recalculateRowHeight is authoritative.  Preserved pixel sizes
           // may be stale (e.g. saved by an older plugin version), so skip
           // them and let the scale-based layout recompute correct heights.
           const hasFill = this.group.images.some(img => this.fillOf(img) != null);
+          scrollDiag.note("preserved 复用判定", {
+            hasFill,
+            branch: hasFill ? "hasFill→交由 recalculateRowHeight" : "复用像素尺寸",
+          });
           if (!hasFill) {
           // Apply saved inline style values directly — no recomputation
           // Use item height as the authoritative height for both item and
@@ -1220,6 +1394,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
             preservedSizes: preserved.images.map((pi) => `${pi.styleW}x${pi.styleH}`),
           });
           this.applyAlignmentToAll();
+          scrollDiag.note("preserved 复用完成（容器高度同步还原）", {
+            pre: preLayoutContainerH || "(empty)",
+            post: this.container.style.height,
+          });
           if (this.container.style.height !== preLayoutContainerH) {
             this.onLayoutChange?.();
           }
@@ -1231,6 +1409,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           } // !hasScale
           // hasScale: delete stale preserved entry so recalculateRowHeight
           // can recompute heights from up-to-date scale ratios.
+          scrollDiag.note("preserved 条目删除（hasFill：交回重算）", { key });
           preservedMultiImageSizes.delete(key);
           } // !isStale
         }
@@ -1339,7 +1518,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       }
       // Force reflow so handle positions use the new dimensions
       void this.container.offsetHeight;
-      this.updateAllHandlePositions();
       window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } else {
       // Use a sensible default until images load.  Prefer the last rendered
@@ -1353,32 +1531,32 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       log.error("ImageRowWidget applyLayout error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
       this.applyUniformFallback();
     } finally {
-      // Every layout pass ends by re-applying any in-session rotate/flip
-      // orientation. Drag single↔multi conversions and alignment edits rebuild
-      // the <img> DOM node, which drops the CSS transform the unified context
-      // menu applied — but the pending orientation survives in transformStore
-      // until the owning note closes and is written to disk. Replaying it here
-      // (after the forced reflow above, so client dims are current for the
-      // quarter-turn fit-scale) keeps the preview intact across the rebuild.
-      this.syncTransformPreviews();
+      // Every layout pass ends by re-applying each member's rotate/flip
+      // orientation. The rotation now lives in the row text, but the transform
+      // itself is still CSS on the <img>: a rebuild recreates that node and
+      // drops the transform, so it is replayed here — after the forced reflow
+      // above, so client dims are current for the quarter-turn fit-scale.
+      this.applyOrientationTransforms();
+      // Handles last, and after the transform: they sit on the *drawn* box on a
+      // quarter turn, which the browser only measures once the transform is on
+      // the element.
+      this.updateAllHandlePositions();
     }
   }
 
-  /**
-   * Re-apply pending rotate/flip orientations from transformStore onto the
-   * current <img> elements. No-op while nothing is pending, so the cheap guard
-   * (a counter read) spares a per-image vault-path lookup + store query on the
-   * common layout path.
-   */
-  private syncTransformPreviews(): void {
-    if (pendingTransformCount() === 0) return;
-    const resolvePath = this.options.getImageVaultPath;
-    if (!resolvePath) return;
+  /** Replay every member's orientation as a CSS transform on its <img>.  A
+   *  quarter-turned single row hands over the explicit fit scale its item was
+   *  sized with; everyone else (multi members, and any single row laid out
+   *  before its box was measurable) uses the transform's own measured scale. */
+  private applyOrientationTransforms(): void {
     for (let i = 0; i < this.imageEls.length; i++) {
-      const vaultPath = resolvePath(this.group.images[i].fileName);
-      if (!vaultPath) continue;
-      const state = getPendingState(vaultPath);
-      if (state) applyOrientationPreview(this.imageEls[i], state);
+      const member = this.group.images[i];
+      if (!member) continue;
+      if (this.isSingleRow() && this.isTurnedImage(i)) {
+        applyOrientationPreview(this.imageEls[i], member.orientation, { scale: this.singleScale });
+      } else {
+        applyOrientationPreview(this.imageEls[i], member.orientation);
+      }
     }
   }
 
@@ -1418,8 +1596,11 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           }
         }
       } else if (img.display.kind === "multi") {
-        // Multi-image: detect incomplete params by counting | components
+        // Multi-image: detect incomplete params by counting | components. The
+        // orientation word is not a sizing component, so drop it before both the
+        // alignment test and the count.
         const parts = (parseEmbedParams(img.raw) ?? []).filter(p => p !== "");
+        if (isOrientationWord(parts[0])) parts.shift();
         // Expected: alignment + flexGrow + scale = 3 parts (or 2 without alignment)
         const hasAlign = parts.length > 0 && /^(left|center|right)$/.test(parts[0]);
         const expectedParts = hasAlign ? 3 : 2;
@@ -1429,6 +1610,11 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           // Params are incomplete — one numeric cannot unambiguously encode both
           // share and fill, so the parsed values are unreliable.  Clear both and
           // let recalculateRowHeight auto-fill from natural aspect ratios.
+          scrollDiag.note("backfill 判为不完整 → 清空并重排", {
+            index: i,
+            parts: parts.join("|"),
+            expectedParts,
+          });
           img.display.share = 1;
           img.display.fill = null;
           img.hasSizing = false;
@@ -1459,6 +1645,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     if (changed) {
       this.applyAlignmentToAll();
+      scrollDiag.note("backfill 有改动 → 排入 RAF 持久化", {
+        needRelayout,
+        images: images.length,
+      });
       window.requestAnimationFrame(() => this.persistCallback?.());
     }
     return needRelayout;
@@ -1720,6 +1910,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       lastRenderedSizes.set(key, {
         containerH: this.container.style.height,
         itemHs: this.itemEls.map(el => el.style.height),
+        itemWs: this.itemEls.map(el => el.style.width),
         imgHs: this.imageEls.map(el => el.style.height),
         imgWs: this.imageEls.map(el => el.style.width),
         atWidth: containerWidth,

@@ -25,7 +25,9 @@ import { computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
 import { logger } from "../logger";
 const log = logger.channel("livePreview");
 import { clampFlexGrow, clampScale } from "../imageLayout/parameterValidator";
-import { stripEmbedParams, parseEmbedParams } from "../imageParse/embedRaw";
+import { stripEmbedParams, parseEmbedParams, embedParamString, stripSizingKeepOrientation } from "../imageParse/embedRaw";
+import { IDENTITY_STATE, isOrientationWord, parseOrientationWord } from "../imageTransform/orientation";
+import * as scrollDiag from "../scrollSync/scrollDiag";
 import { createDragGhost } from "./rowRenderer";
 
 /**
@@ -179,12 +181,13 @@ function convertOrphanedMultiSinglesToBare(
     const parts = parseEmbedParams(raw);
     if (!parts) continue; // already bare
     const ALIGNMENTS = new Set(["left", "center", "right"]);
-    let offset = 0;
-    if (ALIGNMENTS.has(parts[0])) offset = 1;
+    let offset = isOrientationWord(parts[0]) ? 1 : 0;
+    if (ALIGNMENTS.has(parts[offset])) offset += 1;
     const first = parseInt(parts[offset], 10);
-    // Clean single `|S|W` or `|alignment|S|W` (S ∈ {0,1}) → leave untouched.
+    // Clean single `|S|W` or `|orientation|alignment|S|W` (S ∈ {0,1}) → untouched.
     if (parts.length > offset + 1 && (first === 0 || first === 1)) continue;
-    const bare = stripEmbedParams(raw);
+    // Sizing describes the row being left; an orientation stays with the image.
+    const bare = stripSizingKeepOrientation(raw);
     if (bare !== raw) {
       changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: bare });
     }
@@ -217,8 +220,11 @@ function measureItemWidths(view: EditorView, rowLineStart: number): number[] | n
 function parseScaleFromRaw(raw: string): number | null {
   const parts = parseEmbedParams(raw);
   if (!parts) return null;
-  if (parts.length < 2) return null;
-  const v = parseInt(parts[parts.length - 1], 10);
+  // Drop the orientation word first: it is not a sizing component, so counting
+  // it would make a lone share code look like a share+scale pair.
+  const sizing = isOrientationWord(parts[0]) ? parts.slice(1) : parts;
+  if (sizing.length < 2) return null;
+  const v = parseInt(sizing[sizing.length - 1], 10);
   return isFinite(v) && v > 0 ? v / 100 : null;
 }
 
@@ -274,6 +280,9 @@ function applyFlexGrowChanges(
 
   // Apply from bottom to top so earlier positions stay valid
   changes.sort((a, b) => b.from - a.from);
+  scrollDiag.note("追加 dispatch：applyFlexGrowChanges", {
+    lines: changes.map((c) => c.insert),
+  });
   view.dispatch({ changes });
 }
 
@@ -309,6 +318,33 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   eq(other: StaticImageRowWidget): boolean {
+    const same = this.eqInner(other);
+    if (!same) scrollDiag.note("eq=false → setDOM（整块重建）", { reason: this.eqReason(other) });
+    return same;
+  }
+
+  /** Diag only: name the field that refused reuse. Covers the discriminators a
+   *  first rotation flips (raw params, orientation, display kind). */
+  private eqReason(other: StaticImageRowWidget): string {
+    const a = this.group;
+    const b = other.group;
+    if (a.images.length !== b.images.length) return "imageCount";
+    if (a.lineStart !== b.lineStart) return "lineStart";
+    if (a.lineEnd !== b.lineEnd) return "lineEnd";
+    for (let i = 0; i < a.images.length; i++) {
+      if (a.images[i].alignment !== b.images[i].alignment) return `alignment[${i}]`;
+      if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return `raw[${i}]`;
+      if (a.images[i].display.kind !== b.images[i].display.kind) return `display[${i}]`;
+      const ao = a.images[i].orientation;
+      const bo = b.images[i].orientation;
+      if (ao.turns !== bo.turns || ao.mirror !== bo.mirror) {
+        return `orientation[${i}] t${ao.turns}/m${ao.mirror}→t${bo.turns}/m${bo.mirror}`;
+      }
+    }
+    return "options/settings";
+  }
+
+  private eqInner(other: StaticImageRowWidget): boolean {
     const a = this.group;
     const b = other.group;
     if (a.images.length !== b.images.length) return false;
@@ -336,12 +372,22 @@ class StaticImageRowWidget extends WidgetType {
     for (let i = 0; i < a.images.length; i++) {
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
       if (a.images[i].alignment !== b.images[i].alignment) return false;
+      // The orientation word is stripped by normalizeRaw with every other
+      // param, so a rotate/flip would otherwise reuse the live widget — whose
+      // stale model would then write its old orientation straight back over the
+      // new one. Compare it explicitly to force the rebuild.
+      const ao = a.images[i].orientation;
+      const bo = b.images[i].orientation;
+      if (ao.turns !== bo.turns || ao.mirror !== bo.mirror) return false;
     }
     return true;
   }
 
   toDOM(view: EditorView): HTMLElement {
     try {
+      scrollDiag.note("toDOM 重建（块高度自此刻起被遗忘，回到 estimatedHeight）", {
+        images: this.group.images.length,
+      });
       log.debug("SCROLL_DIAG widget build (toDOM)", {
         lineStart: this.group.lineStart,
         lineEnd: this.group.lineEnd,
@@ -631,13 +677,14 @@ class StaticImageRowWidget extends WidgetType {
         changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
       }
     };
-    // Strip every |param → bare `![[file]]`, so the rebuilt multi-image widget
-    // computes an equilibrium layout (equal heights) from natural aspect ratios.
+    // Strip every sizing |param, keeping any orientation word, so the rebuilt
+    // multi-image widget computes an equilibrium layout (equal heights) from
+    // natural aspect ratios while the image's rotate/flip survives the move.
     const rewriteBare = (line0: number): void => {
       if (line0 < 0 || line0 >= doc.lines) return;
       const lineObj = doc.line(line0 + 1);
       const raw = lineObj.text;
-      const newText = stripEmbedParams(raw);
+      const newText = stripSizingKeepOrientation(raw);
       if (newText !== raw) {
         changes.push({ from: lineObj.from, to: lineObj.from + raw.length, insert: newText });
       }
@@ -696,7 +743,10 @@ class StaticImageRowWidget extends WidgetType {
 
 
   updateDOM(_element: HTMLElement, view: EditorView): boolean {
-    if (!this.innerWidget || !this.group) return false;
+    if (!this.innerWidget || !this.group) {
+      scrollDiag.note("updateDOM → false（新实例 innerWidget 为空，走 toDOM 重建）");
+      return false;
+    }
 
     try {
     const doc = view.state.doc;
@@ -713,15 +763,31 @@ class StaticImageRowWidget extends WidgetType {
       currentFiles.push(match[1].split("|")[0]);
     }
 
-    if (currentFiles.length !== this.group.images.length) return false;
+    if (currentFiles.length !== this.group.images.length) {
+      scrollDiag.note("updateDOM → false（成员数变化）", {
+        was: this.group.images.length,
+        now: currentFiles.length,
+      });
+      return false;
+    }
     for (let i = 0; i < currentFiles.length; i++) {
-      if (currentFiles[i] !== this.group.images[i].fileName) return false;
+      if (currentFiles[i] !== this.group.images[i].fileName) {
+        scrollDiag.note("updateDOM → false（成员文件变化）", {
+          index: i,
+          was: this.group.images[i].fileName,
+          now: currentFiles[i],
+        });
+        return false;
+      }
     }
 
     // Single-image rows use the swapped `|S|W` param order; the flex-grow sync
     // below assumes multi-image `|W|...`, so skip it (single sizing is handled
     // by layoutSingleImage on rebuild).
-    if (this.group.images.length === 1) return true;
+    if (this.group.images.length === 1) {
+      scrollDiag.note("updateDOM → true（单图行，沿用现有 DOM）");
+      return true;
+    }
 
     // Group composition unchanged: just sync flex-grows, no DOM rebuild
     const grows: number[] = [];
@@ -740,6 +806,7 @@ class StaticImageRowWidget extends WidgetType {
       });
       this.innerWidget.updateFlexGrows(safeGrows);
     }
+    scrollDiag.note("updateDOM → true（多图行，同步 flex-grow，不重建）", { grows });
     return true;
     } catch (e) {
       log.error("LivePreview updateDOM error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
@@ -758,6 +825,11 @@ class StaticImageRowWidget extends WidgetType {
   }
 
   destroy(): void {
+    scrollDiag.note("destroy", {
+      images: this.group.images.length,
+      willPersistGrows:
+        !!this.innerWidget && this.group.images.length > 1,
+    });
     log.debug("SCROLL_DIAG widget destroy", {
       lineStart: this.group.lineStart,
       imageCount: this.group.images.length,
@@ -848,6 +920,11 @@ class StaticImageRowWidget extends WidgetType {
       manual ? {} : { followWidthPx: widthPx }
     );
     if (newText === lineObj.text) return;
+    scrollDiag.note("追加 dispatch：persistSingleImage", {
+      line: img.line,
+      from: lineObj.text,
+      to: newText,
+    });
     this.editorView.dispatch({
       changes: { from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText },
     });
@@ -872,6 +949,9 @@ function buildMultiLine(
     raw,
     fileName: "",
     alignment,
+    // The line is rewritten for its sizing only; whatever orientation it
+    // already carries must survive the rewrite.
+    orientation: parseOrientationWord(embedParamString(raw)) ?? IDENTITY_STATE,
     hasSizing: true,
     display: { kind: "multi", share: grow, fill: scale },
   });

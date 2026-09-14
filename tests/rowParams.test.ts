@@ -214,3 +214,69 @@ describe("write single-row", () => {
     expect(write(edited)).toBe("  ![[a.webp|1|200]]");
   });
 });
+
+// ── orientation slot ────────────────────────────────────────────────────
+describe("read orientation word", () => {
+  it("reads it ahead of the alignment word and the numbers", () => {
+    const [m] = read("![[a.png|r90|left|120|50]]", "multi", EXTS);
+    expect(m.orientation).toEqual({ turns: 1, mirror: false });
+    expect(m.alignment).toBe("left");
+    expect(m.display).toEqual({ kind: "multi", share: 1.2, fill: 0.5 });
+  });
+
+  it("shifts the single row's S/W pair past it", () => {
+    const [manual] = read("![[a.webp|orig|1|350]]", "single", EXTS);
+    expect(manual.orientation).toEqual({ turns: 0, mirror: false });
+    expect(manual.alignment).toBeUndefined();
+    expect(manual.display).toEqual({ kind: "single-manual", widthPx: 350 });
+
+    const [follow] = read("![[a.webp|r270fh|center|0|420]]", "single", EXTS);
+    expect(follow.orientation).toEqual({ turns: 3, mirror: true });
+    expect(follow.alignment).toBe("center");
+    expect(follow.display).toEqual({ kind: "single-follow" });
+  });
+
+  it("defaults to identity both when the word is absent and when it reads orig", () => {
+    const identity = { turns: 0, mirror: false };
+    expect(read("![[a.png]]", "multi", EXTS)[0].orientation).toEqual(identity);
+    expect(read("![[a.png|orig]]", "multi", EXTS)[0].orientation).toEqual(identity);
+    expect(read("![[a.png|left|120|50]]", "multi", EXTS)[0].orientation).toEqual(identity);
+  });
+
+  it("leaves hasSizing keyed on numbers alone", () => {
+    expect(read("![[a.png|r90]]", "multi", EXTS)[0].hasSizing).toBe(false);
+    expect(read("![[a.png|r90|200]]", "multi", EXTS)[0].hasSizing).toBe(true);
+    expect(read("![[a.webp|r90]]", "single", EXTS)[0].hasSizing).toBe(false);
+    expect(read("![[a.webp|r90|1|350]]", "single", EXTS)[0].hasSizing).toBe(true);
+  });
+});
+
+describe("write orientation word", () => {
+  it("leaves a line that never carried the slot untouched", () => {
+    expect(write(read("![[a.png]]", "multi", EXTS)[0])).toBe("![[a.png]]");
+    expect(write(read("![[a.png|100]]", "multi", EXTS)[0])).toBe("![[a.png]]");
+  });
+
+  it("prepends the word ahead of the alignment and numbers", () => {
+    const [m] = read("![[a.png|left|120|50]]", "multi", EXTS);
+    const rotated = { ...m, orientation: { turns: 1, mirror: false } };
+    expect(write(rotated)).toBe("![[a.png|r90|left|120|50]]");
+  });
+
+  it("round-trips a rotated line and a rotated single row", () => {
+    expect(write(read("![[a.png|r90|left|120|50]]", "multi", EXTS)[0]))
+      .toBe("![[a.png|r90|left|120|50]]");
+    expect(write(read("![[a.webp|r270fh|0|420]]", "single", EXTS)[0], { followWidthPx: 420 }))
+      .toBe("![[a.webp|r270fh|0|420]]");
+  });
+
+  it("keeps the slot as an explicit orig once it is reset", () => {
+    const [m] = read("![[a.png|r90|120|50]]", "multi", EXTS);
+    const reset = { ...m, orientation: { turns: 0, mirror: false } };
+    expect(write(reset)).toBe("![[a.png|orig|120|50]]");
+
+    const [s] = read("![[a.webp|r90|0|420]]", "single", EXTS);
+    const sReset = { ...s, orientation: { turns: 0, mirror: false } };
+    expect(write(sReset)).toBe("![[a.webp|orig|0|420]]");
+  });
+});

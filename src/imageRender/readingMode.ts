@@ -9,6 +9,13 @@ const log = logger.channel("readingMode");
 import { storePendingAlignment } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
 import {
+  isIdentityOrientation,
+  orientationWord,
+  parseOrientationWord,
+  type OrientationState,
+} from "../imageTransform/orientation";
+import { applyOrientationPreview } from "../imageTransform/transformPreview";
+import {
   setImageRowIndex, setImageLineRe,
   getScrollAnchor, getFallbackPct,
   setLastAnchor, setLastFallbackPct,
@@ -223,6 +230,15 @@ export function createReadingModeProcessor(
       if (parsed.alignment) {
         embed.setAttribute("data-diaa-alignment", parsed.alignment);
       }
+      // Rotate/flip rides as a word on the embed so the RM renderers (this file's
+      // standalone path and rmFlexRow's row path) can replay it as a CSS
+      // transform — mirroring how the LP widget renders it from the row params.
+      if (!isIdentityOrientation(parsed.orientation)) {
+        embed.setAttribute(
+          "data-diaa-orientation",
+          orientationWord(parsed.orientation)
+        );
+      }
       // 1-based source line, to match ImageRowIndex.startLine/endLine (which
       // scrollAnchor.ts uses for every data-diaa-line query and range check).
       // toLine1 is the single, greppable 0→1 conversion point: parsed.line is
@@ -277,6 +293,7 @@ export function createReadingModeProcessor(
             }),
             resetSingleManual: null,
           });
+          applyEmbedOrientation(embed, img);
         }
       }
     }
@@ -338,6 +355,26 @@ export function createReadingModeProcessor(
       afterRender();
     }
   };
+}
+
+// ── Orientation render ───────────────────────────────────────
+
+/**
+ * Replay an embed's persisted rotate/flip as a CSS transform on its <img>, the
+ * Reading Mode mirror of the LP widget's `applyOrientationTransforms`.  The
+ * quarter-turn fit-scale needs the image laid out, so a not-yet-complete image
+ * is re-applied once on load; identity embeds carry no attribute and are left
+ * untouched.
+ */
+function applyEmbedOrientation(embed: HTMLElement, img: HTMLImageElement): void {
+  const state: OrientationState | null = parseOrientationWord(
+    embed.getAttribute("data-diaa-orientation") ?? ""
+  );
+  if (!state || isIdentityOrientation(state)) return;
+  applyOrientationPreview(img, state);
+  if (!img.complete) {
+    img.addEventListener("load", () => applyOrientationPreview(img, state), { once: true });
+  }
 }
 
 // ── Group detection ──────────────────────────────────────────

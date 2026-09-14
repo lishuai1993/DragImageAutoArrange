@@ -10,6 +10,21 @@ import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 import { storePendingAlignment } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
+import { isIdentityOrientation, parseOrientationWord } from "../imageTransform/orientation";
+import { applyOrientationPreview } from "../imageTransform/transformPreview";
+
+/** Replay each embed's persisted rotate/flip word as a CSS transform on its
+ *  <img>.  Identity / attribute-less embeds are skipped.  Call after sizing so
+ *  a quarter-turn's fit-scale sees the final item dimensions. */
+function applyEmbedOrientations(embeds: HTMLElement[]): void {
+  for (const embed of embeds) {
+    const state = parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "");
+    if (!state || isIdentityOrientation(state)) continue;
+    for (const img of Array.from(embed.querySelectorAll<HTMLImageElement>("img"))) {
+      applyOrientationPreview(img, state);
+    }
+  }
+}
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
 export function getFileNameFromEmbed(embed: HTMLElement): string {
@@ -320,6 +335,10 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     row.appendChild(embed);
   }
 
+  // Apply the row members' rotate/flip immediately (pre-sizing), then again
+  // inside applySizes once heights are known so the fit-scale is accurate.
+  applyEmbedOrientations(embeds);
+
   if (blockHasText) {
     // Keep the surrounding text in place; the flex row follows it.
     firstBlock.after(row);
@@ -438,6 +457,8 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         }
       }
     }
+
+    applyEmbedOrientations(embeds);
 
     const rowDiagnostic = () => {
       try {

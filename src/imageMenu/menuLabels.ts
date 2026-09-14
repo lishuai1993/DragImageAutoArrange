@@ -43,15 +43,16 @@ export const NOTICE_FAILED = {
     cannotCopyPath: '当前环境无法取得绝对路径',
     fileActionFailed: '操作失败',
     resetWidthFailed: '重置宽度失败',
+    transformFailed: '旋转 / 翻转失败',
 } as const;
 
 /** Row label per file-operation id, in the canonical order. */
 export const FILE_OPERATION_LABELS: Record<FileOperationId, string> = {
-    openInNewTab: '新标签页',
-    openToTheRight: '右侧打开',
-    openInNewWindow: '新窗口',
-    openInDefaultApp: '默认应用',
-    showInExplorer: '访达',
+    openInNewTab: '在新标签页中打开',
+    openToTheRight: '在右侧打开',
+    openInNewWindow: '在新窗口中打开',
+    openInDefaultApp: '使用默认应用打开',
+    showInExplorer: '在访达中显示',
     renameImage: '重命名',
     deleteImage: '删除',
 };

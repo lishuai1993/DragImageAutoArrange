@@ -115,6 +115,53 @@ export function isIdentityOrientation(state: OrientationState): boolean {
     return state.turns === 0 && !state.mirror;
 }
 
+// ── Word form of the eight states ───────────────────────────────────────
+// The orientation rides in the embed line's parameter slot as a readable word,
+// so a note stays legible by hand.  Eight words, eight states, both directions
+// total: every state has exactly one spelling and every spelling one state.
+// `orig` is a real code rather than an omitted-default, so once a row carries
+// the slot it always says what it means.
+
+export type OrientationWord =
+    | 'orig' | 'r90' | 'r180' | 'r270'
+    | 'fh' | 'fv' | 'r90fh' | 'r270fh';
+
+const WORD_TO_STATE: Record<OrientationWord, OrientationState> = {
+    orig: { turns: 0, mirror: false },
+    r90: { turns: 1, mirror: false },
+    r180: { turns: 2, mirror: false },
+    r270: { turns: 3, mirror: false },
+    fh: { turns: 0, mirror: true },
+    // FLIP_H ∘ R180 = FLIP_V, so the mirrored half-turn reads as a plain flip.
+    fv: { turns: 2, mirror: true },
+    r90fh: { turns: 1, mirror: true },
+    r270fh: { turns: 3, mirror: true },
+};
+
+const STATE_TO_WORD = new Map<string, OrientationWord>(
+    (Object.entries(WORD_TO_STATE) as Array<[OrientationWord, OrientationState]>)
+        .map(([word, state]) => [`${state.turns}:${state.mirror}`, word])
+);
+
+export function orientationWord(state: OrientationState): OrientationWord {
+    return STATE_TO_WORD.get(`${state.turns}:${state.mirror}`) ?? 'orig';
+}
+
+export function isOrientationWord(token: string | undefined): token is OrientationWord {
+    return token !== undefined && Object.prototype.hasOwnProperty.call(WORD_TO_STATE, token);
+}
+
+/**
+ * Read the orientation word a `|`-joined param string opens with, or null when
+ * it opens with anything else. A null return is not "identity" — it means the
+ * slot is absent, which callers that must preserve an existing slot need to
+ * tell apart from an explicit `orig`.
+ */
+export function parseOrientationWord(paramStr: string): OrientationState | null {
+    const first = paramStr.split('|', 1)[0];
+    return isOrientationWord(first) ? WORD_TO_STATE[first] : null;
+}
+
 /**
  * CSS transform that renders the current orientation.  The CSS function list is
  * applied right-to-left, so `scaleX(-1) rotate(θ)` yields FLIP_H ∘ R(turns),

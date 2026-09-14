@@ -24,6 +24,12 @@ export interface ResizeHost {
   getImageContentRect(index: number): { left: number; top: number; width: number; height: number } | null;
   getObjectPosition(): string;
   updateHandlePositions(index: number): void;
+  /** True when an odd quarter turn is drawn for this member, i.e. what is on
+   *  screen is smaller than (and not the same shape as) the image's layout box. */
+  isTurnedImage(index: number): boolean;
+  /** Replay that member's orientation against the box as it now stands and
+   *  re-fit a lone image's item to the drawing. */
+  syncItemToDrawing(index: number): void;
   notifyLayoutChange(): void;
   emitResizeEnd(index: number, flexGrow: number): void;
   setImageScale(index: number, scale: number): void;
@@ -112,7 +118,10 @@ export class ResizeHandleController {
         // A prior resize or layout pass may have left imageEls[i].style.height
         // out of sync with itemEls[i].style.height, causing the image to be
         // clipped (item has overflow:hidden) or letterboxed (image shorter).
+        // Skipped for a quarter-turned image, where the two are meant to differ:
+        // what is on screen is drawn from the box, and the item hugs the drawing.
         for (let j = 0; j < nItems; j++) {
+          if (this.host.isTurnedImage(j)) continue;
           const itemH = this.host.getItemEls()[j].style.height;
           if (itemH && itemH !== this.host.getImageEls()[j].style.height) {
             log.debug("resize-mousedown syncing img height to item", {
@@ -146,11 +155,21 @@ export class ResizeHandleController {
         // In zoom mode (beyond fill-width), we switch to object-fit: cover
         // so the image and container "lock" and grow together.
         const meta = this.host.getLoadedMeta(index);
+        const aspect = meta && meta.naturalWidth > 0 && meta.naturalHeight > 0
+          ? meta.naturalWidth / meta.naturalHeight
+          : 1;
         const fillWidthH = meta && meta.naturalWidth > 0
           ? Math.round(AW * meta.naturalHeight / meta.naturalWidth)
           : startHeight;
 
-        const displayRect = this.host.getImageContentRect(index);
+        // The height the pointer drives. A quarter turn swaps the drawing, so a
+        // turned single row hugs the drawn picture and *that* is what the handle
+        // should track — not the un-rotated layout box getImageContentRect
+        // reports. Everywhere else the two coincide.
+        const turnedSingle = nItems === 1 && this.host.isTurnedImage(0);
+        const displayRect = turnedSingle
+          ? (this.host.getItemEls()[0]?.getBoundingClientRect() ?? null)
+          : this.host.getImageContentRect(index);
         startDisplayH = displayRect ? displayRect.height : startHeight;
         if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
         if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
@@ -175,29 +194,46 @@ export class ResizeHandleController {
               ? (dx * xSign * wx + dy * ySign * wy) / (wx + wy) * SENS
               : 0;
 
-            const newHeight = Math.max(50, Math.min(2000, Math.round(startHeight + delta)));
+            // The baseline is the image's own box, not the row's height: after a
+            // quarter turn the row hugs the drawing and is the shorter of the
+            // two, while this drag grows the box the image is drawn from.
+            //
+            // A quarter turn swaps the two, so the height the pointer drives is
+            // the *drawn* one; divide the aspect out to get the box height the
+            // img is laid out from. A turned row never zooms — its width is
+            // already capped to the page, so a taller box can no longer widen
+            // the picture.
+            const turned = this.host.isTurnedImage(0);
+            const targetDisplayed = Math.max(50, Math.min(2000, Math.round(startDisplayH + delta)));
+            const newHeight = turned
+              ? Math.max(50, Math.min(2000, Math.round(targetDisplayed / aspect)))
+              : targetDisplayed;
 
-            if (newHeight <= fillWidthH) {
-              // Normal mode: image height directly controls rendered size.
-              // width:auto preserves aspect ratio; flex:0 0 auto lets item
-              // shrink to image size so justify-content alignment is visible.
-              this.host.getImageEls()[0].setCssStyles({ objectFit: "contain" });
-              this.host.getImageEls()[0].style.setProperty("object-position", this.host.getObjectPosition(), "important");
-              this.host.getImageEls()[0].removeClass(CLASSES.zoomPos);
-              this.host.getImageEls()[0].setCssStyles({ width: "auto" });
-              this.host.getImageEls()[0].style.height = `${newHeight}px`;
-              this.host.getItemEls()[0].setCssStyles({ height: "" });
-              this.host.getItemEls()[0].setCssStyles({ flex: "0 0 auto" });
-              this.host.getContainer()!.setCssStyles({ height: "" });
-            } else {
+            if (!turned && newHeight > fillWidthH) {
               // Zoom mode: image and container "locked" together beyond fill-width.
               // Switch to object-fit:cover so the image fills the element height,
-              // allowing growth past the width-constrained boundary.
+              // allowing growth past the width-constrained boundary.  A turned
+              // row never reaches here: its width is already capped to the page,
+              // so a taller box can no longer widen the picture.
               this.host.getImageEls()[0].setCssStyles({ objectFit: "cover" });
               this.host.getImageEls()[0].addClass(CLASSES.zoomPos);
               this.host.getImageEls()[0].style.height = `${newHeight}px`;
               this.host.getItemEls()[0].style.height = `${newHeight}px`;
               this.host.getContainer()!.style.height = `${newHeight}px`;
+            } else {
+              // Normal mode: image height directly controls rendered size.
+              // width:auto preserves aspect ratio; flex:0 0 auto lets item
+              // shrink to image size so justify-content alignment is visible.
+              // The item is then re-fitted to the drawing, which is what a
+              // turned row needs — its box and its drawing differ in size.
+              this.host.getImageEls()[0].setCssStyles({ objectFit: "contain" });
+              this.host.getImageEls()[0].style.setProperty("object-position", this.host.getObjectPosition(), "important");
+              this.host.getImageEls()[0].removeClass(CLASSES.zoomPos);
+              this.host.getImageEls()[0].setCssStyles({ width: "auto" });
+              this.host.getImageEls()[0].style.height = `${newHeight}px`;
+              this.host.getItemEls()[0].setCssStyles({ flex: "0 0 auto" });
+              this.host.getContainer()!.setCssStyles({ height: "" });
+              this.host.syncItemToDrawing(0);
             }
 
             // Force synchronous reflow so the container's height is

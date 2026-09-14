@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { stripEmbedParams, parseEmbedParams } from "../src/imageParse/embedRaw";
+import {
+  stripEmbedParams,
+  parseEmbedParams,
+  stripSizingKeepOrientation,
+} from "../src/imageParse/embedRaw";
 
 describe("stripEmbedParams", () => {
   it("strips a single width param", () => {
@@ -40,5 +44,22 @@ describe("parseEmbedParams", () => {
   it("round-trips with stripEmbedParams (strip then no params)", () => {
     const bare = stripEmbedParams("![[a.webp|740|48]]");
     expect(parseEmbedParams(bare)).toBeNull();
+  });
+});
+
+describe("stripSizingKeepOrientation", () => {
+  it("keeps a leading orientation word and drops the sizing after it", () => {
+    expect(stripSizingKeepOrientation("![[a.png|r90|left|120|48]]")).toBe("![[a.png|r90]]");
+    expect(stripSizingKeepOrientation("![[a.webp|orig|0|420]]")).toBe("![[a.webp|orig]]");
+  });
+
+  it("falls back to a full strip when no orientation word opens the params", () => {
+    expect(stripSizingKeepOrientation("![[a.png|left|120|48]]")).toBe("![[a.png]]");
+    expect(stripSizingKeepOrientation("![[a.webp|0|420]]")).toBe("![[a.webp]]");
+  });
+
+  it("is idempotent, on bare lines and on already-stripped ones", () => {
+    expect(stripSizingKeepOrientation("![[a.png]]")).toBe("![[a.png]]");
+    expect(stripSizingKeepOrientation("![[a.png|r90]]")).toBe("![[a.png|r90]]");
   });
 });

@@ -9,7 +9,7 @@
  * where the third image in a resized row appeared not to respond to
  * alignment setting changes.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('obsidian', () => ({
   Menu: vi.fn().mockImplementation(() => ({
@@ -19,20 +19,29 @@ vi.mock('obsidian', () => ({
   })),
 }));
 
-import { ImageRowWidget, ImageRowOptions, sanitizeOptions } from '../src/imageRender/imageRowWidget';
+import { ImageRowWidget, ImageRowOptions, sanitizeOptions, handleRect } from '../src/imageRender/imageRowWidget';
 import type { RowGroup } from '../src/imageParse/imageDetector';
 import type { RowImage, RowKind } from '../src/imageParse/rowParams';
-import { setPendingTransform, clearPendingTransform, listPendingTransforms } from '../src/imageTransform/transformStore';
+import type { OrientationState } from '../src/imageTransform/orientation';
 
 // ── Test helpers ─────────────────────────────────────────────────────
 
+const IDENTITY: OrientationState = { turns: 0, mirror: false };
+
 /** Build a typed RowImage.  Callers hand over the flex-grammar grow the widget
  *  used to seed; hasExplicitWidth maps to the model's hasSizing flag. */
-function makeImage(fileName: string, line: number, flexGrow: number, hasExplicitWidth = false): RowImage {
+function makeImage(
+  fileName: string,
+  line: number,
+  flexGrow: number,
+  hasExplicitWidth = false,
+  orientation: OrientationState = IDENTITY
+): RowImage {
   return {
     line,
     raw: hasExplicitWidth ? `![[${fileName}|${Math.round(flexGrow * 100)}]]` : `![[${fileName}]]`,
     fileName,
+    orientation,
     hasSizing: hasExplicitWidth,
     display: { kind: 'multi', share: flexGrow, fill: null },
   };
@@ -95,6 +104,13 @@ class MockResizeObserver {
   disconnect() {}
 }
 window.ResizeObserver = MockResizeObserver;
+
+// Every test drives layout synchronously (patched bounding rect + a fired
+// load event), so the widget's requestAnimationFrame callbacks — log snapshots
+// and zero-width retries — are irrelevant here. Drop them: in jsdom they run
+// after the test environment tears down, and the resulting late console write
+// surfaces as a spurious "EnvironmentTeardownError" on the run.
+window.requestAnimationFrame = () => 0;
 
 // jsdom lacks getBoundingClientRect that reflects layout — patch to
 // return a plausible container width so applyLayout doesn't retry via RAF.
@@ -456,32 +472,20 @@ describe('ImageRowWidget.updateAlignment (in-place)', () => {
   });
 });
 
-describe('ImageRowWidget re-applies pending orientation preview across rebuild', () => {
+describe('ImageRowWidget replays each member orientation as a CSS transform', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
 
-  afterEach(() => {
-    for (const entry of listPendingTransforms()) clearPendingTransform(entry.imagePath);
-    document.body.innerHTML = '';
-  });
-
-  function makeOptsWithResolver(): ImageRowOptions {
-    return {
-      ...makeOptions('left'),
-      getImageVaultPath: (fileName: string) =>
-        fileName === 'a.png' || fileName === 'b.png' ? `assets/${fileName}` : null,
-    };
-  }
-
   function buildLoaded(
-    files: Array<{ name: string; line: number; grow: number }>,
+    files: Array<{ name: string; line: number; grow: number; orientation?: OrientationState }>,
     dims: Array<{ w: number; h: number }>,
-    opts: ImageRowOptions,
     lineStart = 17,
   ): { el: HTMLElement; widget: ImageRowWidget } {
-    const group = makeGroup(files.map((f) => makeImage(f.name, f.line, f.grow)), lineStart);
-    const widget = new ImageRowWidget(group, opts);
+    const group = makeGroup(
+      files.map((f) => makeImage(f.name, f.line, f.grow, false, f.orientation))
+    );
+    const widget = new ImageRowWidget(group, makeOptions('left'));
     const el = widget.build();
     document.body.appendChild(el);
     patchBoundingRect(el, 944);
@@ -489,30 +493,25 @@ describe('ImageRowWidget re-applies pending orientation preview across rebuild',
     return { el, widget };
   }
 
-  it('replays a pending quarter-turn onto a rebuilt single-image row', () => {
-    setPendingTransform('assets/a.png', 'notes/note.md', { turns: 1, mirror: false });
+  it('applies a quarter-turn onto a single-image row', () => {
     const { el } = buildLoaded(
-      [{ name: 'a.png', line: 5, grow: 1 }],
-      [{ w: 500, h: 654 }],
-      makeOptsWithResolver()
+      [{ name: 'a.png', line: 5, grow: 1, orientation: { turns: 1, mirror: false } }],
+      [{ w: 500, h: 654 }]
     );
     const img = el.querySelector('img') as HTMLImageElement;
     expect(img.style.transform).toBe('rotate(90deg)');
   });
 
-  it('replays pending orientations onto every rebuilt multi-image member', () => {
-    setPendingTransform('assets/a.png', 'notes/note.md', { turns: 3, mirror: false });
-    setPendingTransform('assets/b.png', 'notes/note.md', { mirror: true, turns: 0 });
+  it('applies each member orientation onto a multi-image row', () => {
     const { el } = buildLoaded(
       [
-        { name: 'a.png', line: 17, grow: 1 },
-        { name: 'b.png', line: 18, grow: 4 },
+        { name: 'a.png', line: 17, grow: 1, orientation: { turns: 3, mirror: false } },
+        { name: 'b.png', line: 18, grow: 4, orientation: { turns: 0, mirror: true } },
       ],
       [
         { w: 500, h: 654 },
         { w: 800, h: 1200 },
-      ],
-      makeOptsWithResolver()
+      ]
     );
     const imgs = el.querySelectorAll('img');
     expect(imgs.length).toBe(2);
@@ -520,17 +519,122 @@ describe('ImageRowWidget re-applies pending orientation preview across rebuild',
     expect(imgs[1].style.transform).toBe('scaleX(-1)');
   });
 
-  it('leaves rebuilt images untransformed once the pending state is cleared', () => {
-    setPendingTransform('assets/a.png', 'notes/note.md', { turns: 1, mirror: false });
-    // Simulate the note-departure flush clearing the store, then a fresh rebuild.
-    for (const entry of listPendingTransforms()) clearPendingTransform(entry.imagePath);
+  it('leaves an identity-orientation image untransformed', () => {
     const { el } = buildLoaded(
       [{ name: 'a.png', line: 5, grow: 1 }],
-      [{ w: 500, h: 654 }],
-      makeOptsWithResolver(),
-      18
+      [{ w: 500, h: 654 }]
     );
     const img = el.querySelector('img') as HTMLImageElement;
     expect(img.style.transform).toBe('');
+  });
+});
+
+describe('ImageRowWidget sizes a lone item to what is drawn', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** jsdom measures nothing, so the box the layout maths works from is the one
+   *  the widget writes: a 500×654 natural image rendered 500 wide is a 500×654
+   *  box, and a quarter turn draws it at 654×500 — width and height swapped, the
+   *  picture's own pixel scale untouched. */
+  function buildSingle(orientation?: OrientationState, dims = { w: 500, h: 654 }) {
+    const group = makeGroup([makeImage('a.png', 5, 1, false, orientation)]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [dims]);
+    const item = el.querySelector('.drag-img-item') as HTMLElement;
+    const img = el.querySelector('img') as HTMLImageElement;
+    return { el, widget, item, img };
+  }
+
+  it('swaps the item to the turned drawing rather than the layout box', () => {
+    const { item, img } = buildSingle({ turns: 1, mirror: false });
+    // The box keeps the un-rotated size — it holds the un-rotated bitmap.
+    expect(img.style.height).toBe('654px');
+    // The item takes the drawn size: the box's width and height swapped.
+    expect(item.style.width).toBe('654px');
+    expect(item.style.height).toBe('500px');
+    // The box is centred in the item, which is why it must not be clamped by it.
+    expect(item.style.alignItems).toBe('center');
+    expect(item.style.justifyContent).toBe('center');
+    expect(img.style.maxWidth).toBe('none');
+    expect(img.style.transform).toBe('rotate(90deg)');
+  });
+
+  it('fit-scales the drawing to the page when the swap would overrun it', () => {
+    // 700×1400 portrait rendered 700 wide: turned, 1400 would be drawn across a
+    // 944 page, so one uniform factor brings the picture back to page width.
+    const { item, img } = buildSingle({ turns: 1, mirror: false }, { w: 700, h: 1400 });
+    const k = Number((944 / 1400).toFixed(4));
+    expect(img.style.height).toBe('1400px');
+    expect(img.style.transform).toBe(`scale(${k}) rotate(90deg)`);
+    expect(Math.round(parseFloat(item.style.width))).toBe(944);
+    expect(Math.round(parseFloat(item.style.height))).toBe(Math.round(700 * k));
+  });
+
+  it('restores the layout box height when Obsidian overwrites it on a turned row', async () => {
+    const { img } = buildSingle({ turns: 1, mirror: false });
+    // Obsidian's own resize writes the img's inline height to the *item* size
+    // (the drawn one). Left alone that would deform the box the turn is drawn
+    // from, so the observer has to put the box height back.
+    img.setCssStyles({ height: '500px' });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(img.style.height).toBe('654px');
+  });
+
+  it('leaves an unturned item to the image box', () => {
+    const { item, img } = buildSingle(undefined);
+    expect(img.style.height).toBe('654px');
+    expect(item.style.height).toBe('');
+    expect(item.style.width).toBe('');
+    expect(item.style.alignItems).toBe('flex-start');
+    expect(img.style.maxWidth).toBe('100%');
+  });
+
+  it('goes back to the box when the turn is undone', () => {
+    const { item } = buildSingle({ turns: 1, mirror: false });
+    expect(item.style.height).toBe('500px');
+    const { item: upright } = buildSingle(undefined);
+    expect(upright.style.height).toBe('');
+  });
+
+  it('reports the turn for the resize controller', () => {
+    expect(buildSingle({ turns: 3, mirror: true }).widget.isTurnedImage(0)).toBe(true);
+    expect(buildSingle(undefined).widget.isTurnedImage(0)).toBe(false);
+  });
+});
+
+describe('handleRect', () => {
+  const item = { left: 5, top: 5, width: 400, height: 523 };
+  const content = { left: 0, top: 0, width: 400, height: 523 };
+  const img = { left: 20, top: 10, width: 400, height: 523 };
+
+  it('is the content rect when no turn is in play', () => {
+    expect(handleRect(content, img, item, false)).toEqual(content);
+  });
+
+  it('hugs the measured img box after a quarter turn', () => {
+    // The 400×523 layout box draws its content at 400×306 once turned, and the
+    // browser reports exactly that as the img's rect, transform included.
+    const turnedImg = { left: 20, top: 10, width: 400, height: 306 };
+    expect(handleRect(content, turnedImg, item, true)).toEqual({
+      left: 15,
+      top: 5,
+      width: 400,
+      height: 306,
+    });
+  });
+
+  it('follows the img box wherever flex alignment puts it', () => {
+    const turnedImg = { left: 205, top: 55, width: 380, height: 288.4 };
+    expect(handleRect(content, turnedImg, item, true)).toEqual({
+      left: 200,
+      top: 50,
+      width: 380,
+      height: 288.4,
+    });
   });
 });

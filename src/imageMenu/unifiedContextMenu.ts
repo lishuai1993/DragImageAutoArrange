@@ -13,7 +13,14 @@
  */
 
 import { FileSystemAdapter, Notice, Platform, type App, type Editor, type TFile } from 'obsidian';
+import {
+    applyOrientationOp,
+    findEmbedLine,
+    lineOrientation,
+    resetOrientationOnLine,
+} from './orientationEdit';
 import { MENU_TEXT, NOTICE_DONE, NOTICE_FAILED } from './menuLabels';
+import { viewOfElement } from './quietWrite';
 import {
     findMarkdownViewForElement,
     getBestHttpImageSource,
@@ -35,25 +42,18 @@ import type { ImageMenuFacade } from './imageMenuHost';
 import {
     cutImage,
     cutMenuItemEnabled,
+    resolveClickedSourceLine,
     CUT_IMAGE_FAILED,
     CUT_IMAGE_ICON,
     CUT_IMAGE_TITLE,
 } from './cutImage';
 import {
-    composeOrientation,
-    IDENTITY_STATE,
     isIdentityOrientation,
+    type OrientationState,
     type TransformOp,
 } from '../imageTransform/orientation';
-import {
-    getPendingState,
-    setPendingTransform,
-    clearPendingTransform,
-} from '../imageTransform/transformStore';
-import {
-    applyOrientationPreview,
-    clearOrientationPreview,
-} from '../imageTransform/transformPreview';
+import type { EditorView } from '@codemirror/view';
+import * as scrollDiag from '../scrollSync/scrollDiag';
 
 type AlignValue = 'left' | 'center' | 'right';
 
@@ -118,16 +118,6 @@ function resetWidthLabel(target: SingleResetTarget | null): string {
         return `${MENU_TEXT.resetToSettingWidth} ${Math.round(target.width)}`;
     }
     return MENU_TEXT.resetToNaturalWidth;
-}
-
-/**
- * Formats the rotate/flip disk write cannot preserve: svg (vector), gif and avif
- * (canvas re-encode would silently fall back to PNG). Those rows render greyed.
- */
-function isTransformFormatUnsupported(file: TFile): boolean {
-    return file.extension.toLowerCase() === 'svg'
-        || file.extension.toLowerCase() === 'gif'
-        || file.extension.toLowerCase() === 'avif';
 }
 
 /** Add a divider only when there is something above it and it is not one already. */
@@ -320,60 +310,110 @@ const TRANSFORM_ACTIONS: Array<{ label: string; op: TransformOp }> = [
     { label: MENU_TEXT.flipVertical, op: 'flipVertical' },
 ];
 
-function applyTransformOp(
-    img: HTMLImageElement,
-    imagePath: string,
-    notePath: string,
-    op: TransformOp
-): void {
-    const current = getPendingState(imagePath) ?? IDENTITY_STATE;
-    const next = composeOrientation(current, op);
-    setPendingTransform(imagePath, notePath, next);
-    applyOrientationPreview(img, next);
+/**
+ * Where a rotate/flip gets written: the editor, the source line the image sits
+ * on, and the orientation that line currently declares. Null when no line can
+ * be pinned down — without one there is nothing to rewrite.
+ */
+interface TransformTarget {
+    editor: Editor;
+    line: number;
+    state: OrientationState;
+    /** The line's text before the write — the diag probe's pre-write snapshot. */
+    lineText: string;
+    /** CodeMirror view behind the editor: the scroll-jump probe reads it, and
+     *  the write uses it to hold the viewport. */
+    view: EditorView | null;
 }
 
-function resetTransform(img: HTMLImageElement, imagePath: string): void {
-    clearPendingTransform(imagePath);
-    clearOrientationPreview(img);
+/** The link targets an embed of `file` may spell, most specific first. */
+function embedTargets(file: TFile): string[] {
+    const stem = file.name.replace(/\.[^.]+$/, '');
+    return [
+        file.path,
+        file.name,
+        stem,
+        encodeURIComponent(file.path),
+        encodeURIComponent(file.name),
+    ];
 }
 
 /**
- * "旋转 / 翻转 ▸" — composes each click onto the image's in-session orientation
- * (CSS preview) and records it for the single cumulative disk write when the
- * note closes. A "重置旋转" row joins the submenu once the orientation is no
- * longer identity. Greyed when there is no vault file to write back to, in
- * Reading Mode, or for a format (svg/gif/avif) a canvas re-encode would degrade.
+ * Resolve the line to write to.  A DIA-managed image carries its row anchor, so
+ * the line is exact.  An image on a text-bearing line carries none — there the
+ * line is found by content, and only when exactly one line holds exactly one
+ * embed of this file; anything ambiguous is refused rather than guessed at.
  */
-function addTransformGroup(
-    menu: DomMenu,
-    target: { img: HTMLImageElement; imgFile: TFile | null; noteFile: TFile | null },
-    disabled: boolean
-): void {
-    const imagePath = target.imgFile?.path ?? '';
-    const notePath = target.noteFile?.path ?? '';
+function resolveTransformTarget(
+    img: HTMLImageElement,
+    imgFile: TFile | null,
+    editor: Editor | null
+): TransformTarget | null {
+    if (!editor) return null;
+    const text = editor.getValue();
+    const line = resolveClickedSourceLine(img)
+        ?? (imgFile ? findEmbedLine(text, embedTargets(imgFile)) : null);
+    if (line === null) return null;
+    const lines = text.split('\n');
+    if (line < 0 || line >= lines.length) return null;
+    return {
+        editor,
+        line,
+        state: lineOrientation(lines[line]),
+        lineText: lines[line],
+        view: viewOfElement(img),
+    };
+}
 
+function applyTransformOp(target: TransformTarget, op: TransformOp): void {
+    scrollDiag.openRotationWindow(target.view, target.line, target.lineText);
+    const ok = applyOrientationOp(target.editor, target.line, op, target.view);
+    scrollDiag.note('op applied', { op, ok });
+    if (!ok) {
+        new Notice(NOTICE_FAILED.transformFailed);
+    }
+}
+
+/** Rewrite the line's orientation back to identity — explicitly, since a line
+ *  that carries the slot keeps it (`|orig|…`) rather than silently dropping it. */
+function resetTransform(target: TransformTarget): void {
+    scrollDiag.openRotationWindow(target.view, target.line, target.lineText);
+    const ok = resetOrientationOnLine(target.editor, target.line, target.view);
+    scrollDiag.note('reset applied', { ok });
+    if (!ok) {
+        new Notice(NOTICE_FAILED.transformFailed);
+    }
+}
+
+/**
+ * "旋转 / 翻转 ▸" — composes each click onto the orientation the target line
+ * declares and writes the word straight back into that line, so the rotation
+ * rides in the note text: undoable, synced, and free of any re-encode of the
+ * image file. Format is no longer a reason to grey the row out. A "重置旋转"
+ * row joins the submenu once the line is no longer identity. Greyed in Reading
+ * Mode and whenever no writable line can be pinned down.
+ */
+function addTransformGroup(menu: DomMenu, target: TransformTarget | null, disabled: boolean): void {
     const parentRow = createMenuRowEl(MENU_TEXT.transform, 'rotate-cw', true);
     menu.appendRowEl(parentRow);
-    if (disabled || !imagePath) {
+    if (disabled || !target) {
         parentRow.classList.add('diaa-menu-item-disabled');
         return;
     }
 
-    const img = target.img;
     attachHoverSubmenu(parentRow, () => {
         const sub = new DomMenu();
         for (const action of TRANSFORM_ACTIONS) {
             sub.addItem(item => {
                 item.setTitle(action.label);
-                item.onClick(() => applyTransformOp(img, imagePath, notePath, action.op));
+                item.onClick(() => applyTransformOp(target, action.op));
             });
         }
-        const state = getPendingState(imagePath) ?? IDENTITY_STATE;
-        if (!isIdentityOrientation(state)) {
+        if (!isIdentityOrientation(target.state)) {
             sub.addSeparator();
             sub.addItem(item => {
                 item.setTitle(MENU_TEXT.transformReset);
-                item.onClick(() => resetTransform(img, imagePath));
+                item.onClick(() => resetTransform(target));
             });
         }
         return sub;
@@ -460,11 +500,11 @@ export async function openUnifiedImageMenu(
     // ── Group 2: the image's own operations, no dividers inside ────────────
     addSeparatorIfNeeded(menu);
     addAlignSubmenu(menu, img);
-    addTransformGroup(
-        menu,
-        { img, imgFile, noteFile },
-        readingMode || (imgFile !== null && isTransformFormatUnsupported(imgFile))
-    );
+    // A rotation is a note edit, so the row needs a writable line: the image's
+    // own DIA anchor, or — for an image on a text-bearing line — the one
+    // unambiguous embed line the upgrade path can rewrite into a row.
+    const transformTarget = readingMode ? null : resolveTransformTarget(img, imgFile, cap.editor);
+    addTransformGroup(menu, transformTarget, readingMode);
     addResetToSettingWidthItem(
         menu,
         img,

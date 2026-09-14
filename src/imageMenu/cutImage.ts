@@ -1,11 +1,14 @@
 import { Notice, type Editor, type TFile } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
 import { logger } from '../logger';
-import { parseEmbedParams, stripEmbedParams } from '../imageParse/embedRaw';
+import { parseEmbedParams, stripSizingKeepOrientation } from '../imageParse/embedRaw';
+import { isOrientationWord } from '../imageTransform/orientation';
 import { trashFile } from '../utils';
 import { lineStartOffset, minimalTextChange } from './noteEdit';
 import { copyImageToClipboard } from './clipboard';
 import { forgetReference } from './nativeClipboard';
 import { planImageLinkRemoval, removeImageLinkOccurrences } from './noteLinks';
+import { viewOfElement, writeQuietly } from './quietWrite';
 import { confirmDelete } from './imageFile';
 import type { ImageMenuFacade } from './imageMenuHost';
 
@@ -114,7 +117,9 @@ export function sourceLineFromMarkers(
   return null;
 }
 
-function resolveClickedSourceLine(img: HTMLImageElement): number | null {
+/** 0-based source line of the clicked image, or null when it carries no DIA
+ *  anchor (an image Obsidian rendered outside any row). */
+export function resolveClickedSourceLine(img: HTMLImageElement): number | null {
   const lineHost = img.closest?.<HTMLElement>('[data-diaa-line]');
   const rowHost = img.closest?.<HTMLElement>('[data-line-start]');
   return sourceLineFromMarkers(
@@ -133,8 +138,9 @@ function resolveClickedSourceLine(img: HTMLImageElement): number | null {
 function isMultiMemberLine(raw: string): boolean {
   const parts = parseEmbedParams(raw);
   if (!parts) return false;
-  const align = parts[0] === 'left' || parts[0] === 'center' || parts[0] === 'right';
-  const offset = align ? 1 : 0;
+  let offset = isOrientationWord(parts[0]) ? 1 : 0;
+  const align = parts[offset] === 'left' || parts[offset] === 'center' || parts[offset] === 'right';
+  if (align) offset += 1;
   const first = parseInt(parts[offset], 10);
   if (parts.length > offset + 1 && (first === 0 || first === 1)) return false;
   return true;
@@ -175,7 +181,9 @@ export function normalizeRowAfterRemoval(content: string, removedLine: number | 
     let end = anchor;
     while (end + 1 < lines.length && isMultiMemberLine(lines[end + 1])) end += 1;
     if (end - start + 1 === 1) {
-      const bare = stripEmbedParams(lines[start]);
+      // Sizing belongs to the row the survivor is leaving; its orientation
+      // belongs to the image, so it stays.
+      const bare = stripSizingKeepOrientation(lines[start]);
       if (bare !== lines[start]) lines[start] = bare;
     }
   }
@@ -196,6 +204,7 @@ async function removeReferenceFromNote(
   imgFile: TFile,
   noteFile: TFile,
   editor: Editor | null,
+  view: EditorView | null,
   line: number | null
 ): Promise<{ found: number; removed: number }> {
   const opts = { max: 1, line, afterRemoval: normalizeRowAfterRemoval };
@@ -208,11 +217,7 @@ async function removeReferenceFromNote(
   const planned = planImageLinkRemoval(facade.app, before, imgFile, noteFile, opts);
   const change = minimalTextChange(before, planned.next);
   if (change) {
-    editor.replaceRange(
-      change.insert,
-      editor.offsetToPos(change.from),
-      editor.offsetToPos(change.to)
-    );
+    writeQuietly(view, editor, change);
     if (line !== null) {
       editor.setCursor(editor.offsetToPos(Math.max(0, lineStartOffset(before, line) - 1)));
     }
@@ -242,7 +247,14 @@ async function removeOneReference(
 ): Promise<ReferenceOutcome> {
   const line = resolveClickedSourceLine(img);
   const other = countOtherRefs(facade.app.metadataCache.resolvedLinks, imgFile.path, noteFile.path);
-  const { found, removed } = await removeReferenceFromNote(facade, imgFile, noteFile, editor, line);
+  const { found, removed } = await removeReferenceFromNote(
+    facade,
+    imgFile,
+    noteFile,
+    editor,
+    viewOfElement(img),
+    line
+  );
   const { remaining, deleteFile } = decideCut({ other, liveInCurrent: found, removed });
 
   log.debug('LOG_REFERENCE_REMOVAL', {
