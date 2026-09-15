@@ -310,6 +310,30 @@
   transition: transform 0.1s ease, background-color 0.1s ease, color 0.1s ease;
 }
 
+/* A button's frame is not a `border` — it is a 1px inset ring inside the
+   `--input-shadow` list (see `button:not(.clickable-icon)`), which over the
+   fill reads as a dark edge. Repainting that ring in the button's own colour
+   hides it: shadow layers paint first-on-top, so an opaque ring of the same
+   geometry covers the theme's, while the rest of the list stays underneath and
+   any drop shadow survives. The colour has to be the *fill's* variable, not
+   `--interactive-accent`: a theme owns the CTA fill (`GitHub Theme` paints it
+   from `--color-btn-primary-bg`) and its accent can be a different hue, which
+   is how a green button ended up ringed in blue. Theme-less Obsidian fills the
+   CTA from the accent, hence the fallbacks. The hover colour is mirrored for
+   the same reason; the keyboard focus ring (`button:focus-visible`) is left
+   alone by the `:not()`. */
+.drag-img-settings .drag-img-setting-btn:not(:focus-visible) {
+  border: none !important;
+  box-shadow: inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent)),
+    var(--input-shadow) !important;
+}
+
+.drag-img-settings .drag-img-setting-btn:not(:focus-visible):hover,
+.drag-img-settings .drag-img-setting-btn:not(:focus-visible).mobile-tap {
+  box-shadow: inset 0 0 0 1px var(--color-btn-primary-hover-bg, var(--interactive-accent-hover)),
+    var(--input-shadow-hover) !important;
+}
+
 .drag-img-setting-btn.drag-img-btn-pressed {
   background: var(--color-green) !important;
   color: #fff !important;
