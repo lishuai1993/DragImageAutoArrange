@@ -6,8 +6,6 @@ import { alignmentToCSS } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
-import { parseEmbedParams } from "../imageParse/embedRaw";
-import { isOrientationWord } from "../imageTransform/orientation";
 import * as scrollDiag from "../scrollSync/scrollDiag";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { attachDiaImageMarkers } from "./imageMarkers";
@@ -1419,11 +1417,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // distribution to calculate max height (avoids overwriting user adjustments).
       if (this.group.images.some((img) => img.hasSizing)) {
         this.recalculateRowHeight();
-        if (this.backfillMissingParams()) {
-          // Incomplete params were cleared — re-run to auto-fill flexGrow
-          // from natural aspect ratios via the recalculateRowHeight auto-fill.
-          this.recalculateRowHeight();
-        }
+        this.backfillMissingParams();
         return;
       }
 
@@ -1561,20 +1555,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
 
   /**
-   * Validate and backfill missing markdown params from rendered state or defaults.
-   * Alignment comes from the global setting; flexGrow/scale/W come from current
-   * rendered values. Schedules a RAF persist when changes are made.
+   * Validate and backfill missing markdown params from rendered state or
+   * defaults.  Alignment comes from the global setting; share/fill/W come from
+   * current rendered values.  Schedules a RAF persist when changes are made.
    */
-  /**
-   * Validate and backfill missing markdown params from rendered state or defaults.
-   * Returns true if any images need re-layout (had incomplete params that were
-   * cleared so recalculateRowHeight can auto-fill from natural aspect ratios).
-   */
-  private backfillMissingParams(): boolean {
+  private backfillMissingParams(): void {
     const images = this.group.images;
     const n = images.length;
     let changed = false;
-    let needRelayout = false;
 
     for (let i = 0; i < n; i++) {
       const img = images[i];
@@ -1596,47 +1584,24 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           }
         }
       } else if (img.display.kind === "multi") {
-        // Multi-image: detect incomplete params by counting | components. The
-        // orientation word is not a sizing component, so drop it before both the
-        // alignment test and the count.
-        const parts = (parseEmbedParams(img.raw) ?? []).filter(p => p !== "");
-        if (isOrientationWord(parts[0])) parts.shift();
-        // Expected: alignment + flexGrow + scale = 3 parts (or 2 without alignment)
-        const hasAlign = parts.length > 0 && /^(left|center|right)$/.test(parts[0]);
-        const expectedParts = hasAlign ? 3 : 2;
-        const incomplete = parts.length < expectedParts;
-
-        if (incomplete) {
-          // Params are incomplete — one numeric cannot unambiguously encode both
-          // share and fill, so the parsed values are unreliable.  Clear both and
-          // let recalculateRowHeight auto-fill from natural aspect ratios.
-          scrollDiag.note("backfill 判为不完整 → 清空并重排", {
-            index: i,
-            parts: parts.join("|"),
-            expectedParts,
-          });
-          img.display.share = 1;
-          img.display.fill = null;
-          img.hasSizing = false;
-          needRelayout = true;
+        // A multi member's slots are filled from the rendered layout.  A lone
+        // numeric is read as the share code (the first slot), so a legacy
+        // `|left|120` keeps its 1.2 instead of being reset to uniform; the fill
+        // code follows from the rendered content-vs-item width ratio.  An
+        // unmeasurable fill (image not loaded yet, or a broken link) stays null
+        // — the row then materialises without that one slot and picks it up on
+        // a later pass, rather than pinning a made-up ratio.
+        if (!img.hasSizing && this.itemEls[i]) {
+          const fg = parseFloat(this.itemEls[i].style.flexGrow || String(img.display.share));
+          img.display.share = clampFlexGrow(fg);
+          img.hasSizing = true;
           changed = true;
-        } else {
-          // Multi-image: flexGrow → from rendered itemEls
-          if (!img.hasSizing && this.itemEls[i]) {
-            const fg = parseFloat(this.itemEls[i].style.flexGrow || String(img.display.share));
-            img.display.share = clampFlexGrow(fg);
-            img.hasSizing = true;
-            changed = true;
-          }
-          // Multi-image: scale → from rendered content rect
-          if (img.display.fill == null && this.itemEls[i]) {
-            const cr = this.getImageContentRect(i);
-            const ir = this.itemEls[i].getBoundingClientRect();
-            if (cr && ir && cr.width > 0 && ir.width > 0) {
-              img.display.fill = clampScale(cr.width / ir.width);
-            } else {
-              img.display.fill = 1;
-            }
+        }
+        if (img.display.fill == null && this.itemEls[i]) {
+          const cr = this.getImageContentRect(i);
+          const ir = this.itemEls[i].getBoundingClientRect();
+          if (cr && ir && cr.width > 0 && ir.width > 0) {
+            img.display.fill = clampScale(cr.width / ir.width);
             changed = true;
           }
         }
@@ -1646,12 +1611,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (changed) {
       this.applyAlignmentToAll();
       scrollDiag.note("backfill 有改动 → 排入 RAF 持久化", {
-        needRelayout,
         images: images.length,
       });
       window.requestAnimationFrame(() => this.persistCallback?.());
     }
-    return needRelayout;
   }
 
   /** Minimal safe layout used when applyLayout throws: uniform default height. */

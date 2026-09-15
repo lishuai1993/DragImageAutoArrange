@@ -8,6 +8,7 @@
  */
 
 import { ButtonComponent, Setting } from 'obsidian';
+import { applySettingButtonStyle } from '../settingsButton';
 import { FILE_OPERATION_LABELS } from './menuLabels';
 import { restoreDefaultFileOperationOrder, type ImageMenuSettings } from './settingsModel';
 
@@ -77,13 +78,15 @@ class ImageMenuSettingsSection {
             .setName('文件操作')
             .setDesc('菜单底部的文件操作项：开关控制是否显示，箭头调整先后顺序。')
             .addButton(button =>
-                button.setButtonText('恢复默认顺序').onClick(async () => {
-                    this.settings.fileOperationItems = restoreDefaultFileOperationOrder(
-                        this.settings.fileOperationItems
-                    );
-                    await this.bridge.saveSettings();
-                    this.refreshOperations(list);
-                })
+                applySettingButtonStyle(button)
+                    .setButtonText('恢复默认顺序')
+                    .onClick(async () => {
+                        this.settings.fileOperationItems = restoreDefaultFileOperationOrder(
+                            this.settings.fileOperationItems
+                        );
+                        await this.bridge.saveSettings();
+                        this.refreshOperations(list);
+                    })
             );
 
         const rows = list.createDiv();
@@ -110,7 +113,9 @@ class ImageMenuSettingsSection {
     /** Move one row one step (`delta` −1 up / +1 down); disabled at either end. */
     private wireMove(button: ButtonComponent, list: HTMLElement, index: number, delta: number): void {
         const label = delta < 0 ? '上移' : '下移';
-        button.setButtonText(delta < 0 ? '↑' : '↓').setTooltip(label);
+        applySettingButtonStyle(button)
+            .setButtonText(delta < 0 ? '↑' : '↓')
+            .setTooltip(label);
         const items = this.settings.fileOperationItems;
         const target = index + delta;
         if (target < 0 || target >= items.length) {

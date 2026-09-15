@@ -15,10 +15,9 @@
 // LAST numeric as the width, so the word can never sit between numbers.
 
 import { buildImageLineRe } from "../constants";
-import { embedParamString, stripEmbedParams } from "./embedRaw";
+import { stripEmbedParams } from "./embedRaw";
 import {
   IDENTITY_STATE,
-  isIdentityOrientation,
   isOrientationWord,
   orientationWord,
   parseOrientationWord,
@@ -62,6 +61,12 @@ export interface RowImageOptions {
 const ALIGN_WORDS: ReadonlySet<string> = new Set(["left", "center", "right"]);
 const RE_LEADING_NUM = /(?:^|\|)(\d+)/;
 const RE_TRAILING_NUM = /\|(\d+)$/;
+
+/** Whether a token is one of the alignment words.  Exported so a line-level
+ *  policy can tell an alignment slot apart from a token it doesn't own. */
+export function isAlignmentWord(token: string | undefined): token is Alignment {
+  return token !== undefined && ALIGN_WORDS.has(token);
+}
 
 /** Split the pipe params of an embed line into ordered string parts.  [] bare. */
 function splitTokens(paramStr: string): string[] {
@@ -189,14 +194,12 @@ function storedFollowWidth(raw: string): number | null {
 }
 
 /**
- * The orientation params to prepend. Written when the row is rotated, and also
- * when it already carries the slot — so resetting a rotated image lands on an
- * explicit `orig` instead of silently dropping the slot, while a line that never
- * had one stays untouched. See the emission policy in the design doc (§8.2).
+ * The orientation params to prepend. Always written, identity included: an
+ * image at its original orientation lands on an explicit `orig` rather than an
+ * absent slot, so no reader has to infer a default. See the 槽位恒满 emission
+ * policy in the design doc (旋转翻转文档 §2.5 / §8.2).
  */
 function orientationParams(img: RowImage): string[] {
-  const had = isOrientationWord(embedParamString(img.raw).split("|", 1)[0]);
-  if (!had && isIdentityOrientation(img.orientation)) return [];
   return [orientationWord(img.orientation)];
 }
 
@@ -205,21 +208,18 @@ function serializeMulti(img: RowImage): string {
   if (img.display.kind !== "multi") return base;
   const { share, fill } = img.display;
 
-  const shareCode = Math.round(share * 100);
+  // Slots are always filled: orientation word, the alignment word when the
+  // model carries one, and the share code — a uniform 1.0 is written as `100`,
+  // never omitted. The fill code follows only when a measured ratio exists: an
+  // unmeasured row (image not loaded yet, or a broken link) is written with the
+  // three leading slots and has its fill appended once it can be measured.
   const params: string[] = orientationParams(img);
   if (img.alignment) params.push(img.alignment);
-  // A default share of 1.0 (code 100) is omitted — unless a scale needs a
-  // numeric placeholder before it so the fill code stays last.
-  if (shareCode !== 100) params.push(String(shareCode));
+  params.push(String(Math.round(share * 100)));
   if (fill != null && fill > 0) {
-    const safeScale = Math.min(1, fill);
-    const scaleValue = Math.round(safeScale * 100);
-    if (scaleValue > 0 && scaleValue <= 100) {
-      if (!params.some((p) => /^\d+$/.test(p))) params.push("100");
-      params.push(String(scaleValue));
-    }
+    const scaleValue = Math.round(Math.min(1, fill) * 100);
+    if (scaleValue > 0 && scaleValue <= 100) params.push(String(scaleValue));
   }
-  if (params.length === 0) return base;
   return base.replace(/\]\]/, `|${params.join("|")}]]`);
 }
 

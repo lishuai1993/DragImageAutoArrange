@@ -137,81 +137,93 @@ describe("read hasSizing", () => {
   });
 });
 
-// ── write: multi round-trip ─────────────────────────────────────────────
+// ── write: multi round-trip (every slot is always filled) ───────────────
 describe("write multi-row member", () => {
-  it("bare stays bare", () => {
+  it("a bare line materialises with the orientation and share slots", () => {
     const [r] = read("![[a.png]]", "multi", EXTS);
-    expect(write(r)).toBe("![[a.png]]");
+    expect(write(r)).toBe("![[a.png|orig|100]]");
   });
 
-  it("round-trips share/fill codes", () => {
-    for (const line of [
-      "![[a.png|200]]",
-      "![[a.png|120|50]]",
-      "![[a.png|left|120|50]]",
-      "![[a.png|center|150|80]]",
-      "![[a.png|left|120]]",
-      "![[folder/p.png|740|48]]",
-    ]) {
-      const [r] = read(line, "multi", EXTS);
-      expect(write(r)).toBe(line);
+  it("normalises a legacy line to the filled form", () => {
+    const cases: [string, string][] = [
+      ["![[a.png|200]]", "![[a.png|orig|200]]"],
+      ["![[a.png|120|50]]", "![[a.png|orig|120|50]]"],
+      ["![[a.png|left|120|50]]", "![[a.png|orig|left|120|50]]"],
+      ["![[a.png|center|150|80]]", "![[a.png|orig|center|150|80]]"],
+      ["![[a.png|left|120]]", "![[a.png|orig|left|120]]"],
+      ["![[folder/p.png|740|48]]", "![[folder/p.png|orig|740|48]]"],
+    ];
+    for (const [from, to] of cases) {
+      expect(write(read(from, "multi", EXTS)[0])).toBe(to);
     }
   });
 
-  it("share 1.0 with a scale keeps a placeholder 100", () => {
-    const [r] = read("![[a.png|100|50]]", "multi", EXTS);
-    expect(r.display).toEqual({ kind: "multi", share: 1, fill: 0.5 });
-    expect(write(r)).toBe("![[a.png|100|50]]");
+  it("round-trips an already-filled line byte for byte", () => {
+    for (const line of [
+      "![[a.png|orig|100]]",
+      "![[a.png|orig|120|50]]",
+      "![[a.png|r90|center|150|80]]",
+    ]) {
+      expect(write(read(line, "multi", EXTS)[0])).toBe(line);
+    }
   });
 
-  it("a default |100 alone normalises to bare (mirrors updateImageLineWidth)", () => {
-    const [r] = read("![[a.png|100]]", "multi", EXTS);
-    expect(write(r)).toBe("![[a.png]]");
+  it("a uniform share still writes its 100 code", () => {
+    const [r] = read("![[a.png|100|50]]", "multi", EXTS);
+    expect(r.display).toEqual({ kind: "multi", share: 1, fill: 0.5 });
+    expect(write(r)).toBe("![[a.png|orig|100|50]]");
+  });
+
+  it("keeps the share code alone when no fill has been measured", () => {
+    const [r] = read("![[a.png|120]]", "multi", EXTS);
+    expect(write(r)).toBe("![[a.png|orig|120]]");
   });
 
   it("serialises new values onto a bare line", () => {
     const [r] = read("![[a.png]]", "multi", EXTS);
     const edited = { ...r, display: { kind: "multi" as const, share: 1.2, fill: 0.5 } };
-    expect(write(edited)).toBe("![[a.png|120|50]]");
+    expect(write(edited)).toBe("![[a.png|orig|120|50]]");
   });
 });
 
-// ── write: single round-trip ────────────────────────────────────────────
+// ── write: single round-trip (every slot is always filled) ──────────────
 describe("write single-row", () => {
-  it("manual round-trips |1|W and floors W ≥ 1", () => {
-    expect(write(read("![[a.webp|1|350]]", "single", EXTS)[0])).toBe("![[a.webp|1|350]]");
-    expect(write(read("![[a.webp|1|0]]", "single", EXTS)[0])).toBe("![[a.webp|1|1]]");
+  it("manual round-trips |S|W with the orientation word and floors W ≥ 1", () => {
+    expect(write(read("![[a.webp|1|350]]", "single", EXTS)[0])).toBe("![[a.webp|orig|1|350]]");
+    expect(write(read("![[a.webp|1|0]]", "single", EXTS)[0])).toBe("![[a.webp|orig|1|1]]");
   });
 
   it("manual keeps alignment", () => {
-    expect(write(read("![[a.webp|left|1|350]]", "single", EXTS)[0])).toBe("![[a.webp|left|1|350]]");
+    expect(write(read("![[a.webp|left|1|350]]", "single", EXTS)[0])).toBe(
+      "![[a.webp|orig|left|1|350]]"
+    );
   });
 
   it("follow round-trips with explicit width", () => {
     const [r] = read("![[a.webp|0|420]]", "single", EXTS);
-    expect(write(r, { followWidthPx: 420 })).toBe("![[a.webp|0|420]]");
+    expect(write(r, { followWidthPx: 420 })).toBe("![[a.webp|orig|0|420]]");
   });
 
   it("follow round-trips without opts via the stored |0|W width", () => {
     const [r] = read("![[a.webp|0|420]]", "single", EXTS);
-    expect(write(r)).toBe("![[a.webp|0|420]]");
+    expect(write(r)).toBe("![[a.webp|orig|0|420]]");
   });
 
   it("follow serialises a fresh width onto a bare line", () => {
     const [r] = read("![[a.webp]]", "single", EXTS);
-    expect(write(r, { followWidthPx: 350 })).toBe("![[a.webp|0|350]]");
+    expect(write(r, { followWidthPx: 350 })).toBe("![[a.webp|orig|0|350]]");
   });
 
   it("manual serialises a new pixel width", () => {
     const [r] = read("![[a.webp|0|350]]", "single", EXTS);
     const edited = { ...r, display: { kind: "single-manual" as const, widthPx: 700 } };
-    expect(write(edited)).toBe("![[a.webp|1|700]]");
+    expect(write(edited)).toBe("![[a.webp|orig|1|700]]");
   });
 
   it("preserves surrounding text and leading whitespace", () => {
     const [r] = read("  ![[a.webp|1|50]]", "single", EXTS);
     const edited = { ...r, display: { kind: "single-manual" as const, widthPx: 200 } };
-    expect(write(edited)).toBe("  ![[a.webp|1|200]]");
+    expect(write(edited)).toBe("  ![[a.webp|orig|1|200]]");
   });
 });
 
@@ -252,9 +264,9 @@ describe("read orientation word", () => {
 });
 
 describe("write orientation word", () => {
-  it("leaves a line that never carried the slot untouched", () => {
-    expect(write(read("![[a.png]]", "multi", EXTS)[0])).toBe("![[a.png]]");
-    expect(write(read("![[a.png|100]]", "multi", EXTS)[0])).toBe("![[a.png]]");
+  it("fills the slot even on a line that never carried one", () => {
+    expect(write(read("![[a.png]]", "multi", EXTS)[0])).toBe("![[a.png|orig|100]]");
+    expect(write(read("![[a.png|100]]", "multi", EXTS)[0])).toBe("![[a.png|orig|100]]");
   });
 
   it("prepends the word ahead of the alignment and numbers", () => {

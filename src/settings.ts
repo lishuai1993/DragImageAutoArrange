@@ -9,6 +9,8 @@ import {
 } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 import { renderImageMenuSettings, type ImageMenuBridge } from "./imageMenu/menuSettingsUi";
+import { renderMaintenanceSettings } from "./maintenance/maintenanceSettingsUi";
+import { applySettingButtonStyle } from "./settingsButton";
 import { logger, type LogLevel } from "./logger";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
@@ -269,10 +271,8 @@ export class DragImageSettingTab extends PluginSettingTab {
         "One-shot: clear every image's per-image alignment override and revert to the global setting above."
       )
       .addButton((button) => {
-        button.buttonEl.classList.add("drag-img-reset-btn");
-        return button
+        return applySettingButtonStyle(button)
           .setButtonText("Reset all to current setting")
-          .setCta()
           .onClick(() => {
             this.plugin.resetAllImageAlignments();
             alignDropdown?.setValue(
@@ -378,10 +378,8 @@ export class DragImageSettingTab extends PluginSettingTab {
         "One-shot: clear every single image's manual size override and re-apply the current mode."
       )
       .addButton((button) => {
-        button.buttonEl.classList.add("drag-img-reset-btn");
-        return button
+        return applySettingButtonStyle(button)
           .setButtonText("Reset all to current setting")
-          .setCta()
           .onClick(() => {
             this.plugin.resetAllSingleImages();
             // Sync dropdown + width input in-place to reflect the reset
@@ -405,6 +403,15 @@ export class DragImageSettingTab extends PluginSettingTab {
     }
 
     this.renderLogSettings(containerEl);
+
+    // Vault-wide maintenance: restore every DIA-managed row to the native
+    // `![[file]]` form (the counterpart to the always-filled write policy), and
+    // pre-place the word slots on every hostable row.
+    renderMaintenanceSettings(containerEl, this.app, () => ({
+      extensions: this.plugin.settings.imageExtensions,
+      alignment: this.plugin.settings.alignment,
+      maxImagesPerRow: this.plugin.settings.maxImagesPerRow,
+    }));
 
     // Move every description element out of the left info column and onto its
     // own full-width line, so long descriptions no longer wrap inside a narrow

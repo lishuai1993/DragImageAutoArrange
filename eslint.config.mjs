@@ -1,5 +1,8 @@
 import { defineConfig } from "eslint/config";
 import obsidianmd from "eslint-plugin-obsidianmd";
+// Passing `acronyms` at all *replaces* the rule's built-in list, so the defaults
+// have to be carried over explicitly to add one of our own.
+import { DEFAULT_ACRONYMS } from "eslint-plugin-obsidianmd/dist/lib/rules/ui/acronyms.js";
 
 export default defineConfig([
   {
@@ -13,6 +16,16 @@ export default defineConfig([
           allowDefaultProject: ["eslint.config.*"],
         },
       },
+    },
+  },
+  {
+    rules: {
+      // "DIA" is this plugin's own acronym: without this the sentence-case rule
+      // rewrites it to "dia" in every user-facing string that names it.
+      "obsidianmd/ui/sentence-case": [
+        "warn",
+        { enforceCamelCaseLower: true, acronyms: [...DEFAULT_ACRONYMS, "DIA"] },
+      ],
     },
   },
   {

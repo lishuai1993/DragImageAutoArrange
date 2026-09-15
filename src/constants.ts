@@ -68,3 +68,16 @@ export function buildImageLineRe(extensions: string): RegExp {
     "i"
   );
 }
+
+/**
+ * Every image embed a line holds, wherever it sits in the line (`![[a.png]]`,
+ * `- ![[a.png|400]]`, `文字 ![[a.png|center]] 文字`).  Groups: 1 = file name,
+ * 2 = the param run, absent on a bare embed.  Global, so callers walk one
+ * reference at a time — `buildImageLineRe` only sees the rows DIA hosts, while
+ * a reference embedded in prose is still a reference the maintenance passes
+ * have to account for.
+ */
+export function buildImageEmbedRe(extensions: string): RegExp {
+  const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");
+  return new RegExp(`!\\[\\[([^\\]|]+\\.(?:${extList}))(?:\\|([^\\]]*))?\\]\\]`, "gi");
+}
