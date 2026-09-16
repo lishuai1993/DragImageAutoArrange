@@ -34,16 +34,8 @@ export class DividerController {
     divider.style.width = `${DIVIDER_WIDTH}px`;
     divider.setCssStyles({ cursor: "col-resize" });
     divider.setCssStyles({ alignSelf: "stretch" });
-    divider.setCssStyles({ backgroundColor: "transparent" });
     divider.setCssStyles({ transition: "background-color 0.15s" });
     divider.dataset.leftIndex = String(leftIndex);
-
-    divider.onmouseenter = () => {
-      divider.setCssStyles({ backgroundColor: "#4a9eff" });
-    };
-    divider.onmouseleave = () => {
-      divider.setCssStyles({ backgroundColor: "transparent" });
-    };
 
     // Double-click divider → snap to equal heights
     divider.ondblclick = (e) => {

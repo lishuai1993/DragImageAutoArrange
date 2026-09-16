@@ -28,53 +28,84 @@ const STABLE_FRAMES = 8;
 const STABLE_FRAMES_EARLY = 2;
 const SET_FALLBACK_AT_MS = 3000;
 
-// ── CSS override machinery ─────────────────────────────────────────────
-// The override rules live in styles.css (`.diaa-warmup-container` /
-// `.diaa-warmup-probe`): the classes are only ever applied by this module
-// while a warm-up is in flight, so a static rule set is equivalent to the
-// runtime-injected <style> element this used to create.
+// ── Style override machinery ───────────────────────────────────────────
+// The overrides go on as inline styles rather than as styles.css classes: they
+// land on Obsidian's own container chain (`.workspace-leaf-content`, the view's
+// containerEl, `.markdown-reading-view`), so they have to outrank the display /
+// position rules Obsidian itself puts on those elements. The class names are
+// kept as markers, so a warm-up's DOM traces stay identifiable in DevTools.
 
 const OVERRIDE_CLASS = "diaa-warmup-probe";
 const CONTAINER_OVERRIDE_CLASS = "diaa-warmup-container";
 
+/** Makes an element layout-capable but invisible for the duration of a warm-up. */
+const OVERRIDE_STYLE = {
+  display: "block",
+  visibility: "hidden",
+  position: "absolute",
+  inset: "0",
+  pointerEvents: "none",
+} as const;
+
+type OverrideProp = keyof typeof OVERRIDE_STYLE;
+
+/** Apply OVERRIDE_STYLE, returning the element's previous inline values. */
+function applyOverrideStyle(el: HTMLElement): Record<OverrideProp, string> {
+  const saved = {} as Record<OverrideProp, string>;
+  const props = Object.keys(OVERRIDE_STYLE) as OverrideProp[];
+  for (const key of props) saved[key] = el.style[key];
+  el.setCssStyles(OVERRIDE_STYLE);
+  return saved;
+}
+
+/** Put back whatever inline values applyOverrideStyle displaced. */
+function restoreOverrideStyle(el: HTMLElement, saved: Record<OverrideProp, string>): void {
+  const props = Object.keys(saved) as OverrideProp[];
+  for (const key of props) el.style[key] = saved[key];
+}
+
 /** Apply overrides to the container chain so a non-active leaf's DOM
  *  is layout-capable. Returns cleanup. */
 function applyContainerOverrides(leaf: WorkspaceLeaf): () => void {
-  const overridden: HTMLElement[] = [];
+  const overridden: Array<{ el: HTMLElement; saved: Record<OverrideProp, string> }> = [];
   const view = viewInternals(leaf.view);
   const contentEl = view?.contentEl;
   const containerEl = view?.containerEl;
+
+  const override = (el: HTMLElement) => {
+    el.classList.add(CONTAINER_OVERRIDE_CLASS);
+    overridden.push({ el, saved: applyOverrideStyle(el) });
+  };
 
   // Walk up from contentEl to the workspace-leaf, overriding each
   // ancestor that might have display:none.
   let el: HTMLElement | null = contentEl?.parentElement ?? null;
   while (el && !el.classList.contains("workspace-leaf")) {
-    const computed = getComputedStyle(el);
-    if (computed.display === "none") {
-      el.classList.add(CONTAINER_OVERRIDE_CLASS);
-      overridden.push(el);
-    }
+    if (getComputedStyle(el).display === "none") override(el);
     el = el.parentElement;
   }
   // Also check containerEl itself
-  if (containerEl && getComputedStyle(containerEl).display === "none") {
-    containerEl.classList.add(CONTAINER_OVERRIDE_CLASS);
-    overridden.push(containerEl);
-  }
+  if (containerEl && getComputedStyle(containerEl).display === "none") override(containerEl);
 
   return () => {
-    for (const el of overridden) el.classList.remove(CONTAINER_OVERRIDE_CLASS);
+    for (const { el: target, saved } of overridden) {
+      target.classList.remove(CONTAINER_OVERRIDE_CLASS);
+      restoreOverrideStyle(target, saved);
+    }
   };
 }
 
 let _active = false;
 let _overriddenEl: HTMLElement | null = null;
+let _overriddenSaved: Record<OverrideProp, string> | null = null;
 let _removeContainerOverride: (() => void) | null = null;
 
 function removeOverride(): void {
   if (_overriddenEl) {
     _overriddenEl.classList.remove(OVERRIDE_CLASS);
+    if (_overriddenSaved) restoreOverrideStyle(_overriddenEl, _overriddenSaved);
     _overriddenEl = null;
+    _overriddenSaved = null;
   }
   if (_removeContainerOverride) {
     _removeContainerOverride();
@@ -133,6 +164,7 @@ export async function runWarmup(
   _active = true;
   readingEl.classList.add(OVERRIDE_CLASS);
   _overriddenEl = readingEl;
+  _overriddenSaved = applyOverrideStyle(readingEl);
 
   log.info("WARMUP start", {
     file,

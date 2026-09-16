@@ -77,12 +77,15 @@
   background-color: #4a9eff;
 }
 
-.diaa-divider-active {
-  background-color: #4a9eff !important;
+/* Both states must beat `.diaa-divider:hover`; repeating the class name takes
+   them to the same specificity as the :hover rule and, being declared later,
+   they win the tie. */
+.diaa-divider.diaa-divider-active {
+  background-color: #4a9eff;
 }
 
-.diaa-divider-snap {
-  background-color: #f59e0b !important;
+.diaa-divider.diaa-divider-snap {
+  background-color: #f59e0b;
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
 }
 
@@ -294,7 +297,7 @@
   }
 
   .diaa-resize-handle {
-    display: none !important;
+    display: none;
   }
 }
 
@@ -577,20 +580,6 @@
   height: 1px;
   margin: 2px 4px;
   background: var(--background-modifier-border);
-}
-
-/* ── Reading-Mode warm-up probe ──────────────────────────────────────────
-   A warm-up pre-renders the Reading Mode view inside a leaf that is kept
-   layout-capable but invisible, so the first Live Preview → Reading Mode
-   switch takes the hot path. These classes are applied only while a warm-up
-   is in flight (see src/scrollSync/warmupProbe.ts). */
-.diaa-warmup-container,
-.diaa-warmup-probe {
-  display: block !important;
-  visibility: hidden !important;
-  position: absolute !important;
-  inset: 0 !important;
-  pointer-events: none !important;
 }
 
 /* ── Settings: vault-wide maintenance passes ──────────────────────────────
