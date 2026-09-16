@@ -33,7 +33,7 @@ class ImageMenuSettingsSection {
     ) {
         new Setting(containerEl).setName('图片右键菜单设置').setHeading();
         this.group = containerEl.createDiv();
-        this.group.addClass('drag-img-settings-group');
+        this.group.addClass('diaa-settings-group');
     }
 
     render(): void {

@@ -1,5 +1,5 @@
-// ── Vault-wide "normalise to the standard DIA form" policy ──────────────
-// Puts every image line DIA can host into the standard slot layout: the two
+// ── Vault-wide "normalise to the standard DIAA form" policy ──────────────
+// Puts every image line DIAA can host into the standard slot layout: the two
 // leading word slots get written in — an explicit orientation word (`orig` when
 // the image stands upright) and the alignment word the row renders with — so a
 // later rotate is a word-for-word replacement inside a row that already has its
@@ -12,12 +12,12 @@
 // explicit share sets `hasSizing` and stops the render from ever deriving it.
 //
 // The one numeric this pass does touch is a single row's bare width: `|400` and
-// `|400x300` are Obsidian's native sizing, which DIA's first render would
+// `|400x300` are Obsidian's native sizing, which DIAA's first render would
 // otherwise overwrite with a setting-driven `|0|W`.  Promoting them to `|1|400`
 // keeps the hand-written width as a manual one.
 //
 // A line whose params carry anything unrecognised — an alias, a size form on a
-// multi member, a shape DIA never writes — is not ours to rewrite and is left
+// multi member, a shape DIAA never writes — is not ours to rewrite and is left
 // byte-for-byte alone.  Only the policy lives here; the walk, the write channel
 // and the progress reporting are ./vaultPass.
 
@@ -39,7 +39,7 @@ export interface NormalizeOptions {
 const INT = /^\d+$/;
 const SIZE = /^(\d+)x\d+$/;
 
-/** A single row's numeric tail, or null when the shape isn't one DIA accounts
+/** A single row's numeric tail, or null when the shape isn't one DIAA accounts
  *  for.  Absent stays absent (the first render derives the width and the
  *  setting-driven `S`); a bare native width becomes a manual one. */
 function readSingleTail(rest: string[]): string[] | null {

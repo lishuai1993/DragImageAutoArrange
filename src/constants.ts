@@ -1,6 +1,6 @@
 import type { LogLevel } from "./logger";
 
-export const CSS_PREFIX = "drag-img";
+export const CSS_PREFIX = "diaa";
 
 export const CLASSES = {
   row: `${CSS_PREFIX}-row`,
@@ -73,7 +73,7 @@ export function buildImageLineRe(extensions: string): RegExp {
  * Every image embed a line holds, wherever it sits in the line (`![[a.png]]`,
  * `- ![[a.png|400]]`, `文字 ![[a.png|center]] 文字`).  Groups: 1 = file name,
  * 2 = the param run, absent on a bare embed.  Global, so callers walk one
- * reference at a time — `buildImageLineRe` only sees the rows DIA hosts, while
+ * reference at a time — `buildImageLineRe` only sees the rows DIAA hosts, while
  * a reference embedded in prose is still a reference the maintenance passes
  * have to account for.
  */

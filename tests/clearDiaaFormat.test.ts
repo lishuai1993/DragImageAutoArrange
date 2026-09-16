@@ -5,7 +5,7 @@ const EXTS = "png,jpg,webp";
 
 // ── managed-param test (conservative) ───────────────────────────────────
 describe("isManagedLine", () => {
-  it("keeps lines that carry no DIA-only marker", () => {
+  it("keeps lines that carry no DIAA-only marker", () => {
     expect(isManagedLine("![[a.png]]")).toBe(false);
     expect(isManagedLine("![[a.png|400]]")).toBe(false);
     expect(isManagedLine("![[a.png|400x300]]")).toBe(false);
@@ -13,7 +13,7 @@ describe("isManagedLine", () => {
     expect(isManagedLine("![[a.png|left|120]]")).toBe(false);
   });
 
-  it("claims lines DIA could have written", () => {
+  it("claims lines DIAA could have written", () => {
     expect(isManagedLine("![[a.png|0|350]]")).toBe(true);
     expect(isManagedLine("![[a.png|1|350]]")).toBe(true);
     expect(isManagedLine("![[a.png|150|100]]")).toBe(true);
@@ -44,14 +44,14 @@ describe("clearPlan — image rows", () => {
     expect(clearPlan(["![[a.png]]", "![[b.png|400x300]]"], EXTS).size).toBe(0);
   });
 
-  it("leaves a lone alignment word alone — a row DIA will fill in, not residue", () => {
+  it("leaves a lone alignment word alone — a row DIAA will fill in, not residue", () => {
     expect(clearPlan(["![[a.png|center]]"], EXTS).size).toBe(0);
   });
 });
 
 // ── inline references (prose / list / quote) ────────────────────────────
 describe("clearPlan — inline references", () => {
-  it("takes DIA's alignment word back out of a paragraph", () => {
+  it("takes DIAA's alignment word back out of a paragraph", () => {
     const plan = clearPlan(["文字 ![[c.png|center]] 尾巴"], EXTS);
     expect(plan.get(0)).toBe("文字 ![[c.png]] 尾巴");
   });
@@ -69,7 +69,7 @@ describe("clearPlan — inline references", () => {
     ]);
   });
 
-  it("drops a full DIA param run wherever it sits in the line", () => {
+  it("drops a full DIAA param run wherever it sits in the line", () => {
     const plan = clearPlan(["文字 ![[c.png|0|350]] 尾巴"], EXTS);
     expect(plan.get(0)).toBe("文字 ![[c.png]] 尾巴");
   });

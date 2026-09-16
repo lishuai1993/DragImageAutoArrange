@@ -42,9 +42,9 @@ export const DELETE_IMAGE_CANCELLED = '已删除当前引用（文件保留）';
 /**
  * Whether a reference-removing row may act. Removing a reference rewrites the
  * note, so it is confined to the one case where both the target line is knowable
- * and editing is allowed: a DIA-managed image in Live Preview, whose row anchors
+ * and editing is allowed: a DIAA-managed image in Live Preview, whose row anchors
  * give the exact source line. Reading Mode must not touch note content at all,
- * and a non-DIA image has no anchor to resolve — both render greyed instead.
+ * and a non-DIAA image has no anchor to resolve — both render greyed instead.
  *
  * Shared by 「剪切图像」 and the 「删除」 file-operation row, which differ only in
  * what happens around the removal.
@@ -91,10 +91,10 @@ export function countOtherRefs(
 }
 
 /**
- * 0-based source line of the clicked image, from the anchors DIA already writes
+ * 0-based source line of the clicked image, from the anchors DIAA already writes
  * to the DOM: Reading Mode tags the embed with `data-diaa-line` (1-based, so
  * subtract one), Live Preview tags the row container with `data-line-start` and
- * each image with `index`. Returns null for an image with no DIA marker — an
+ * each image with `index`. Returns null for an image with no DIAA marker — an
  * Obsidian-rendered image that belongs to no row — which makes the caller fall
  * back to the note's first matching reference.
  */
@@ -117,7 +117,7 @@ export function sourceLineFromMarkers(
   return null;
 }
 
-/** 0-based source line of the clicked image, or null when it carries no DIA
+/** 0-based source line of the clicked image, or null when it carries no DIAA
  *  anchor (an image Obsidian rendered outside any row). */
 export function resolveClickedSourceLine(img: HTMLImageElement): number | null {
   const lineHost = img.closest?.<HTMLElement>('[data-diaa-line]');

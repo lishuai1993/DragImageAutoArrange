@@ -75,14 +75,14 @@ export class DragImageSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     // Scope the full-width-description reflow styles to this settings tab only.
-    containerEl.addClass("drag-img-settings");
+    containerEl.addClass("diaa-settings");
 
     // No plugin-name heading: the settings tab already carries it as its title.
 
     // ── Layout & interaction (global) ──────────────────────────
     new Setting(containerEl).setName("行布局与交互设置").setHeading();
     const layoutGroup = containerEl.createDiv();
-    layoutGroup.addClass("drag-img-settings-group");
+    layoutGroup.addClass("diaa-settings-group");
 
     new Setting(layoutGroup)
       .setName("Default row height")
@@ -241,7 +241,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("图片统一对齐设置").setHeading();
 
     const alignGroup = containerEl.createDiv();
-    alignGroup.addClass("drag-img-settings-group");
+    alignGroup.addClass("diaa-settings-group");
 
     let alignDropdown: DropdownComponent | null = null;
 
@@ -315,7 +315,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("单图行图片尺寸设置").setHeading();
 
     const singleImageGroup = containerEl.createDiv();
-    singleImageGroup.addClass("drag-img-settings-group");
+    singleImageGroup.addClass("diaa-settings-group");
 
     const mode = this.plugin.settings.singleImageSizeMode;
 
@@ -404,7 +404,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     this.renderLogSettings(containerEl);
 
-    // Vault-wide maintenance: restore every DIA-managed row to the native
+    // Vault-wide maintenance: restore every DIAA-managed row to the native
     // `![[file]]` form (the counterpart to the always-filled write policy), and
     // pre-place the word slots on every hostable row.
     renderMaintenanceSettings(containerEl, this.app, () => ({
@@ -428,7 +428,7 @@ export class DragImageSettingTab extends PluginSettingTab {
   private renderLogSettings(containerEl: HTMLElement): void {
     new Setting(containerEl).setName("日志与调试设置").setHeading();
     const group = containerEl.createDiv();
-    group.addClass("drag-img-settings-group");
+    group.addClass("diaa-settings-group");
 
     let active = LOG_LEVELS.indexOf(this.plugin.settings.logLevel);
     if (active < 0) active = 0;
@@ -439,10 +439,10 @@ export class DragImageSettingTab extends PluginSettingTab {
     // dots to the thumb's left take the filled-track colour, and the dot under the
     // thumb itself is dropped so it can't show through it.
     const markActive = (idx: number) => {
-      ticksEl?.querySelectorAll<HTMLElement>(".drag-img-log-tick").forEach((el, i) => {
+      ticksEl?.querySelectorAll<HTMLElement>(".diaa-log-tick").forEach((el, i) => {
         el.toggleClass("is-active", i === idx);
       });
-      nodesEl?.querySelectorAll<HTMLElement>(".drag-img-log-node").forEach((el, i) => {
+      nodesEl?.querySelectorAll<HTMLElement>(".diaa-log-node").forEach((el, i) => {
         el.toggleClass("is-on", i < idx);
         el.toggleClass("is-hidden", i === idx);
       });
@@ -469,7 +469,7 @@ export class DragImageSettingTab extends PluginSettingTab {
     // The control takes the whole card row so the track gets its full width, with
     // four tick labels and a row of stop dots underneath.
     const controlEl = levelSetting.controlEl;
-    controlEl.addClass("drag-img-log-control");
+    controlEl.addClass("diaa-log-control");
     // How far the info column is inset from the control column varies by version
     // and theme, so measure the gap and indent the track to start flush with the
     // "日志级别" name rather than assuming a value.
@@ -479,15 +479,15 @@ export class DragImageSettingTab extends PluginSettingTab {
     );
     if (inset > 0 && inset < 40) controlEl.style.marginLeft = `${inset}px`;
 
-    ticksEl = controlEl.createDiv("drag-img-log-ticks");
+    ticksEl = controlEl.createDiv("diaa-log-ticks");
     for (const name of LOG_LEVELS) {
-      ticksEl.createSpan({ text: name, cls: "drag-img-log-tick" });
+      ticksEl.createSpan({ text: name, cls: "diaa-log-tick" });
     }
     // Dots live in their own layer anchored to the stops: the outer two labels are
     // pushed inside the track ends, so they no longer sit over their stops.
-    nodesEl = ticksEl.createDiv("drag-img-log-nodes");
+    nodesEl = ticksEl.createDiv("diaa-log-nodes");
     for (let i = 0; i < LOG_LEVELS.length; i++) {
-      nodesEl.createSpan({ cls: "drag-img-log-node" });
+      nodesEl.createSpan({ cls: "diaa-log-node" });
     }
     // Where the track centre sits above the ticks row depends on the theme's
     // slider height and on whatever gap the flex layout adds, so measure the lift
@@ -542,7 +542,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
   /**
    * Re-parent each setting's description element from setting-item-info to the
-   * setting-item root. The .drag-img-settings .setting-item flex-wrap + the
+   * setting-item root. The .diaa-settings .setting-item flex-wrap + the
    * full-width flex-basis in styles.css then lay it out as a block that spans
    * the whole card, left-aligned with the label and right-aligned with the
    * card edge (below the control).
@@ -561,17 +561,17 @@ export class DragImageSettingTab extends PluginSettingTab {
    */
   private flashResetFeedback(button: ButtonComponent): void {
     const el = button.buttonEl;
-    if (el.classList.contains("drag-img-btn-pressed")) return;
+    if (el.classList.contains("diaa-btn-pressed")) return;
     const originalText = el.textContent ?? "Reset all to current setting";
     // Pin the width so the shorter "已重置" label doesn't shrink the button.
     el.style.minWidth = `${el.offsetWidth}px`;
     button.setDisabled(true);
     button.setButtonText("已重置");
-    el.classList.add("drag-img-btn-pressed");
+    el.classList.add("diaa-btn-pressed");
     window.setTimeout(() => {
       button.setDisabled(false);
       button.setButtonText(originalText);
-      el.classList.remove("drag-img-btn-pressed");
+      el.classList.remove("diaa-btn-pressed");
       el.setCssStyles({ minWidth: "" });
     }, 1500);
   }

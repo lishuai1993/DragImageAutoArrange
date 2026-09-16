@@ -20,11 +20,11 @@ export default defineConfig([
   },
   {
     rules: {
-      // "DIA" is this plugin's own acronym: without this the sentence-case rule
-      // rewrites it to "dia" in every user-facing string that names it.
+      // "DIAA" is this plugin's own acronym: without this the sentence-case rule
+      // rewrites it to "diaa" in every user-facing string that names it.
       "obsidianmd/ui/sentence-case": [
         "warn",
-        { enforceCamelCaseLower: true, acronyms: [...DEFAULT_ACRONYMS, "DIA"] },
+        { enforceCamelCaseLower: true, acronyms: [...DEFAULT_ACRONYMS, "DIAA"] },
       ],
     },
   },

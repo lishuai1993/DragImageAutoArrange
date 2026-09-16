@@ -1,8 +1,8 @@
 // ── Shared vault-wide maintenance pass ──────────────────────────────────
-// The skeleton behind the settings tab's two "DIA 格式维护" actions: walk every
+// The skeleton behind the settings tab's two "DIAA 格式维护" actions: walk every
 // markdown file, let a policy say which lines it owns and what they become, then
 // write the changed notes back.  Traversal, progress cadence, the hybrid write
-// channel and failure accounting live here; the two actions — clearing every DIA
+// channel and failure accounting live here; the two actions — clearing every DIAA
 // row back to a bare embed, and normalising every hostable line into the
 // standard slot layout — are pure line policies supplied by the caller.
 

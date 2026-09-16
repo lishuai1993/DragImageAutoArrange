@@ -33,7 +33,7 @@ export function stripObsidianClasses(img: HTMLElement): boolean {
 /**
  * Neutralize Obsidian's intermediate wrapper elements (e.g. .image-resize-container)
  * between an img and a boundary element by tagging them with the
- * `drag-img-contents` class, so the img behaves as a direct flex child.  Walks
+ * `diaa-contents` class, so the img behaves as a direct flex child.  Walks
  * from `img.parentElement` up to (but not including) `boundary`, skipping any
  * element listed in `skipEls`.
  */

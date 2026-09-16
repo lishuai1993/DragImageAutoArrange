@@ -25,7 +25,7 @@ describe("normalizePlan: single rows", () => {
     // A bare line gains both word slots; the numeric slots stay empty for the
     // first render to derive.
     ["![[a.png]]", "![[a.png|orig|left]]"],
-    // A hand-written native width becomes a manual one, so DIA's first render
+    // A hand-written native width becomes a manual one, so DIAA's first render
     // can't overwrite it with a setting-driven `|0|W`.
     ["![[a.png|400]]", "![[a.png|orig|left|1|400]]"],
     ["![[a.png|400x300]]", "![[a.png|orig|left|1|400]]"],

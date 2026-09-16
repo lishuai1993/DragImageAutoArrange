@@ -18,7 +18,7 @@ const log = logger.channel("rmImageClick");
  * Obsidian's listener runs before ours when it is also document-capture (older
  * registration), and after ours when bubble-phase — the synthetic click is not
  * suppressed either way.  The only failure mode is Obsidian rejecting untrusted
- * (synthetic) events; if that surfaces in testing, the fallback is a DIA-owned
+ * (synthetic) events; if that surfaces in testing, the fallback is a DIAA-owned
  * lightbox that renders the image full-size.
  */
 export function installReadingModeImageDoubleClickZoom(

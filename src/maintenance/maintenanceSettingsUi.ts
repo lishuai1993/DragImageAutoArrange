@@ -7,7 +7,7 @@
  * owns, confirm, write — so they share one runner and differ only in copy and in
  * the plan they hand it (see ./clearDiaaFormat and ./normalizeDiaaFormat).
  *
- * User-facing copy names the plugin's own acronym in caps ("DIA 格式"); the
+ * User-facing copy names the plugin's own acronym in caps ("DIAA 格式"); the
  * sentence-case lint rule is configured to keep it — see eslint.config.mjs.
  */
 
@@ -62,7 +62,7 @@ interface MaintenanceAction {
   failureNotice: string;
 }
 
-/** 「DIA 格式维护」: the actions, one runner, one busy flag. */
+/** 「DIAA 格式维护」: the actions, one runner, one busy flag. */
 class MaintenanceSection {
   private readonly group: HTMLElement;
   private readonly views: MaintenanceActionView[] = [];
@@ -73,9 +73,9 @@ class MaintenanceSection {
     private readonly app: App,
     private readonly bridge: () => MaintenanceBridge
   ) {
-    new Setting(containerEl).setName('DIA 格式维护').setHeading();
+    new Setting(containerEl).setName('DIAA 格式维护').setHeading();
     this.group = containerEl.createDiv();
-    this.group.addClass('drag-img-settings-group');
+    this.group.addClass('diaa-settings-group');
   }
 
   render(): void {
@@ -163,13 +163,13 @@ class MaintenanceActionView {
       });
 
     const progress = group.createDiv();
-    progress.addClass('drag-img-vault-progress');
+    progress.addClass('diaa-vault-progress');
     const track = progress.createDiv();
-    track.addClass('drag-img-vault-track');
+    track.addClass('diaa-vault-track');
     this.barEl = track.createDiv();
-    this.barEl.addClass('drag-img-vault-bar');
+    this.barEl.addClass('diaa-vault-bar');
     this.labelEl = progress.createDiv();
-    this.labelEl.addClass('drag-img-vault-label');
+    this.labelEl.addClass('diaa-vault-label');
     this.setLabel('尚未执行。');
   }
 
@@ -232,7 +232,7 @@ class MaintenanceConfirmModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.addClass('drag-img-vault-confirm');
+    contentEl.addClass('diaa-vault-confirm');
     new Setting(contentEl).setName(this.action.confirmTitle).setHeading();
     this.action.writeConfirmBody(contentEl, this.scan);
 
@@ -275,38 +275,38 @@ function sampleBlock(containerEl: HTMLElement, before: string, after: string): v
   pre.createEl('code', { text: after });
 }
 
-// ── Action: clear every DIA row back to a bare embed ────────────────────
+// ── Action: clear every DIAA row back to a bare embed ────────────────────
 
 const CLEAR_ACTION: MaintenanceAction = {
-  name: '清除 DIA 格式（本库）',
+  name: '清除 DIAA 格式（本库）',
   desc:
-    '把全库中 DIA 写入的图片参数还原为 Obsidian 原生的 ![[文件名]]：整行图片行清掉整个' +
-    '参数段，行内引用只清 DIA 写的对齐词、Obsidian 原生的宽度保留。逐个文件处理，' +
+    '把全库中 DIAA 写入的图片参数还原为 Obsidian 原生的 ![[文件名]]：整行图片行清掉整个' +
+    '参数段，行内引用只清 DIAA 写的对齐词、Obsidian 原生的宽度保留。逐个文件处理，' +
     '点击后先扫描、再确认、然后写入。清除会丢弃朝向、对齐、份额、填充与单图宽度，' +
     '且不可自动恢复（原始图片文件不受影响）。' +
     '注意：插件启用期间，笔记只要被打开或编辑，参数就会在第一帧被重新写回；' +
     '若目的是卸载插件，建议清除前先关闭所有打开的笔记，并在清除完成后立即停用插件。',
   buttonText: '开始清除',
-  confirmTitle: '清除 DIA 格式（本库）',
+  confirmTitle: '清除 DIAA 格式（本库）',
   confirmButton: '确认清除',
   applyLabel: '正在清除',
   plan: () => clearPlan,
   emptyText: (scan) =>
-    `扫描完成：${scan.scanned} 个 Markdown 文件中没有 DIA 格式行，无需清除。`,
+    `扫描完成：${scan.scanned} 个 Markdown 文件中没有 DIAA 格式行，无需清除。`,
   cancelledText: (scan) =>
-    `已取消，未做任何修改。共检测到 ${scan.foundLines} 行 DIA 格式，` +
+    `已取消，未做任何修改。共检测到 ${scan.foundLines} 行 DIAA 格式，` +
     `分布在 ${scan.entries.length} 个文件中。`,
   doneText: (summary) =>
     `清除完成：共扫描 ${summary.scanned} 个文件，` +
     `还原 ${summary.changedLines} 行，覆盖 ${summary.changedFiles} 个文件` +
     (summary.failed > 0 ? `，${summary.failed} 个文件失败（见 log.txt）。` : '。') +
     '若目的是卸载插件，请立即停用插件，并关闭所有打开的笔记。',
-  failureNotice: '清除 DIA 格式失败',
+  failureNotice: '清除 DIAA 格式失败',
   writeConfirmBody: (contentEl, scan) => {
     paragraph(
       contentEl,
       `本次已扫描 ${scan.scanned} 个 Markdown 文件，命中 ${scan.foundLines} 行 ` +
-        `DIA 写入的图片行参数，分布在 ${scan.entries.length} 个文件中。`
+        `DIAA 写入的图片行参数，分布在 ${scan.entries.length} 个文件中。`
     );
     paragraph(contentEl, '这些行会被改写为 Obsidian 原生格式，例如：');
     sampleBlock(contentEl, '![[示例图片.webp|orig|center|100|67]]', '![[示例图片.webp]]');
@@ -318,7 +318,7 @@ const CLEAR_ACTION: MaintenanceAction = {
 const NORMALIZE_ACTION: MaintenanceAction = {
   name: '归一化为标准格式（本库）',
   desc:
-    '把全库中 DIA 可托管的图片行补写成标准参数格式：朝向槽写入原朝向（直立时写 orig），' +
+    '把全库中 DIAA 可托管的图片行补写成标准参数格式：朝向槽写入原朝向（直立时写 orig），' +
     '对齐槽写入当前统一对齐设置，行内已有的数值参数原样保留。缺失的数值槽不在这里猜——' +
     '份额要按各成员的自然像素尺寸才算得准、填充比要等图像画出来才量得到，' +
     '所以交给该行首次渲染时按真实值补写，免得把一个凑出来的数钉死在笔记里。' +

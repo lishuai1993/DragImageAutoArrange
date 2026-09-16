@@ -356,7 +356,7 @@ describe('ImageRowWidget alignment persists across widget recreation (preserved 
     // Simulate corner-handle resize on image 2: set inline height
     const imgsA = elA.querySelectorAll('img');
     imgsA[2].setCssStyles({ height: '361px' });
-    const itemC = elA.querySelectorAll('.drag-img-item')[2] as HTMLElement;
+    const itemC = elA.querySelectorAll('.diaa-item')[2] as HTMLElement;
     itemC.setCssStyles({ height: '361px' });
     // Destroy — this saves preservedMultiImageSizes internally
     widgetA.destroy();
@@ -440,7 +440,7 @@ describe('ImageRowWidget.updateAlignment (in-place)', () => {
       expect((img as HTMLImageElement).style.objectPosition).toBe('right top');
     }
     // Verify item-level alignment (img element positioning within item)
-    const items = el.querySelectorAll('.drag-img-item');
+    const items = el.querySelectorAll('.diaa-item');
     for (const item of items) {
       expect((item as HTMLElement).style.display).toBe('flex');
       expect((item as HTMLElement).style.justifyContent).toBe('flex-end');
@@ -463,7 +463,7 @@ describe('ImageRowWidget.updateAlignment (in-place)', () => {
       { w: 800, h: 1200 },
       { w: 1920, h: 1440 },
     ]);
-    const items = el.querySelectorAll('.drag-img-item');
+    const items = el.querySelectorAll('.diaa-item');
     expect(items.length).toBe(3);
     for (const item of items) {
       expect((item as HTMLElement).style.display).toBe('flex');
@@ -545,7 +545,7 @@ describe('ImageRowWidget sizes a lone item to what is drawn', () => {
     document.body.appendChild(el);
     patchBoundingRect(el, 944);
     simulateImagesLoaded(widget, el, [dims]);
-    const item = el.querySelector('.drag-img-item') as HTMLElement;
+    const item = el.querySelector('.diaa-item') as HTMLElement;
     const img = el.querySelector('img') as HTMLImageElement;
     return { el, widget, item, img };
   }

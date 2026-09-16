@@ -254,7 +254,7 @@ export default class DragImageAutoArrangePlugin
     log.info("Plugin loaded successfully");
 
     // ── 图片右键菜单能力 ────────────────────────────────────────────
-    // 载入图片菜单设置（住在 DIA 数据对象的 imageMenu 键下，首次载入会把旧键
+    // 载入图片菜单设置（住在 DIAA 数据对象的 imageMenu 键下，首次载入会把旧键
     // 迁移过来），并把门面交给右键菜单与设置页使用。
     const imageMenu = await createImageMenuFacade(this);
     this.imageMenu = imageMenu;

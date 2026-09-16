@@ -125,19 +125,19 @@ describe('cutImageKeptNotice', () => {
 });
 
 describe('cutMenuItemEnabled', () => {
-  it('allows cut for a DIA-managed image in Live Preview', () => {
+  it('allows cut for a DIAA-managed image in Live Preview', () => {
     expect(cutMenuItemEnabled(true, false)).toBe(true);
   });
 
-  it('forbids cut in Reading Mode even for a DIA-managed image', () => {
+  it('forbids cut in Reading Mode even for a DIAA-managed image', () => {
     expect(cutMenuItemEnabled(true, true)).toBe(false);
   });
 
-  it('forbids cut for a non-DIA image in Live Preview', () => {
+  it('forbids cut for a non-DIAA image in Live Preview', () => {
     expect(cutMenuItemEnabled(false, false)).toBe(false);
   });
 
-  it('forbids cut for a non-DIA image in Reading Mode', () => {
+  it('forbids cut for a non-DIAA image in Reading Mode', () => {
     expect(cutMenuItemEnabled(false, true)).toBe(false);
   });
 });

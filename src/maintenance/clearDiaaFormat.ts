@@ -1,17 +1,17 @@
-// ── Vault-wide "clear DIA format" policy ────────────────────────────────
-// Restores every image reference DIA wrote to Obsidian's own form, so an
-// uninstalled DIA leaves nothing behind.  This is the escape hatch the "slots
+// ── Vault-wide "clear DIAA format" policy ────────────────────────────────
+// Restores every image reference DIAA wrote to Obsidian's own form, so an
+// uninstalled DIAA leaves nothing behind.  This is the escape hatch the "slots
 // are always filled" write policy needs — with every writable slot persisted, a
 // multi-row member's last numeric would be read as a pixel width by Obsidian's
-// own renderer once DIA is gone.
+// own renderer once DIAA is gone.
 //
-// Two shapes of reference, because DIA writes to them differently:
+// Two shapes of reference, because DIAA writes to them differently:
 //
-//  - A row: an image alone on its line.  DIA hosts it, so the whole param run is
-//    DIA's (orientation / alignment / share / fill / the single `|S|W` tail) and
+//  - A row: an image alone on its line.  DIAA hosts it, so the whole param run is
+//    DIAA's (orientation / alignment / share / fill / the single `|S|W` tail) and
 //    all of it goes back to `![[file]]`.
 //  - An inline reference: an image embedded in prose, a list item or a quote.
-//    DIA never hosts these, and the one path that could reach them is the
+//    DIAA never hosts these, and the one path that could reach them is the
 //    reading-mode alignment flush (see rmAlignStore.flushPendingAlignments),
 //    which drops a bare alignment word after the first `|` of any line naming
 //    the file.  So only the leading word params go; Obsidian's own numeric
@@ -29,7 +29,7 @@ import type { LinePlan } from "./vaultPass";
 const NUMERIC = /^\d+$/;
 
 /**
- * A param run is DIA-managed when it opens with an orientation word, or carries
+ * A param run is DIAA-managed when it opens with an orientation word, or carries
  * two or more numerics.  Everything else is left alone, because the clear is
  * irreversible and losing a hand-written value is worse than skipping a legacy
  * row:
@@ -42,8 +42,8 @@ const NUMERIC = /^\d+$/;
  *  - `|0|350`                         the `|S|W` tail — native never writes it
  *  - `|orig|center|100|67`            orientation word and two numerics
  *
- * `|left|120` (a DIA row whose fill code was omitted) is intentionally kept for
- * the same reason as a lone numeric; once DIA has rendered that row under the
+ * `|left|120` (a DIAA row whose fill code was omitted) is intentionally kept for
+ * the same reason as a lone numeric; once DIAA has rendered that row under the
  * always-filled policy it gains the missing slots and becomes clearable.
  */
 function isManagedParams(parts: string[]): boolean {
@@ -60,7 +60,7 @@ export function isManagedLine(raw: string): boolean {
 }
 
 /** Drop the leading word params, keeping every numeric one.  Used for a
- *  reference DIA never hosted: its alignment word is DIA's, its numbers are
+ *  reference DIAA never hosted: its alignment word is DIAA's, its numbers are
  *  Obsidian's (`文字 ![[a.png|center|400]] 文字` → `文字 ![[a.png|400]] 文字`). */
 function stripLeadingWords(params: string): string {
   const parts = params.split("|");
@@ -70,7 +70,7 @@ function stripLeadingWords(params: string): string {
 }
 
 /** Rewrite the references embedded in a line that isn't an image row, or null
- *  when none of them carries anything DIA wrote. */
+ *  when none of them carries anything DIAA wrote. */
 function clearInline(line: string, embedRe: RegExp): string | null {
   const pieces: string[] = [];
   let cursor = 0;
@@ -88,7 +88,7 @@ function clearInline(line: string, embedRe: RegExp): string | null {
   return pieces.join("");
 }
 
-/** Strip what DIA wrote off every image reference in the file. */
+/** Strip what DIAA wrote off every image reference in the file. */
 export const clearPlan: LinePlan = (lines, extensions) => {
   const rowRe = buildImageLineRe(extensions);
   const embedRe = buildImageEmbedRe(extensions);

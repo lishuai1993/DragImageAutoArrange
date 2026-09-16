@@ -5,7 +5,7 @@
  * image's own clipboard actions, its own operations (align / rotate / flip /
  * reset width), then the file-operation block. A row is greyed when the
  * capability it needs is missing — never hidden — so the menu keeps the same
- * shape and the same row positions whether the image is DIA-managed, rendered
+ * shape and the same row positions whether the image is DIAA-managed, rendered
  * by Obsidian itself, or remote.
  *
  * The menu is a DOM menu (`DomMenu`) rather than Obsidian's `Menu`, because the
@@ -69,7 +69,7 @@ interface ImageCapabilities {
     /** Note the image was clicked in; null when it could not be resolved. */
     noteFile: TFile | null;
     editor: Editor | null;
-    /** The renderer attached DIA's alignment channel to this image. */
+    /** The renderer attached DIAA's alignment channel to this image. */
     managed: boolean;
     /** src is an external http(s) URL. */
     remote: boolean;
@@ -83,7 +83,7 @@ interface ImageCapabilities {
 // Guards against two async menu builds racing each other (rapid right-clicks).
 let buildSeq = 0;
 
-/** Current per-image alignment + the DIA callback that persists it. */
+/** Current per-image alignment + the DIAA callback that persists it. */
 function diaaAlignment(img: HTMLImageElement): {
     alignment: AlignValue | undefined;
     onAlign?: (a: AlignValue | undefined) => void;
@@ -100,7 +100,7 @@ function diaIsManualSingle(img: HTMLImageElement): boolean {
 }
 
 /** What the size setting resolves to, or null when the renderer attached no
- *  such marker (an image DIA never laid out). */
+ *  such marker (an image DIAA never laid out). */
 function diaResetTarget(img: HTMLImageElement): SingleResetTarget | null {
     const fn = img.__diaa_resetTarget;
     return typeof fn === 'function' ? fn() : null;
@@ -129,7 +129,7 @@ function addSeparatorIfNeeded(menu: DomMenu): void {
 /**
  * "Align image ▸" hover submenu. Writes go through the callback the renderer
  * (Live Preview CM dispatch / Reading Mode rmAlignStore buffer) attached to the
- * image, so DIA's own persist path is untouched. An image with no such callback
+ * image, so DIAA's own persist path is untouched. An image with no such callback
  * renders the row greyed, keeping its position in the stack.
  */
 function addAlignSubmenu(menu: DomMenu, img: HTMLImageElement): void {
@@ -339,7 +339,7 @@ function embedTargets(file: TFile): string[] {
 }
 
 /**
- * Resolve the line to write to.  A DIA-managed image carries its row anchor, so
+ * Resolve the line to write to.  A DIAA-managed image carries its row anchor, so
  * the line is exact.  An image on a text-bearing line carries none — there the
  * line is found by content, and only when exactly one line holds exactly one
  * embed of this file; anything ambiguous is refused rather than guessed at.
@@ -501,7 +501,7 @@ export async function openUnifiedImageMenu(
     addSeparatorIfNeeded(menu);
     addAlignSubmenu(menu, img);
     // A rotation is a note edit, so the row needs a writable line: the image's
-    // own DIA anchor, or — for an image on a text-bearing line — the one
+    // own DIAA anchor, or — for an image on a text-bearing line — the one
     // unambiguous embed line the upgrade path can rewrite into a row.
     const transformTarget = readingMode ? null : resolveTransformTarget(img, imgFile, cap.editor);
     addTransformGroup(menu, transformTarget, readingMode);

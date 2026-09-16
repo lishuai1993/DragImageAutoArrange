@@ -1,6 +1,6 @@
 /* Drag Image Auto Arrange — Flex Row Layout */
 
-.drag-img-row {
+.diaa-row {
   display: flex;
   align-items: flex-start;
   width: 100%;
@@ -12,7 +12,7 @@
 }
 
 /* Individual image item within a row */
-.drag-img-item {
+.diaa-item {
   flex: 1 1 0;
   position: relative;
   overflow: hidden;
@@ -22,22 +22,22 @@
   cursor: grab;
 }
 
-.drag-img-item:hover {
+.diaa-item:hover {
   outline: 2px solid rgba(74, 158, 255, 0.15);
   outline-offset: -2px;
 }
 
-.drag-img-item:active {
+.diaa-item:active {
   cursor: grabbing;
 }
 
-.drag-img-item.drag-img-dragging {
+.diaa-item.diaa-dragging {
   opacity: 0.4;
   cursor: grabbing;
 }
 
 /* The actual <img> element */
-.drag-img-img {
+.diaa-img {
   display: block;
   width: 100%;
   height: 100%;
@@ -48,7 +48,7 @@
 }
 
 /* Placeholder for broken/missing images */
-.drag-img-placeholder {
+.diaa-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -62,7 +62,7 @@
 }
 
 /* Draggable divider between images */
-.drag-img-divider {
+.diaa-divider {
   flex: 0 0 auto;
   width: 4px;
   align-self: stretch;
@@ -73,21 +73,21 @@
   border-radius: 2px;
 }
 
-.drag-img-divider:hover {
+.diaa-divider:hover {
   background-color: #4a9eff;
 }
 
-.drag-img-divider-active {
+.diaa-divider-active {
   background-color: #4a9eff !important;
 }
 
-.drag-img-divider-snap {
+.diaa-divider-snap {
   background-color: #f59e0b !important;
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
 }
 
 /* Top hover bar — visual indicator only, never blocks pointer events */
-.drag-img-top-bar {
+.diaa-top-bar {
   position: absolute;
   top: 0;
   left: 0;
@@ -101,12 +101,12 @@
 }
 
 /* Snap highlight on image items */
-.drag-img-item.drag-img-snap {
+.diaa-item.diaa-snap {
   box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.7);
 }
 
 /* Resize handles on image content — square, more prominent */
-.drag-img-resize-handle {
+.diaa-resize-handle {
   position: absolute;
   width: 10px;
   height: 10px;
@@ -121,26 +121,26 @@
 }
 
 /* Show handles on item hover and keep them visible during resize drag */
-.drag-img-item:hover .drag-img-resize-handle,
-.drag-img-item.drag-img-resizing .drag-img-resize-handle {
+.diaa-item:hover .diaa-resize-handle,
+.diaa-item.diaa-resizing .diaa-resize-handle {
   opacity: 1;
   pointer-events: auto;
 }
 
 /* Drop indicator during drag reorder */
-.drag-img-item.drag-img-drop-before {
+.diaa-item.diaa-drop-before {
   border-left: 3px solid #4a9eff;
 }
 
-.drag-img-item.drag-img-drop-after {
+.diaa-item.diaa-drop-after {
   border-right: 3px solid #4a9eff;
 }
 
 /* === Reading Mode specific === */
 
 /* When images are in a flex row, remove default Obsidian margins */
-.markdown-preview-view .drag-img-row p,
-.markdown-reading-view .drag-img-row p {
+.markdown-preview-view .diaa-row p,
+.markdown-reading-view .diaa-row p {
   margin: 0;
   padding: 0;
 }
@@ -149,8 +149,8 @@
    properties, so they carry !important and are declared here instead of being
    written inline by rmFlexRow. justify-content / flex / object-position stay
    inline because their values are computed per row. */
-.markdown-preview-view .drag-img-row .internal-embed,
-.markdown-reading-view .drag-img-row .internal-embed {
+.markdown-preview-view .diaa-row .internal-embed,
+.markdown-reading-view .diaa-row .internal-embed {
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
@@ -162,8 +162,8 @@
 
 /* Ensure images in the row fill their containers. Reading-Mode scoped: the
    Live Preview widget sets its own image sizes inline. */
-.markdown-preview-view .drag-img-row img,
-.markdown-reading-view .drag-img-row img {
+.markdown-preview-view .diaa-row img,
+.markdown-reading-view .diaa-row img {
   width: 100% !important;
   height: 100% !important;
   object-fit: contain !important;
@@ -174,26 +174,26 @@
 /* Size-by-height rows (explicit flex-grow or scale): the image keeps its
    natural aspect ratio instead of filling the item width. Specificity must
    exceed the fill-the-container rule above. */
-.markdown-preview-view .drag-img-row img.drag-img-img-auto,
-.markdown-reading-view .drag-img-row img.drag-img-img-auto {
+.markdown-preview-view .diaa-row img.diaa-img-auto,
+.markdown-reading-view .diaa-row img.diaa-img-auto {
   width: auto !important;
 }
 
 /* Image extracted out of a mixed text+image block: shrink-wrap it so the
    text-align set on its block can position it. */
-.drag-img-row-inline {
+.diaa-row-inline {
   display: inline-block !important;
 }
 
 /* Single image Zoomed past the container width: pin the crop to the centre.
    Applied by resizeHandleController in zoom mode only. */
-.drag-img-zoom-pos {
+.diaa-zoom-pos {
   object-position: center !important;
 }
 
 /* Obsidian's intermediate wrappers (e.g. .image-resize-container) between an
    img and its boundary are neutralized so the img is a direct flex child. */
-.drag-img-row .drag-img-contents {
+.diaa-row .diaa-contents {
   display: contents !important;
 }
 
@@ -210,8 +210,8 @@
   box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
 }
 
-.markdown-reading-view .diaa-draggable.drag-img-dragging,
-.markdown-preview-view .diaa-draggable.drag-img-dragging {
+.markdown-reading-view .diaa-draggable.diaa-dragging,
+.markdown-preview-view .diaa-draggable.diaa-dragging {
   opacity: 0.4;
   cursor: grabbing;
 }
@@ -254,12 +254,12 @@
 /* === Live Preview specific === */
 
 /* Make our custom widgets sit well within CodeMirror lines */
-.cm-content .drag-img-row {
+.cm-content .diaa-row {
   margin: 2px 0;
 }
 
 /* Ensure the CodeMirror embed block styles don't interfere */
-.cm-embed-block .drag-img-row {
+.cm-embed-block .diaa-row {
   pointer-events: auto;
 }
 
@@ -268,32 +268,32 @@
    and adds .image-resize-handle children. Neutralize the container
    so it doesn't interfere with our flex layout, and hide the handles
    since our plugin provides its own. */
-.drag-img-row .image-resize-container {
+.diaa-row .image-resize-container {
   display: contents !important;
 }
 
-.drag-img-row .image-resize-handle {
+.diaa-row .image-resize-handle {
   display: none !important;
 }
 
 /* === Mobile responsiveness === */
 
 @media (max-width: 768px) {
-  .drag-img-row {
+  .diaa-row {
     flex-wrap: wrap;
     height: auto !important;
   }
 
-  .drag-img-item {
+  .diaa-item {
     flex: 1 1 45% !important;
     min-width: 120px;
   }
 
-  .drag-img-divider {
+  .diaa-divider {
     display: none;
   }
 
-  .drag-img-resize-handle {
+  .diaa-resize-handle {
     display: none !important;
   }
 }
@@ -306,7 +306,7 @@
 /* Settings tab: every clickable button shares one treatment. The accent fill
    and its hover/disabled states come from Obsidian's CTA style (applied by
    settingsButton.ts); these rules add the transition and the pressed flash. */
-.drag-img-setting-btn {
+.diaa-setting-btn {
   transition: transform 0.1s ease, background-color 0.1s ease, color 0.1s ease;
 }
 
@@ -322,19 +322,19 @@
    CTA from the accent, hence the fallbacks. The hover colour is mirrored for
    the same reason; the keyboard focus ring (`button:focus-visible`) is left
    alone by the `:not()`. */
-.drag-img-settings .drag-img-setting-btn:not(:focus-visible) {
+.diaa-settings .diaa-setting-btn:not(:focus-visible) {
   border: none !important;
   box-shadow: inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent)),
     var(--input-shadow) !important;
 }
 
-.drag-img-settings .drag-img-setting-btn:not(:focus-visible):hover,
-.drag-img-settings .drag-img-setting-btn:not(:focus-visible).mobile-tap {
+.diaa-settings .diaa-setting-btn:not(:focus-visible):hover,
+.diaa-settings .diaa-setting-btn:not(:focus-visible).mobile-tap {
   box-shadow: inset 0 0 0 1px var(--color-btn-primary-hover-bg, var(--interactive-accent-hover)),
     var(--input-shadow-hover) !important;
 }
 
-.drag-img-setting-btn.drag-img-btn-pressed {
+.diaa-setting-btn.diaa-btn-pressed {
   background: var(--color-green) !important;
   color: #fff !important;
   transform: scale(0.96);
@@ -346,11 +346,11 @@
    (settings.ts) re-parents each .setting-item-description onto the setting-item
    root; flex-wrap + flex-basis:100% lay it out as its own full-width line,
    flush against the card edges. */
-.drag-img-settings .setting-item {
+.diaa-settings .setting-item {
   flex-wrap: wrap;
 }
 
-.drag-img-settings .setting-item-description {
+.diaa-settings .setting-item-description {
   flex-basis: 100%;
   max-width: 100%;
   flex-shrink: 0;
@@ -358,13 +358,13 @@
 }
 
 /* Settings tab: two-level grouping grid. Headings sit flush-left; every group's
-   cards share one fixed indent (.drag-img-settings-group), so no card row is ever
+   cards share one fixed indent (.diaa-settings-group), so no card row is ever
    misaligned against another group's — regardless of which group it belongs to. */
-.drag-img-settings h3 {
+.diaa-settings h3 {
   margin: 1.2em 0 0.2em;
 }
 
-.drag-img-settings .drag-img-settings-group {
+.diaa-settings .diaa-settings-group {
   padding-left: 16px;
 }
 
@@ -375,7 +375,7 @@
    there too); the middle pair marks where the thumb's centre actually stops —
    inset by half a thumb at each end, hence 1/3 and 2/3 of the *travel*, not of
    the track. settings.ts measures the thumb and overwrites --diaa-log-thumb-r. */
-.drag-img-settings .drag-img-log-control {
+.diaa-settings .diaa-log-control {
   --diaa-log-gap: 8px;
   /* Half the native thumb's width (border included). Only covers a tab painted
      before settings.ts has taken its measurement. */
@@ -391,12 +391,12 @@
   flex-shrink: 1;
 }
 
-.drag-img-settings .drag-img-log-control .slider {
+.diaa-settings .diaa-log-control .slider {
   width: 100%;
   margin: 0;
 }
 
-.drag-img-settings .drag-img-log-ticks {
+.diaa-settings .diaa-log-ticks {
   position: relative;
   height: 16px;
   margin-top: var(--diaa-log-gap);
@@ -404,7 +404,7 @@
 
 /* The outer two labels are edge-aligned with the track so neither can overhang
    its end; the inner two centre on the stops the thumb actually lands on. */
-.drag-img-settings .drag-img-log-tick {
+.diaa-settings .diaa-log-tick {
   position: absolute;
   top: 0;
   white-space: nowrap;
@@ -413,26 +413,26 @@
   color: var(--text-faint);
 }
 
-.drag-img-settings .drag-img-log-tick:nth-child(1) {
+.diaa-settings .diaa-log-tick:nth-child(1) {
   left: 0;
 }
 
 /* Middle pair: 1/3 and 2/3 of the thumb's travel (track minus one thumb width). */
-.drag-img-settings .drag-img-log-tick:nth-child(2) {
+.diaa-settings .diaa-log-tick:nth-child(2) {
   left: calc(
     var(--diaa-log-thumb-r) + (100% - 2 * var(--diaa-log-thumb-r)) / 3
   );
   transform: translateX(-50%);
 }
 
-.drag-img-settings .drag-img-log-tick:nth-child(3) {
+.diaa-settings .diaa-log-tick:nth-child(3) {
   left: calc(
     var(--diaa-log-thumb-r) + 2 * (100% - 2 * var(--diaa-log-thumb-r)) / 3
   );
   transform: translateX(-50%);
 }
 
-.drag-img-settings .drag-img-log-tick:nth-child(4) {
+.diaa-settings .diaa-log-tick:nth-child(4) {
   left: 100%;
   transform: translateX(-100%);
 }
@@ -442,7 +442,7 @@
    the outer two are inset so their outer edge sits exactly on a track end.
    --diaa-log-lift is the measured distance from the ticks row up to the track
    centre (set in settings.ts); the fallback covers a tab rendered while hidden. */
-.drag-img-settings .drag-img-log-nodes {
+.diaa-settings .diaa-log-nodes {
   position: absolute;
   left: 0;
   right: 0;
@@ -451,7 +451,7 @@
   pointer-events: none;
 }
 
-.drag-img-settings .drag-img-log-node {
+.diaa-settings .diaa-log-node {
   position: absolute;
   top: 0;
   transform: translate(-50%, -50%);
@@ -463,36 +463,36 @@
 
 /* Dots left of the thumb take the filled-track colour; those right of it stay
    track-grey. */
-.drag-img-settings .drag-img-log-node.is-on {
+.diaa-settings .diaa-log-node.is-on {
   background: var(--interactive-accent, var(--text-accent));
 }
 
 /* The thumb already sits on its own stop — drop that dot. */
-.drag-img-settings .drag-img-log-node.is-hidden {
+.diaa-settings .diaa-log-node.is-hidden {
   opacity: 0;
 }
 
-.drag-img-settings .drag-img-log-node:nth-child(1) {
+.diaa-settings .diaa-log-node:nth-child(1) {
   left: var(--diaa-log-node-r);
 }
 
-.drag-img-settings .drag-img-log-node:nth-child(2) {
+.diaa-settings .diaa-log-node:nth-child(2) {
   left: calc(
     var(--diaa-log-thumb-r) + (100% - 2 * var(--diaa-log-thumb-r)) / 3
   );
 }
 
-.drag-img-settings .drag-img-log-node:nth-child(3) {
+.diaa-settings .diaa-log-node:nth-child(3) {
   left: calc(
     var(--diaa-log-thumb-r) + 2 * (100% - 2 * var(--diaa-log-thumb-r)) / 3
   );
 }
 
-.drag-img-settings .drag-img-log-node:nth-child(4) {
+.diaa-settings .diaa-log-node:nth-child(4) {
   left: calc(100% - var(--diaa-log-node-r));
 }
 
-.drag-img-settings .drag-img-log-tick.is-active {
+.diaa-settings .diaa-log-tick.is-active {
   color: var(--text-accent);
   font-weight: 600;
 }
@@ -598,14 +598,14 @@
    accent fill = share already processed, so a long vault-wide pass reads as
    motion even between repaints. The fill turns solid accent once the pass
    finishes, which is what the final state is read as. */
-.drag-img-settings .drag-img-vault-progress {
+.diaa-settings .diaa-vault-progress {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 4px 0 0;
 }
 
-.drag-img-settings .drag-img-vault-track {
+.diaa-settings .diaa-vault-track {
   flex: 1 1 auto;
   height: 6px;
   border-radius: 3px;
@@ -613,7 +613,7 @@
   overflow: hidden;
 }
 
-.drag-img-settings .drag-img-vault-bar {
+.diaa-settings .diaa-vault-bar {
   width: 0;
   height: 100%;
   border-radius: 3px;
@@ -621,18 +621,18 @@
   transition: width 0.12s linear;
 }
 
-.drag-img-settings .drag-img-vault-bar.is-done {
+.diaa-settings .diaa-vault-bar.is-done {
   background: var(--interactive-accent);
 }
 
-.drag-img-settings .drag-img-vault-label {
+.diaa-settings .diaa-vault-label {
   flex: 0 1 auto;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
 /* Confirmation dialog for the same action. */
-.modal .drag-img-vault-confirm pre {
+.modal .diaa-vault-confirm pre {
   margin: 0.4em 0 0.9em;
   padding: 6px 10px;
   border-radius: 6px;
@@ -640,7 +640,7 @@
   white-space: pre-wrap;
 }
 
-.modal .drag-img-vault-confirm pre code {
+.modal .diaa-vault-confirm pre code {
   display: block;
   background: none;
   padding: 0;

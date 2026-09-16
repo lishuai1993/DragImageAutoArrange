@@ -14,6 +14,7 @@ Automatically arrange consecutive image embeds into side-by-side rows — like F
 - **Rotate / flip** — rotate by 90° / 180° and flip horizontally or vertically. The orientation is stored as a parameter on the note line (a readable word such as `r90` / `fv`), so the image file itself is never re-encoded and each change is a single undoable edit. Reset returns the image to its original orientation.
 - **Right-click menu** — one unified menu for alignment, rotation, resizing, copy, cut, and file operations. Copy and cut put the bitmap on the clipboard together with the image's in-vault reference: pasting inside this vault lands as a `![[…]]` link instead of minting a duplicate attachment, while pasting into another vault or app yields the image itself — PNG and JPEG files go over byte-for-byte, lossy formats are re-encoded as JPEG. Cut additionally removes that one reference, and deletes the local file only when nothing else in the vault points at it.
 - **Reading Mode support** — rows render in Reading Mode too, including each image's rotate/flip orientation; editing operations are greyed out.
+- **Vault-wide maintenance** — two passes in the settings tab: clear everything the plugin wrote out of every note, or normalise every line it can host into the standard parameter form. Both scan the vault and show you the exact scope before writing.
 
 ## Installation
 
@@ -46,6 +47,15 @@ Layout parameters are stored on the embed line itself, so the arrangement surviv
 - **Image extensions** — which file extensions count as images.
 - **Enable drag reorder / resize / dividers** — toggle individual interactions.
 - **Log level and file logging** — diagnostics for troubleshooting; the release build is silent by default.
+
+## Maintenance
+
+The foot of the plugin's settings tab holds two vault-wide passes. Both scan first and show the exact scope — how many notes were read, how many lines matched, how many files are involved — and only write after you confirm. Notes currently open are written through an editor transaction (a single `cmd+z` undoes the whole note); the rest go through `vault.process`. Files that fail are counted and named in `log.txt`.
+
+- **Clear DIAA format (this vault)** — puts every image reference the plugin wrote back into Obsidian's own form, so uninstalling leaves nothing behind. An image alone on its line loses its whole parameter run; a reference inside prose, a list or a quote only loses the orientation / alignment words the plugin added, keeping Obsidian's own `|width` and `|widthxheight`. Run this before uninstalling; after clearing, disable the plugin immediately.
+- **Normalise to the standard form (this vault)** — writes the two word slots (orientation, alignment) into every line the plugin can host, so a later rotate is a word-for-word replacement instead of the first write that grows the line's parameter run. Numeric slots are left untouched: a row's share follows from every member's natural pixel size and its fill ratio from the measured layout, neither of which exists before the row first renders, and a number invented here would be pinned as an explicit parameter. A hand-written `|400` / `|400x300` on a single-image row is kept as a manual width (`|1|400`).
+
+Both passes are irreversible on notes already saved to disk. While the plugin is enabled, opening or editing a note writes its parameters back on the first frame — so to uninstall, close the open notes first, run **Clear DIAA format**, then disable the plugin immediately.
 
 ## Development
 
@@ -80,6 +90,7 @@ MIT — see [LICENSE](LICENSE).
 - **旋转 / 翻转**：支持 90° / 180° 旋转与水平、垂直翻转。朝向以行参数的形式写回笔记（可读词，如 `r90` / `fv`），原图文件自始至终不被重编码，每次操作都是一步可撤销的编辑；重置后回到原始朝向。
 - **右键菜单**：对齐、旋转、缩放、复制、剪切与文件操作收敛在同一个菜单中。复制与剪切会把位图写入剪贴板，并一并带上该图在库内的引用：在本库粘贴落成 `![[…]]` 链接，而不是另存出一份重复附件；粘到其它仓库或 App 则落成图像本身 —— png / jpg 原样写入，webp、avif 等有损格式转码为 JPEG。剪切还会移除该处引用，并且仅当全库再无其他引用时才删除本地文件。
 - **阅读模式支持**：多图行在阅读模式下同样渲染，旋转 / 翻转朝向一并呈现，编辑类操作置灰。
+- **全库格式维护**：设置页提供两个全库动作 —— 把插件写入的参数从全部笔记中清除，或把所有可托管的图片行归一化为标准参数格式。两者都先扫描、把改动范围显示给你，确认之后才写入。
 
 ## 安装
 
@@ -112,6 +123,15 @@ MIT — see [LICENSE](LICENSE).
 - **图片扩展名**：哪些扩展名的文件被识别为图片。
 - **启用拖拽排序 / 缩放 / 分隔条**：逐项开关各类交互。
 - **日志级别与文件日志**：排障用的诊断开关；发布版默认静默。
+
+## 维护
+
+插件设置页底部有两个全库动作。两者都是先扫描、把改动范围显示给你（读过多少笔记、命中多少行、涉及多少文件），确认之后才写入。正在编辑器里打开的笔记走编辑器事务（该笔记一次 `cmd+z` 可整体撤销），其余文件走 `vault.process`；写失败的文件会计数并在 `log.txt` 中留痕。
+
+- **清除 DIAA 格式（本库）**：把插件写入的图片参数还原为 Obsidian 原生形式，卸载插件后不在笔记里留痕。独处一行的图片清掉整个参数段；正文、列表、引用块里的图片只清插件加上的朝向 / 对齐词，Obsidian 原生的 `|宽度`、`|宽x高` 保留。卸载前先执行本动作，清除完成后立即停用插件。
+- **归一化为标准格式（本库）**：为所有可托管的图片行补上两个词槽（朝向、对齐），此后旋转都是等长替换，而不是首次撑开参数段的那一次写入。数值槽一律不动 —— 份额取决于各成员的自然像素尺寸、填充比取决于实测布局，两者在行首次渲染前都不存在，在这里硬写一个数会被固定为显式参数。单图行手写的 `|400` / `|400x300` 会保留为手动宽度（`|1|400`）。
+
+两个动作对已保存到磁盘的笔记都不可撤销。插件启用期间，笔记只要被打开或编辑，参数就会在第一帧被重新写回 —— 若要卸载，请先关闭所有打开的笔记，执行「清除 DIAA 格式」，然后立即停用插件。
 
 ## 开发
 

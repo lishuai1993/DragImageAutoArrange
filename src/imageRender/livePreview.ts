@@ -200,7 +200,7 @@ function convertOrphanedMultiSinglesToBare(
 /**
  * Measure the current rendered pixel width of every item in a rendered flex row.
  * Locates the row container by its `data-line-start` attribute and reads each
- * `.drag-img-item` child in document (index) order.  Returns null if the row
+ * `.diaa-item` child in document (index) order.  Returns null if the row
  * isn't currently rendered.
  */
 function measureItemWidths(view: EditorView, rowLineStart: number): number[] | null {
@@ -1279,7 +1279,7 @@ export function createStandaloneDropPlugin(
         if (!targetEl || !this.view.dom.contains(targetEl)) return null;
 
         // Detect flex row widgets (our custom DOM, spans multiple lines)
-        const flexRow = targetEl.closest<HTMLElement>(".drag-img-row");
+        const flexRow = targetEl.closest<HTMLElement>(".diaa-row");
         if (flexRow) {
           const ls = parseInt(flexRow.dataset.lineStart || "", 10);
           const le = parseInt(flexRow.dataset.lineEnd || "", 10);
@@ -1370,7 +1370,7 @@ export function createStandaloneDropPlugin(
           const embed = target?.closest?.<HTMLElement>(".internal-embed.image-embed");
           if (!embed) {
             // Check if this is a flex row item drag (should not be intercepted here)
-            const flexItem = target?.closest?.<HTMLElement>(".drag-img-item");
+            const flexItem = target?.closest?.<HTMLElement>(".diaa-item");
             log.info("SD dragstart: not an obsidian embed", {
               targetTag: target?.tagName,
               targetClass: target?.className?.substring?.(0, 60) || "",
@@ -1417,7 +1417,7 @@ export function createStandaloneDropPlugin(
           // For diaa-row: skip if target is inside a flex row (widget handles it)
           if (hasDiaaRow) {
             const targetEl = e.target as HTMLElement;
-            if (targetEl?.closest?.(".drag-img-row")) {
+            if (targetEl?.closest?.(".diaa-row")) {
               this.clearDropIndicator();
               return;
             }
@@ -1458,7 +1458,7 @@ export function createStandaloneDropPlugin(
 
             // Skip if target is inside a flex row (widget handles inter-row merge)
             const targetEl = e.target as HTMLElement;
-            if (targetEl?.closest?.(".drag-img-row")) return;
+            if (targetEl?.closest?.(".diaa-row")) return;
 
             const srcLineStart = parseInt(rowMatch[1], 10);
             const srcIndex = parseInt(rowMatch[2], 10);
@@ -1497,7 +1497,7 @@ export function createStandaloneDropPlugin(
           if (!e.dataTransfer?.types.includes("application/diaa-source")) return;
 
           // Skip if target is inside a flex row (widget handles merge)
-          if ((e.target as HTMLElement)?.closest?.(".drag-img-row")) return;
+          if ((e.target as HTMLElement)?.closest?.(".diaa-row")) return;
 
           const srcLine = parseInt(e.dataTransfer.getData("application/diaa-source"), 10);
           if (isNaN(srcLine)) {
