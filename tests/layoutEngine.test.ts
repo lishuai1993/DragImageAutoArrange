@@ -14,6 +14,8 @@ import {
   computeScaleBasedHeights,
   computeFlexGrowsFromWidths,
   computeSingleImageWidth,
+  computePairHeights,
+  computePairEquilibrium,
 } from '../src/imageLayout/layoutEngine';
 import { ImageMeta } from '../src/imageParse/imageDetector';
 
@@ -737,5 +739,99 @@ describe('findInsertIndex', () => {
     // Middle → fallback (400 < 400 → 0, 450 > 400 → 1)
     expect(findInsertIndex(300, 0, [800], 4, 60)).toBe(0);
     expect(findInsertIndex(500, 0, [800], 4, 60)).toBe(1);
+  });
+});
+
+// ── Pair heights and the divider equilibrium (the render model) ──
+// The two-image row of the 图片并排测试文档 repro, at the width the editor
+// reported for it.  Its members carry different fill ratios (0.64 against
+// 1.00), which is the state the aspect-only model got wrong.
+describe('computePairHeights', () => {
+  const LEFT = m(500, 654); // aspect 0.765
+  const RIGHT = m(800, 1200); // aspect 0.667
+  const WIDTH = 972.890625; // container 972.89, gap 4 → 968.89 available
+  const GAP = 4;
+  const ROW = 200;
+
+  it('reads each member fill into the rendered height', () => {
+    // 0.64 × 519.9 / 0.765 = 435; 1.00 × 448.998 / 0.667 = 673
+    const pair = computePairHeights([1.1, 0.95], [LEFT, RIGHT], [0.64, 1], WIDTH, GAP, ROW, 0);
+    expect(pair).toEqual({ left: 435, right: 673 });
+  });
+
+  it('with both fills at 1 the aspect-equal split is the equal-height one', () => {
+    const pair = computePairHeights([1.095, 0.955], [LEFT, RIGHT], [1, 1], WIDTH, GAP, ROW, 0);
+    expect(pair).toEqual({ left: 677, right: 677 });
+  });
+
+  it('falls back to the uniform row height for members without a fill', () => {
+    const pair = computePairHeights([1.1, 0.95], [LEFT, RIGHT], [null, null], WIDTH, GAP, ROW, 0);
+    expect(pair.left).toBe(pair.right);
+  });
+});
+
+describe('computePairEquilibrium', () => {
+  const LEFT = m(500, 654);
+  const RIGHT = m(800, 1200);
+  const WIDTH = 972.890625;
+  const GAP = 4;
+  const ROW = 200;
+  const pair = { left: LEFT, right: RIGHT };
+
+  it('solves in aspect/fill, not in aspect', () => {
+    // aspect/fill: 1.1946 and 0.6667 → left = 2.05 × 1.1946 / 1.8612 = 1.3157
+    const eq = computePairEquilibrium([1.1, 0.95], [LEFT, RIGHT], [0.64, 1], WIDTH, GAP, ROW, 0);
+    expect(eq).not.toBeNull();
+    expect(eq!.left).toBeCloseTo(1.3157, 3);
+    expect(eq!.right).toBeCloseTo(0.7343, 3);
+    expect(eq!.left + eq!.right).toBeCloseTo(2.05, 5);
+  });
+
+  it('the split it returns really is the equal-height one', () => {
+    const eq = computePairEquilibrium([1.1, 0.95], [LEFT, RIGHT], [0.64, 1], WIDTH, GAP, ROW, 0)!;
+    const at = computePairHeights(
+      [eq.left, eq.right],
+      [pair.left, pair.right],
+      [0.64, 1],
+      WIDTH,
+      GAP,
+      ROW,
+      0
+    );
+    // Solved on the unrounded heights, so the one split is taken: both members
+    // round off it to the same pixel rather than to a pair a pixel apart.
+    expect(at.left).toBe(at.right);
+    // 0.64 × 621.85 / 0.765 = 520.56 — one pixel down from here on both sides.
+    expect(eq.height).toBeCloseTo(520.562, 3);
+    expect(at.left).toBe(521);
+  });
+
+  it('the aspect-only split is not equal for this pair', () => {
+    // The old model's own answer, which an earlier drag had persisted.
+    const at = computePairHeights([1.1, 0.95], [LEFT, RIGHT], [0.64, 1], WIDTH, GAP, ROW, 0);
+    expect(Math.abs(at.left - at.right)).toBe(238);
+  });
+
+  it('returns null when the pair is equal at every split', () => {
+    // No fills at all: both members take the row fallback, so the split cannot
+    // change either height — there is nothing to snap to.
+    expect(
+      computePairEquilibrium([1.1, 0.95], [LEFT, RIGHT], [null, null], WIDTH, GAP, ROW, 0)
+    ).toBeNull();
+  });
+
+  it('returns null when the crossing lies outside the grow range', () => {
+    // left 100:2000 against right 2000:100 — even at its 0.1 floor the left is
+    // the taller of the two, so no allowed split equalises them.
+    const eq = computePairEquilibrium(
+      [1, 1],
+      [m(100, 2000), m(2000, 100)],
+      [1, 1],
+      1000,
+      4,
+      200,
+      0
+    );
+    expect(eq).toBeNull();
   });
 });

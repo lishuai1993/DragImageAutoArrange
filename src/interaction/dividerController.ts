@@ -1,8 +1,13 @@
-import { CLASSES, DIVIDER_WIDTH } from "../constants";
+import { CLASSES } from "../constants";
 import { ImageMeta } from "../imageParse/imageDetector";
 import { logger } from "../logger";
 const log = logger.channel("divider");
 import { clampFlexGrow } from "../imageLayout/parameterValidator";
+import {
+  computePairEquilibrium,
+  computePairHeights,
+  type PairEquilibrium,
+} from "../imageLayout/layoutEngine";
 
 /**
  * Narrow host interface the DividerController needs from ImageRowWidget.
@@ -14,6 +19,15 @@ export interface DividerHost {
   getLoadedMeta(index: number): ImageMeta | undefined;
   getSnapSensitivity(): number;
   getImageCount(): number;
+  /** A member's persisted fill ratio (null = none): the scale the row's
+   *  rendered-height model reads. */
+  getFill(index: number): number | null;
+  /** Live width of the row, as `recalculateRowHeight` measures it. */
+  getRowWidth(): number;
+  /** Space one junction between adjacent items occupies, dividers included —
+   *  the figure the row's layout math divides off.  Not the CSS `gap`. */
+  getInterItemSpace(): number;
+  getDefaultRowHeight(): number;
   snapDividerToEquilibrium(leftIndex: number): void;
   recalculateRowHeight(): void;
   emitDividerDrag(leftIndex: number, ratio: number): void;
@@ -27,14 +41,66 @@ export interface DividerHost {
 export class DividerController {
   constructor(private host: DividerHost) {}
 
+  /**
+   * The pair's rendered heights at a candidate split, plus the split that
+   * equalises them — both solved on the model the row actually paints from, so
+   * per-image fill ratios and the row-wide grow divisor are accounted for.
+   * Null while any of the row's measurements is missing; the drag then runs
+   * without a snap zone rather than show an indicator it cannot back up.
+   */
+  private evaluatePair(
+    leftIndex: number,
+    candidateLeft: number,
+    candidateRight: number
+  ): { heights: { left: number; right: number }; equilibrium: PairEquilibrium | null } | null {
+    const itemEls = this.host.getItemEls();
+    if (itemEls.length < 2) return null;
+    const containerWidth = this.host.getRowWidth();
+    if (!(containerWidth > 0)) return null;
+
+    const grows: number[] = [];
+    const metas: ImageMeta[] = [];
+    const scales: Array<number | null> = [];
+    for (let i = 0; i < itemEls.length; i++) {
+      const parsed = parseFloat(itemEls[i]?.style.flexGrow || "1");
+      grows[i] = isFinite(parsed) ? parsed : 1;
+      const meta = this.host.getLoadedMeta(i);
+      if (!meta || meta.naturalWidth === 0 || meta.naturalHeight === 0) return null;
+      metas[i] = meta;
+      scales[i] = this.host.getFill(i);
+    }
+    grows[leftIndex] = candidateLeft;
+    grows[leftIndex + 1] = candidateRight;
+
+    const gap = this.host.getInterItemSpace();
+    const defaultRowHeight = this.host.getDefaultRowHeight();
+    return {
+      heights: computePairHeights(
+        grows,
+        metas,
+        scales,
+        containerWidth,
+        gap,
+        defaultRowHeight,
+        leftIndex
+      ),
+      equilibrium: computePairEquilibrium(
+        grows,
+        metas,
+        scales,
+        containerWidth,
+        gap,
+        defaultRowHeight,
+        leftIndex
+      ),
+    };
+  }
+
   build(leftIndex: number): HTMLElement {
+    // Every visual property of the divider lives in the `.diaa-divider` rule;
+    // only the index it acts on has to travel on the element.
     const divider = createDiv();
     divider.className = CLASSES.divider;
-    divider.setCssStyles({ flex: "0 0 auto" });
-    divider.style.width = `${DIVIDER_WIDTH}px`;
-    divider.setCssStyles({ cursor: "col-resize" });
-    divider.setCssStyles({ alignSelf: "stretch" });
-    divider.setCssStyles({ transition: "background-color 0.15s" });
     divider.dataset.leftIndex = String(leftIndex);
 
     // Double-click divider → snap to equal heights
@@ -96,30 +162,23 @@ export class DividerController {
         newLeft = clampFlexGrow(newLeft);
         newRight = clampFlexGrow(newRight);
 
-        // Snap: when adjacent image heights are nearly equal, lock to equilibrium.
-        // Snap zone = equilibriumHeight × snapSensitivity%.
-        // Condition |leftH - rightH| < eqHeight × snapFactor simplifies to
-        //   |newLeft/la - newRight/ra| < total/(la+ra) × snapFactor
+        // Snap: lock to the split at which these two render at the same height.
+        // The heights are read from the row's own model, not from the aspect
+        // ratios: a member's drawn height is `fill × grow / aspect`, so equal
+        // aspects are equal heights only while the two fills agree.  Zero
+        // sensitivity (or a pair nothing can equalise) means no snap zone.
         const snapFactor = this.host.getSnapSensitivity() / 100;
-        if (snapFactor > 0) {
-          const lm = this.host.getLoadedMeta(leftIndex);
-          const rm = this.host.getLoadedMeta(leftIndex + 1);
-          if (lm && rm && lm.naturalWidth > 0 && rm.naturalWidth > 0) {
-            const la = lm.naturalWidth / lm.naturalHeight;
-            const ra = rm.naturalWidth / rm.naturalHeight;
-            const snapLeft = total * la / (la + ra);
-            const snapRight = total - snapLeft;
-            const heightDiff = Math.abs(newLeft / la - newRight / ra);
-            const snapThreshold = total / (la + ra) * snapFactor;
-            if (heightDiff < snapThreshold) {
-              newLeft = snapLeft;
-              newRight = snapRight;
-              divider.classList.add(CLASSES.dividerSnap);
-            } else {
-              divider.classList.remove(CLASSES.dividerSnap);
-            }
+        const pair = this.evaluatePair(leftIndex, newLeft, newRight);
+        let snapped = false;
+        if (pair && pair.equilibrium && snapFactor > 0) {
+          const diff = Math.abs(pair.heights.left - pair.heights.right);
+          if (diff < pair.equilibrium.height * snapFactor) {
+            newLeft = pair.equilibrium.left;
+            newRight = pair.equilibrium.right;
+            snapped = true;
           }
         }
+        divider.classList.toggle(CLASSES.dividerSnap, snapped);
 
         leftItem.style.flexGrow = String(newLeft);
         rightItem.style.flexGrow = String(newRight);

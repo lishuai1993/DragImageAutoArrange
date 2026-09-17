@@ -3,6 +3,12 @@ import { ImageMeta } from "../imageParse/imageDetector";
 import { logger } from "../logger";
 const log = logger.channel("resize");
 
+/** Crop anchor for a zoomed image: centred on both axes, whatever the alignment
+ *  setting says.  It has to be claimed inline with `!important` — the alignment
+ *  pass owns `object-position` on the same element under the same priority, so
+ *  neither a plain declaration nor a stylesheet rule could take it back. */
+const ZOOM_CROP_ANCHOR = "center";
+
 export interface HandleDef {
   el: HTMLElement;
   relX: number; // 0=left, 0.5=center, 1=right (relative to image content rect)
@@ -19,7 +25,9 @@ export interface ResizeHost {
   getContainer(): HTMLElement | null;
   getItemEls(): HTMLElement[];
   getImageEls(): HTMLImageElement[];
-  getGap(): number;
+  /** Space one junction between adjacent items occupies, dividers included —
+   *  the row width left to the items.  Not the CSS `gap`. */
+  getInterItemSpace(): number;
   getLoadedMeta(index: number): ImageMeta | undefined;
   getImageContentRect(index: number): { left: number; top: number; width: number; height: number } | null;
   getObjectPosition(): string;
@@ -107,7 +115,7 @@ export class ResizeHandleController {
         // Snapshot layout state
         const containerRect = this.host.getContainer()!.getBoundingClientRect();
         nItems = this.host.getItemEls().length;
-        AW = containerRect.width - (nItems - 1) * this.host.getGap();
+        AW = containerRect.width - (nItems - 1) * this.host.getInterItemSpace();
 
         // Container height may be auto for single-image rows; fall back to
         // the actual rendered height from getBoundingClientRect.
@@ -216,7 +224,9 @@ export class ResizeHandleController {
               // row never reaches here: its width is already capped to the page,
               // so a taller box can no longer widen the picture.
               this.host.getImageEls()[0].setCssStyles({ objectFit: "cover" });
-              this.host.getImageEls()[0].addClass(CLASSES.zoomPos);
+              this.host
+                .getImageEls()[0]
+                .style.setProperty("object-position", ZOOM_CROP_ANCHOR, "important");
               this.host.getImageEls()[0].style.height = `${newHeight}px`;
               this.host.getItemEls()[0].style.height = `${newHeight}px`;
               this.host.getContainer()!.style.height = `${newHeight}px`;
@@ -228,7 +238,6 @@ export class ResizeHandleController {
               // turned row needs — its box and its drawing differ in size.
               this.host.getImageEls()[0].setCssStyles({ objectFit: "contain" });
               this.host.getImageEls()[0].style.setProperty("object-position", this.host.getObjectPosition(), "important");
-              this.host.getImageEls()[0].removeClass(CLASSES.zoomPos);
               this.host.getImageEls()[0].setCssStyles({ width: "auto" });
               this.host.getImageEls()[0].style.height = `${newHeight}px`;
               this.host.getItemEls()[0].setCssStyles({ flex: "0 0 auto" });

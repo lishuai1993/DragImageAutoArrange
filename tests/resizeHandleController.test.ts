@@ -15,13 +15,17 @@
  * turned row takes zoom mode instead — the item and container grow while the
  * drawing stays put (the observer keeps restoring the box height), which reads
  * as "the container resized and the image did not".
+ *
+ * Each mode is pinned by the `object-position` it writes inline.  That value is
+ * the whole point of the branch: the alignment pass owns the property inline and
+ * with `!important`, so a stylesheet rule cannot re-anchor the crop — the zoom
+ * branch has to claim it inline too, and the normal branch has to hand it back.
  */
 import { describe, it, expect } from 'vitest';
 import {
   ResizeHandleController,
   type ResizeHost,
 } from '../src/interaction/resizeHandleController';
-import { CLASSES } from '../src/constants';
 
 /** The 131×176 portrait the turned-row repro was found with. */
 const NATURAL = { naturalWidth: 131, naturalHeight: 176 };
@@ -69,11 +73,12 @@ function makeRow(turned: boolean): Harness {
     getContainer: () => container,
     getItemEls: () => [item],
     getImageEls: () => [img],
-    getGap: () => 0,
+    getInterItemSpace: () => 0,
     getLoadedMeta: () => NATURAL,
     // The un-rotated box, as the real widget reports it.
     getImageContentRect: () => ({ left: 0, top: 0, width: 131, height: 176 }),
-    getObjectPosition: () => 'center center',
+    // Left alignment is the setting the zoom-centring defect shows up with.
+    getObjectPosition: () => 'left top',
     updateHandlePositions: () => undefined,
     isTurnedImage: () => turned,
     syncItemToDrawing: () => calls.push('syncItemToDrawing'),
@@ -96,6 +101,14 @@ function dragSE(h: Harness, dx: number, dy: number): void {
   document.dispatchEvent(new MouseEvent('mouseup'));
 }
 
+/** Which anchor the crop was left on, as written inline on the img. */
+function cropAnchor(img: HTMLElement): { value: string; priority: string } {
+  return {
+    value: img.style.getPropertyValue('object-position'),
+    priority: img.style.getPropertyPriority('object-position'),
+  };
+}
+
 describe('single-image resize drag', () => {
   it('re-fits a turned row to its drawing rather than zooming', () => {
     const h = makeRow(true);
@@ -105,7 +118,7 @@ describe('single-image resize drag', () => {
     expect(h.img.style.height).toBe('203px');
     expect(h.img.style.objectFit).toBe('contain');
     expect(h.img.style.width).toBe('auto');
-    expect(h.img.classList.contains(CLASSES.zoomPos)).toBe(false);
+    expect(cropAnchor(h.img).value).toBe('left top');
     expect(h.container.style.height).toBe('');
     expect(h.calls).toContain('syncItemToDrawing');
   });
@@ -116,7 +129,7 @@ describe('single-image resize drag', () => {
 
     // The box has passed the fill-width height and must still be contained.
     expect(Number.parseFloat(h.img.style.height)).toBeGreaterThan(FILL_WIDTH_H);
-    expect(h.img.classList.contains(CLASSES.zoomPos)).toBe(false);
+    expect(cropAnchor(h.img).value).toBe('left top');
     expect(h.img.style.objectFit).toBe('contain');
     expect(h.container.style.height).toBe('');
     expect(h.calls).toContain('syncItemToDrawing');
@@ -128,7 +141,7 @@ describe('single-image resize drag', () => {
 
     expect(Number.parseFloat(h.img.style.height)).toBeLessThan(FILL_WIDTH_H);
     expect(h.img.style.objectFit).toBe('contain');
-    expect(h.img.classList.contains(CLASSES.zoomPos)).toBe(false);
+    expect(cropAnchor(h.img).value).toBe('left top');
     expect(h.container.style.height).toBe('');
     expect(h.calls).toContain('syncItemToDrawing');
   });
@@ -140,7 +153,9 @@ describe('single-image resize drag', () => {
 
     expect(Number.parseFloat(h.img.style.height)).toBeGreaterThan(FILL_WIDTH_H);
     expect(h.img.style.objectFit).toBe('cover');
-    expect(h.img.classList.contains(CLASSES.zoomPos)).toBe(true);
+    // Overrides the alignment's own inline anchor, which is why it must carry
+    // the same priority — a plain declaration would lose to it.
+    expect(cropAnchor(h.img)).toEqual({ value: 'center', priority: 'important' });
     expect(h.item.style.height).toBe(h.img.style.height);
     expect(h.container.style.height).toBe(h.img.style.height);
     expect(h.calls).not.toContain('syncItemToDrawing');

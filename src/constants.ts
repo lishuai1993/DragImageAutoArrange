@@ -22,8 +22,6 @@ export const CLASSES = {
   rowInline: `${CSS_PREFIX}-row-inline`,
   /** Obsidian wrapper element neutralized to `display: contents`. */
   contents: `${CSS_PREFIX}-contents`,
-  /** Zoomed single image pinned to `object-position: center`. */
-  zoomPos: `${CSS_PREFIX}-zoom-pos`,
 } as const;
 
 export type Alignment = "left" | "center" | "right";
@@ -58,6 +56,19 @@ export const SINGLE_IMAGE_MIN_WIDTH = 100;
 
 export const DIVIDER_WIDTH = 4;
 export const RESIZE_HANDLE_SIZE = 10;
+
+/**
+ * Space one junction between two adjacent flex items occupies, in px.
+ *
+ * A divider is a real flex child, so a junction carrying one costs the
+ * container's flex gap on *both* sides of it plus the divider's own width.
+ * Layout math must subtract this per junction — not the bare CSS `gap` — or
+ * every item is handed more width than it is painted with, and the row's
+ * computed heights run ahead of the pictures by the difference.
+ */
+export function computeInterItemSpace(gap: number, dividers: boolean): number {
+  return dividers ? 2 * gap + DIVIDER_WIDTH : gap;
+}
 
 export function buildImageLineRe(extensions: string): RegExp {
   const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");

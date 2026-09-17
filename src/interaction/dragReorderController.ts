@@ -16,7 +16,9 @@ export interface DragReorderHost {
   getEdgeLeft(): HTMLElement | null;
   getEdgeRight(): HTMLElement | null;
   getGroupLineStart(): number;
-  getGap(): number;
+  /** Space one junction between adjacent items occupies, dividers included:
+   *  what actually separates two item rects on screen.  Not the CSS `gap`. */
+  getInterItemSpace(): number;
   getGhostImageWidth(): number;
   getDragOpacity(): number;
   emitReorder(fromIndex: number, toIndex: number): void;
@@ -198,7 +200,7 @@ export class DragReorderController {
       if (e.clientY < containerRect.top - 20 || e.clientY > containerRect.bottom + 20) return;
 
       const widths = this.host.getItemEls().map(el => el.getBoundingClientRect().width);
-      const positions = computeDividerXPositions(containerRect.left, widths, this.host.getGap());
+      const positions = computeDividerXPositions(containerRect.left, widths, this.host.getInterItemSpace());
       const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
       const threshold = Math.min(avgWidth * 0.4, 80);
       const closestIdx = findClosestDividerIndex(e.clientX, positions, threshold);
@@ -221,7 +223,7 @@ export class DragReorderController {
       if (!data.startsWith("diaa-row:") && !data.startsWith("diaa-standalone:") && !data.startsWith("obsidian://open")) return;
 
       const widths = this.host.getItemEls().map(el => el.getBoundingClientRect().width);
-      const positions = computeDividerXPositions(containerRect.left, widths, this.host.getGap());
+      const positions = computeDividerXPositions(containerRect.left, widths, this.host.getInterItemSpace());
       const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
       const threshold = Math.min(avgWidth * 0.4, 80);
       const closestIdx = findClosestDividerIndex(e.clientX, positions, threshold);
@@ -295,7 +297,7 @@ export class DragReorderController {
     const positions = computeDividerXPositions(
       containerRect.left,
       widths,
-      this.host.getGap()
+      this.host.getInterItemSpace()
     );
 
     const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
@@ -349,7 +351,7 @@ export class DragReorderController {
 
     const containerRect = container.getBoundingClientRect();
     const widths = itemEls.map(el => el.getBoundingClientRect().width);
-    const positions = computeDividerXPositions(containerRect.left, widths, this.host.getGap());
+    const positions = computeDividerXPositions(containerRect.left, widths, this.host.getInterItemSpace());
     const closestIdx = findClosestDividerIndex(cursorX, positions, 60);
     if (closestIdx !== null) return closestIdx;
     // Fallback: binary choice based on container center

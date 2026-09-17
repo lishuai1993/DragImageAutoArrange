@@ -23,6 +23,7 @@ import { ImageRowWidget, ImageRowOptions, sanitizeOptions, handleRect } from '..
 import type { RowGroup } from '../src/imageParse/imageDetector';
 import type { RowImage, RowKind } from '../src/imageParse/rowParams';
 import type { OrientationState } from '../src/imageTransform/orientation';
+import { CLASSES } from '../src/constants';
 
 // ── Test helpers ─────────────────────────────────────────────────────
 
@@ -670,6 +671,61 @@ describe('ImageRowWidget sizes a lone item to what is drawn', () => {
   it('reports the turn for the resize controller', () => {
     expect(buildSingle({ turns: 3, mirror: true }).widget.isTurnedImage(0)).toBe(true);
     expect(buildSingle(undefined).widget.isTurnedImage(0)).toBe(false);
+  });
+});
+
+/**
+ * The two gestures that equalise a pair — double-clicking the divider and
+ * dragging until it snaps — must land on the same geometry.  They diverged:
+ * the double-click pinned `computeRowHeight`'s clamped figure onto the item and
+ * the picture and left the picture its intrinsic width, so the drawing sat
+ * 27 px inside its 513 px item on one side and 24 px inside its 448 px item on
+ * the other, reading as a ~63 px gap; the drag left the picture flush to its
+ * item and showed the divider's own 12 px.  Both now hand the split to the row's
+ * own pass, and the split is the one `computePairEquilibrium` solves to — the
+ * same answer the drag snaps to, pinned in dividerController.test.ts.
+ */
+describe('ImageRowWidget divider double-click', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** The 图片并排测试文档 repro row, at the width the editor reported. */
+  function buildReproRow() {
+    const a = makeImage('a.webp', 23, 1.34, true);
+    a.display = { kind: 'multi', share: 1.34, fill: 0.64 };
+    const b = makeImage('b.webp', 24, 0.72, true);
+    b.display = { kind: 'multi', share: 0.72, fill: 1 };
+    const widget = new ImageRowWidget(makeGroup([a, b]), makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 972.890625);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+    ]);
+    return el;
+  }
+
+  it('lands on the split the drag snaps to, leaving the pictures flush', () => {
+    const el = buildReproRow();
+    const divider = el.querySelector(`.${CLASSES.divider}`) as HTMLElement;
+    divider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+
+    const items = el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
+    // 2.06 grows in, split in aspect/fill: 2.06 × (0.764526/0.64) / 1.861239.
+    expect(Number.parseFloat(items[0].style.flexGrow)).toBeCloseTo(1.32214, 4);
+    expect(Number.parseFloat(items[1].style.flexGrow)).toBeCloseTo(0.73786, 4);
+
+    // Both members draw 0.64 × 616.74 / 0.764526 = 516.29 px tall, which is
+    // what the row's own pass hands back — one number for the pair, and the one
+    // the picture's own box takes too, so nothing is left floating inside it.
+    const imgs = el.querySelectorAll<HTMLImageElement>('img');
+    expect(imgs[0].style.height).toBe('516px');
+    expect(imgs[1].style.height).toBe('516px');
+    expect(items[0].style.height).toBe('516px');
+    expect(items[1].style.height).toBe('516px');
+    expect(el.style.height).toBe('516px');
   });
 });
 

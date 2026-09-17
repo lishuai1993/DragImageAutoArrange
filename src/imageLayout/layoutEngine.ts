@@ -133,6 +133,12 @@ export function computeSingleImageWidth(
  * Given the flex-grow values, image natural dimensions, and container width,
  * computes the max height across all images and clamps it to valid bounds.
  * This is the pure calculation core of `recalculateRowHeight`.
+ *
+ * `gap` is the space one junction between adjacent items consumes — the
+ * container's flex gap plus anything sitting in it (a divider is a real flex
+ * child, so it costs a gap on each side).  It is not the CSS `gap` value; callers
+ * that render dividers must pass the wider figure, or every item is given more
+ * width than it is painted with.
  */
 export function computeRowHeight(
   flexGrows: number[],
@@ -188,6 +194,28 @@ export function computeScaleBasedHeights(
   gap: number,
   defaultRowHeight: number
 ): ScaleBasedHeightsResult {
+  return scaleBasedHeights(flexGrows, metas, scales, containerWidth, gap, defaultRowHeight, true);
+}
+
+/**
+ * The scale-based model, optionally left unrounded.
+ *
+ * Solving for the split that equalises two members needs the *continuous*
+ * height: rounded per-image heights are a staircase, so a search over them can
+ * only report "somewhere in the flat band", and the two members then round to
+ * heights up to a pixel apart.  Unrounded, the difference is monotone with a
+ * single exact zero, and the split found there rounds to the same pixel on both
+ * sides.  Painting always uses the rounded figures.
+ */
+function scaleBasedHeights(
+  flexGrows: number[],
+  metas: ImageMeta[],
+  scales: Array<number | null>,
+  containerWidth: number,
+  gap: number,
+  defaultRowHeight: number,
+  round: boolean
+): ScaleBasedHeightsResult {
   const n = flexGrows.length;
   const fallback = computeRowHeight(flexGrows, metas, containerWidth, gap, defaultRowHeight);
   let totalG = 0;
@@ -203,7 +231,8 @@ export function computeScaleBasedHeights(
     if (scale != null && scale > 0 && scale <= 1 && totalG > 0 && meta && meta.naturalHeight > 0) {
       const itemW = (flexGrows[i] / totalG) * availableWidth;
       const ar = meta.naturalWidth / meta.naturalHeight;
-      imageH = Math.round((scale * itemW) / ar);
+      imageH = (scale * itemW) / ar;
+      if (round) imageH = Math.round(imageH);
     } else {
       imageH = fallback;
     }
@@ -294,22 +323,143 @@ export function computeDividerEquilibrium(
   return { left: snapLeft, right: totalFlex - snapLeft };
 }
 
+/** The lowest flex-grow the divider drag lets either side take. */
+const DIVIDER_MIN_GROW = 0.1;
+/** Two members count as equal when the solved heights differ by no more than
+ *  this.  The split is solved on unrounded heights, so it normally lands on an
+ *  exact zero; the slack exists only for a member whose height comes from the
+ *  row fallback, which is a rounded staircase the bisection cannot split. */
+const PAIR_EQUAL_TOLERANCE_PX = 1;
+
+/**
+ * Rendered heights of two adjacent members at a given flex-grow split, on the
+ * same model `recalculateRowHeight` paints from — per-image fill ratios, the
+ * row-wide grow divisor and the fallback for members without a fill all come
+ * from `computeScaleBasedHeights`.  Pure — no DOM.
+ */
+export function computePairHeights(
+  grows: number[],
+  metas: ImageMeta[],
+  scales: Array<number | null>,
+  containerWidth: number,
+  gap: number,
+  defaultRowHeight: number,
+  leftIndex: number
+): { left: number; right: number } {
+  const { heights } = computeScaleBasedHeights(
+    grows,
+    metas,
+    scales,
+    containerWidth,
+    gap,
+    defaultRowHeight
+  );
+  return { left: heights[leftIndex] ?? 0, right: heights[leftIndex + 1] ?? 0 };
+}
+
+/** Where a pair renders at the same height, and what that height is. */
+export interface PairEquilibrium {
+  left: number;
+  right: number;
+  height: number;
+}
+
+/**
+ * Solve the flex-grow split that renders two adjacent members at the same
+ * height, on the same model `computePairHeights` reads.
+ *
+ * A member's drawn height is `fill × grow / aspect`, so equal heights ask for a
+ * split in `aspect / fill` — not in `aspect`, which is the same thing only while
+ * the two fills agree.  The pair's grow sum is held constant (a divider only
+ * redistributes between its neighbours), and the left height rises with the left
+ * grow while the right falls, so the difference is monotone and bisection
+ * converges.  The search runs on unrounded heights (see `scaleBasedHeights`), so
+ * the split it returns is the one the row actually paints at.
+ *
+ * Returns null when no split can equalise the pair: a member whose height comes
+ * from the row fallback rather than its own grow (no fill of its own) may not
+ * respond to the split at all, and a pair that is already equal everywhere has
+ * nothing to snap to.  Pure — no DOM.
+ */
+export function computePairEquilibrium(
+  grows: number[],
+  metas: ImageMeta[],
+  scales: Array<number | null>,
+  containerWidth: number,
+  gap: number,
+  defaultRowHeight: number,
+  leftIndex: number
+): PairEquilibrium | null {
+  const pairTotal = grows[leftIndex] + grows[leftIndex + 1];
+  const lo = DIVIDER_MIN_GROW;
+  const hi = pairTotal - DIVIDER_MIN_GROW;
+  if (!(hi > lo)) return null;
+
+  const at = (leftGrow: number) => {
+    const candidate = grows.slice();
+    candidate[leftIndex] = leftGrow;
+    candidate[leftIndex + 1] = pairTotal - leftGrow;
+    const { heights } = scaleBasedHeights(
+      candidate,
+      metas,
+      scales,
+      containerWidth,
+      gap,
+      defaultRowHeight,
+      false
+    );
+    const left = heights[leftIndex] ?? 0;
+    const right = heights[leftIndex + 1] ?? 0;
+    return { diff: left - right, left, right };
+  };
+
+  const atLo = at(lo);
+  const atHi = at(hi);
+  if (atLo.diff === atHi.diff) return null;
+  if (atLo.diff > 0 || atHi.diff < 0) return null;
+
+  let a = lo;
+  let b = hi;
+  for (let i = 0; i < 60 && b - a > 1e-6; i++) {
+    const mid = (a + b) / 2;
+    if (at(mid).diff < 0) a = mid;
+    else b = mid;
+  }
+  const left = (a + b) / 2;
+  const best = at(left);
+  if (Math.abs(best.diff) > PAIR_EQUAL_TOLERANCE_PX) return null;
+  return { left, right: pairTotal - left, height: (best.left + best.right) / 2 };
+}
+
 /**
  * Compute equilibrium flex-grow values for all images in a row
  * so every image renders at the same height.
+ *
+ * A member's drawn height is `fill × grow / aspect`, so equal heights in a row
+ * whose fills differ ask for weights in `aspect / fill`.  Passing `scales` (the
+ * members' fill ratios, `null` where none is persisted) applies that; omitting
+ * it keeps the aspect-only distribution, which is the same answer while every
+ * fill agrees.  A member with no fill of its own renders the row fallback rather
+ * than a height of its own choosing, so it cannot be made to match — it keeps
+ * its aspect weight and the filled members share what is left.
  */
 export function computeGlobalEquilibrium(
   metas: ImageMeta[],
-  totalGrow: number
+  totalGrow: number,
+  scales?: Array<number | null>
 ): number[] {
   if (metas.length === 0) return [];
-  const aspects = metas.map((m) => m.naturalWidth / m.naturalHeight);
-  const aspectSum = aspects.reduce((s, a) => s + a, 0);
-  if (aspectSum === 0 || isNaN(aspectSum)) {
+  const weights = metas.map((m, i) => {
+    const ar = m.naturalWidth / m.naturalHeight;
+    const fill = scales?.[i] ?? null;
+    return fill != null && fill > 0 ? ar / fill : ar;
+  });
+  const weightSum = weights.reduce((s, w) => s + w, 0);
+  if (weightSum === 0 || isNaN(weightSum)) {
     const uniform = totalGrow / metas.length;
     return metas.map(() => uniform);
   }
-  return aspects.map((a) => (totalGrow * a) / aspectSum);
+  return weights.map((w) => (totalGrow * w) / weightSum);
 }
 
 /**

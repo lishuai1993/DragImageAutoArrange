@@ -1,5 +1,31 @@
 /* Drag Image Auto Arrange — Flex Row Layout */
 
+/* On the `!important`s in this file
+   ---------------------------------------------------------------------------
+   Every declaration carrying `!important` below overrides a rule this plugin
+   does not own, and none of them is removable by raising specificity a notch.
+   There are six kinds, each with a note at its site:
+
+   1. Reading-mode row internals (`.internal-embed`, `img`): Obsidian's embed
+      rules set the same properties, so the row layout only holds if these win.
+      The per-row computed values (flex, justify-content, object-position) are
+      written inline instead and never appear here.
+   2. Neutralized wrappers (`display: contents`): the img becomes a flex child
+      only once Obsidian's intermediate wrapper is flattened.  See the two sites.
+   3. CodeMirror line highlight (`background-color`, `border-*`): the drop target
+      and the left/right insert indicators paint over CM's own line styles.
+   4. Mobile media query (`height`, `flex`): both fight values the layout writes
+      inline, which no plain stylesheet declaration can outrank.
+   5. Settings buttons: the theme's `--input-shadow` ring and the pressed-state
+      flash; a theme owns the CTA fill and its own selectors would otherwise win.
+   6. A row extracted from a text block (`display: inline-block`): it has to
+      shrink-wrap so the surrounding block's text-align can place it.
+
+   The competitor in every case is the platform's or the theme's stylesheet,
+   which this plugin neither inspects nor can outrank by construction.  Dropping
+   one of these is a change that needs a visual check in Obsidian, not a static
+   one — so treat them as deliberate, not as un-cleaned leftovers. */
+
 .diaa-row {
   display: flex;
   align-items: flex-start;
@@ -188,14 +214,13 @@
   display: inline-block !important;
 }
 
-/* Single image Zoomed past the container width: pin the crop to the centre.
-   Applied by resizeHandleController in zoom mode only. */
-.diaa-zoom-pos {
-  object-position: center !important;
-}
-
 /* Obsidian's intermediate wrappers (e.g. .image-resize-container) between an
-   img and its boundary are neutralized so the img is a direct flex child. */
+   img and its boundary are neutralized so the img is a direct flex child.
+   `!important` stays: the neutralization is what makes the img a flex child in
+   the first place, and the competitor is Obsidian's own wrapper styling, which
+   this plugin does not get to inspect or outrank by specificity.  The lint note
+   ("css-display-contents is only partially supported by Obsidian 1.4.5") is a
+   judgement about a version below this plugin's minimum (1.5.0). */
 .diaa-row .diaa-contents {
   display: contents !important;
 }
@@ -270,7 +295,9 @@
    Obsidian auto-wraps <img> elements in .image-resize-container
    and adds .image-resize-handle children. Neutralize the container
    so it doesn't interfere with our flex layout, and hide the handles
-   since our plugin provides its own. */
+   since our plugin provides its own.  Same rationale for `!important`
+   as the `.diaa-contents` rule above — this is the wrapper the plugin
+   does not tag itself, so it is the same neutralization by another path. */
 .diaa-row .image-resize-container {
   display: contents !important;
 }

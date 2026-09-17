@@ -1,7 +1,7 @@
-import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode } from "../constants";
+import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode, computeInterItemSpace } from "../constants";
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
 import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
-import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth } from "../imageLayout/layoutEngine";
+import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computePairEquilibrium } from "../imageLayout/layoutEngine";
 import { alignmentToCSS } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
@@ -285,6 +285,19 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   getSnapSensitivity(): number {
     return this.options.snapSensitivity;
   }
+  getDefaultRowHeight(): number {
+    return this.options.defaultRowHeight;
+  }
+  /** Live width of the row, as `recalculateRowHeight` measures it. */
+  getRowWidth(): number {
+    return this.container ? this.container.getBoundingClientRect().width : 0;
+  }
+  /** A member's fill ratio (null = none) — the scale the rendered-height model
+   *  reads, exposed so the divider can solve its snap on the same model. */
+  getFill(index: number): number | null {
+    const img = this.group.images[index];
+    return img ? this.fillOf(img) : null;
+  }
   getSingleWidthPx(): number {
     const d = this.group.images[0]?.display;
     return d && d.kind === "single-manual" ? d.widthPx : this.singleWidthPx;
@@ -351,8 +364,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   getImageEls(): HTMLImageElement[] {
     return this.imageEls;
   }
-  getGap(): number {
-    return this.options.gap;
+  /** The space one junction between two of this row's items occupies in px:
+   *  what the layout model must divide off before handing widths out.  Equals
+   *  the CSS gap, plus a divider's width and one more gap when dividers render —
+   *  they are real flex children sitting in the junction. */
+  getInterItemSpace(): number {
+    return computeInterItemSpace(this.options.gap, this.options.enableDividers);
   }
   notifyLayoutChange(): void {
     this.onLayoutChange?.();
@@ -745,7 +762,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         // still reads the old (wide) width and the cached wide heights get
         // restored verbatim into a now-narrow editor — the scroll-up flicker.
         const n = this.itemEls.length;
-        const gapTotal = (n - 1) * this.options.gap;
+        const gapTotal = (n - 1) * this.getInterItemSpace();
         const curWidth =
           (currentEditorWidth && currentEditorWidth > 0)
             ? currentEditorWidth
@@ -1485,7 +1502,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const result = computeUniformHeight(
         metas,
         containerWidth,
-        this.options.gap,
+        this.getInterItemSpace(),
         50,
         this.options.defaultRowHeight * 3
       );
@@ -1494,7 +1511,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       this.container.style.height = h;
 
       const rawGrows = computeFlexGrows(metas);
-      const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.options.gap);
+      const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.getInterItemSpace());
       for (let i = 0; i < this.itemEls.length && i < grows.length; i++) {
         this.itemEls[i].style.flexGrow = String(grows[i]);
         const gImg = this.group.images[i];
@@ -1749,7 +1766,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       grows,
       metas,
       containerWidth,
-      this.options.gap,
+      this.getInterItemSpace(),
       this.options.defaultRowHeight
     );
     this.rowHeight = clamped;
@@ -1775,7 +1792,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
             missingArSum += m.naturalWidth / m.naturalHeight;
           }
         }
-        const AW = containerWidth - (n - 1) * this.options.gap;
+        const AW = containerWidth - (n - 1) * this.getInterItemSpace();
         const denom = AW - clamped * missingArSum;
         if (denom > 0 && missingArSum > 0) {
           const k = clamped * explicitSum / denom;
@@ -1839,7 +1856,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // survives container-width changes across sessions.
       const scales = this.group.images.map((img) => this.fillOf(img));
       const { heights, maxH } = computeScaleBasedHeights(
-        grows, metas, scales, containerWidth, this.options.gap, this.options.defaultRowHeight
+        grows, metas, scales, containerWidth, this.getInterItemSpace(), this.options.defaultRowHeight
       );
       for (let i = 0; i < n; i++) {
         const hPx = `${heights[i]}px`;
@@ -1962,75 +1979,95 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       itemElsLength: this.itemEls.length,
     });
 
-    const lm = this.loadedMetas.get(leftIndex);
-    const rm = this.loadedMetas.get(leftIndex + 1);
-    if (!lm || !rm || lm.naturalWidth === 0 || rm.naturalWidth === 0) {
-      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: metas not ready", {
-        hasLm: !!lm,
-        hasRm: !!rm,
-        lmNaturalW: lm?.naturalWidth,
-        rmNaturalW: rm?.naturalWidth,
-      });
+    const n = this.itemEls.length;
+    if (leftIndex < 0 || leftIndex + 1 >= n) {
+      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: pair out of range", { leftIndex, n });
+      return;
+    }
+    if (!this.container) {
+      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: not built");
+      return;
+    }
+    const containerWidth = this.container.getBoundingClientRect().width;
+    if (!(containerWidth > 0)) {
+      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: no container width");
       return;
     }
 
-    const leftItem = this.itemEls[leftIndex];
-    const rightItem = this.itemEls[leftIndex + 1];
-    if (!leftItem || !rightItem) {
-      log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: items missing");
-      return;
+    const grows: number[] = [];
+    const metas: ImageMeta[] = [];
+    const scales: Array<number | null> = [];
+    for (let i = 0; i < n; i++) {
+      const m = this.loadedMetas.get(i);
+      if (!m || m.naturalWidth === 0 || m.naturalHeight === 0) {
+        log.debug("BALANCE snapDividerToEquilibrium GUARD FAIL: metas not ready", {
+          index: i,
+          hasMeta: !!m,
+          naturalW: m?.naturalWidth,
+        });
+        return;
+      }
+      metas[i] = m;
+      const parsed = parseFloat(this.itemEls[i]?.style.flexGrow || "1");
+      grows[i] = isFinite(parsed) ? parsed : 1;
+      scales[i] = this.fillOf(this.group.images[i]);
     }
 
-    const total = parseFloat(leftItem.style.flexGrow || "1") + parseFloat(rightItem.style.flexGrow || "1");
-    const { left, right } = computeDividerEquilibrium(lm, rm, total);
+    const total = grows[leftIndex] + grows[leftIndex + 1];
 
-    leftItem.style.flexGrow = String(left);
-    rightItem.style.flexGrow = String(right);
+    // Solve on the model the row paints from, so the split is the one the
+    // pictures actually reach equal heights at — the aspect-only split coincides
+    // with it only while the two fills agree.  This is the same solve the divider
+    // drag snaps to, so the two gestures land on identical geometry.
+    let left: number;
+    let right: number;
+    let model = "render";
+    const pair = computePairEquilibrium(
+      grows,
+      metas,
+      scales,
+      containerWidth,
+      this.getInterItemSpace(),
+      this.options.defaultRowHeight,
+      leftIndex
+    );
+    if (pair) {
+      left = pair.left;
+      right = pair.right;
+    } else {
+      // Nothing on the row's model equalises this pair: a member without a fill
+      // of its own renders the row fallback instead of a height its grow can
+      // steer, or the ratio it would need is past the divider's reach.  Land on
+      // the aspect-only split — where a pair of matching fills goes anyway.
+      const aspect = computeDividerEquilibrium(metas[leftIndex], metas[leftIndex + 1], total);
+      left = aspect.left;
+      right = aspect.right;
+      model = "aspect-fallback";
+    }
 
-    // Sync in-memory state before persisting
+    this.itemEls[leftIndex].style.flexGrow = String(clampFlexGrow(left));
+    this.itemEls[leftIndex + 1].style.flexGrow = String(clampFlexGrow(right));
+
+    // Sync in-memory state before persisting.  Each member keeps its own fill:
+    // a fill is a scale the user set, not a fitting knob, and equal heights come
+    // out of the split.
     const leftImg = this.group.images[leftIndex];
     const rightImg = this.group.images[leftIndex + 1];
-    if (leftImg.display.kind === "multi") leftImg.display.share = clampFlexGrow(left);
-    if (rightImg.display.kind === "multi") rightImg.display.share = clampFlexGrow(right);
-
-    // Set fills to 1 so images fill their items, and recalculateRowHeight's
-    // fill branch uses the else-clause (clamped uniform height) for these images.
-    // Using 1 (not null) prevents auto-backfill from re-computing fills.
-    if (leftImg.display.kind === "multi") leftImg.display.fill = 1;
-    if (rightImg.display.kind === "multi") rightImg.display.fill = 1;
-    leftImg.hasSizing = true;
-    rightImg.hasSizing = true;
-    this._scaleDirtyImages.add(leftIndex);
-    this._scaleDirtyImages.add(leftIndex + 1);
-
-    // Set left and right images to uniform height; other images keep
-    // their current per-image heights. Don't delete preserved sizes and
-    // don't call recalculateRowHeight — that would recompute ALL heights.
-    const n = this.itemEls.length;
-    const allGrows: number[] = [];
-    const allMetas: ImageMeta[] = [];
-    for (let i = 0; i < n; i++) {
-      allGrows[i] = parseFloat(this.itemEls[i].style.flexGrow || "1");
-      const m = this.loadedMetas.get(i);
-      if (!m || m.naturalWidth === 0) return;
-      allMetas[i] = m;
+    if (leftImg.display.kind === "multi") {
+      leftImg.display.share = clampFlexGrow(left);
+      leftImg.hasSizing = true;
     }
-    const containerWidth = this.container!.getBoundingClientRect().width;
-    const clamped = computeRowHeight(allGrows, allMetas, containerWidth, this.options.gap, this.options.defaultRowHeight);
-    const hPx = `${clamped}px`;
-    this.itemEls[leftIndex].style.height = hPx;
-    this.itemEls[leftIndex + 1].style.height = hPx;
-    this.imageEls[leftIndex].style.height = hPx;
-    this.imageEls[leftIndex + 1].style.height = hPx;
-    this.imageEls[leftIndex].setCssStyles({ width: "auto" });
-    this.imageEls[leftIndex + 1].setCssStyles({ width: "auto" });
-    let maxH = clamped;
-    for (let j = 0; j < n; j++) {
-      if (j === leftIndex || j === leftIndex + 1) continue;
-      const h = parseFloat(this.itemEls[j].style.height || "0");
-      if (h > maxH) maxH = h;
+    if (rightImg.display.kind === "multi") {
+      rightImg.display.share = clampFlexGrow(right);
+      rightImg.hasSizing = true;
     }
-    this.container!.style.height = `${maxH}px`;
+
+    // Hand the sizing to the row's own pass rather than pinning heights here.
+    // It paints each picture from the split, so the members stay flush to their
+    // items — a pinned height would shrink the picture inside its item and open
+    // the gap between the two — and the row ends up the height every other pass
+    // already agrees on.
+    this.recalculateRowHeight();
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore per-image heights for unaffected images.
@@ -2044,13 +2081,18 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       total,
       snapLeft: left,
       snapRight: right,
+      model,
     });
   }
 
   /**
    * Double-click top bar: snap ALL images in the row to equal heights.
-   * Distributes flex-grow proportionally to aspect ratios so every image
-   * has the same rendered height.
+   *
+   * Distributes flex-grow so every member's *drawn* height matches: weights go
+   * in `aspect / fill`, since a member's drawn height is `fill × grow / aspect`.
+   * Members without a fill of their own render the row fallback and keep their
+   * aspect weight.  Sizing is left to the row's own pass, exactly as the divider
+   * double-click does, so both gestures and the divider drag agree on geometry.
    */
   private snapAllToEquilibrium(): void {
     const n = this.itemEls.length;
@@ -2062,12 +2104,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       log.debug("BALANCE snapAllToEquilibrium GUARD FAIL: n < 2");
       return;
     }
+    if (!this.container) {
+      log.debug("BALANCE snapAllToEquilibrium GUARD FAIL: not built");
+      return;
+    }
 
     const metas: ImageMeta[] = [];
+    const scales: Array<number | null> = [];
     let totalGrow = 0;
     for (let i = 0; i < n; i++) {
       const meta = this.loadedMetas.get(i);
-      if (!meta || meta.naturalWidth === 0) {
+      if (!meta || meta.naturalWidth === 0 || meta.naturalHeight === 0) {
         log.debug("BALANCE snapAllToEquilibrium GUARD FAIL: meta not ready", {
           index: i,
           hasMeta: !!meta,
@@ -2076,43 +2123,24 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         return;
       }
       metas.push(meta);
+      scales.push(this.fillOf(this.group.images[i]));
       totalGrow += parseFloat(this.itemEls[i].style.flexGrow || "1");
     }
 
-    const rawGrows = computeGlobalEquilibrium(metas, totalGrow);
-    const containerWidth = this.container!.getBoundingClientRect().width;
-    const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.options.gap);
+    const rawGrows = computeGlobalEquilibrium(metas, totalGrow, scales);
+    const containerWidth = this.container.getBoundingClientRect().width;
+    const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.getInterItemSpace());
 
     for (let i = 0; i < n; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
       const mi = this.group.images[i];
-      if (mi.display.kind === "multi") mi.display.share = grows[i];
-      // Set fill to 1 so images fill their items, and recalculateRowHeight's
-      // fill branch uses the else-clause (clamped uniform height).  Using 1
-      // (not null) prevents auto-backfill from re-computing fills.
-      if (mi.display.kind === "multi") mi.display.fill = 1;
-      mi.hasSizing = true;
-      this._scaleDirtyImages.add(i);
+      if (mi.display.kind === "multi") {
+        mi.display.share = grows[i];
+        mi.hasSizing = true;
+      }
     }
 
-    // Compute uniform row height with updated flexGrow distribution.
-    const allGrows2: number[] = [];
-    const allMetas2: ImageMeta[] = [];
-    for (let i = 0; i < n; i++) {
-      allGrows2[i] = parseFloat(this.itemEls[i].style.flexGrow || "1");
-      const m = this.loadedMetas.get(i);
-      if (!m || m.naturalWidth === 0) return;
-      allMetas2[i] = m;
-    }
-    const containerWidth2 = this.container!.getBoundingClientRect().width;
-    const clamped2 = computeRowHeight(allGrows2, allMetas2, containerWidth2, this.options.gap, this.options.defaultRowHeight);
-    const hPx2 = `${clamped2}px`;
-    for (let i = 0; i < n; i++) {
-      this.itemEls[i].style.height = hPx2;
-      this.imageEls[i].style.height = hPx2;
-      this.imageEls[i].setCssStyles({ width: "auto" });
-    }
-    this.container!.style.height = hPx2;
+    this.recalculateRowHeight();
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore the uniform heights correctly.
