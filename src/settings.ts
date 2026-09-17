@@ -1,17 +1,36 @@
 import {
   App,
   ButtonComponent,
-  DropdownComponent,
   Plugin,
   PluginSettingTab,
   Setting,
   TextComponent,
+  requireApiVersion,
+  type SettingControl,
+  type SettingDefinition,
+  type SettingDefinitionItem,
 } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
-import { renderImageMenuSettings, type ImageMenuBridge } from "./imageMenu/menuSettingsUi";
-import { renderMaintenanceSettings } from "./maintenance/maintenanceSettingsUi";
+import {
+  imageMenuSectionDefinitions,
+  renderImageMenuSettings,
+  type ImageMenuBridge,
+} from "./imageMenu/menuSettingsUi";
+import {
+  createMaintenanceSection,
+  type MaintenanceBridge,
+  type MaintenanceSection,
+} from "./maintenance/maintenanceSettingsUi";
 import { applySettingButtonStyle } from "./settingsButton";
 import { logger, type LogLevel } from "./logger";
+import {
+  CONTROL_ROWS,
+  SETTINGS_SECTIONS,
+  type ControlRow,
+  type HostId,
+  type RenderRowId,
+  type RowSpec,
+} from "./settingsSpecs";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
 
@@ -40,6 +59,12 @@ export interface DragImageSettings {
 /** Slider stops, least→most verbose. The slider index maps into this array. */
 const LOG_LEVELS: LogLevel[] = ["ERROR", "WARN", "INFO", "DEBUG"];
 
+const asNumber = (value: unknown): number => (typeof value === "number" ? value : 0);
+const asBoolean = (value: unknown): boolean => value === true;
+const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+const asAlignment = (value: unknown): Alignment =>
+  value === "center" || value === "right" ? value : "left";
+
 export interface IDragImagePlugin extends Plugin {
   settings: DragImageSettings;
   saveSettings(): Promise<void>;
@@ -61,9 +86,47 @@ export async function loadSettings(plugin: { loadData(): Promise<unknown> }): Pr
   return merged;
 }
 
+/** Build the declarative control descriptor for one `control` row. */
+function controlSpec(row: ControlRow): SettingControl {
+  switch (row.kind) {
+    case "slider":
+      return { key: row.key, type: "slider", min: row.min, max: row.max, step: row.step };
+    case "toggle":
+      return { key: row.key, type: "toggle" };
+    case "dropdown":
+      return { key: row.key, type: "dropdown", options: Object.fromEntries(row.options) };
+    case "text":
+      return { key: row.key, type: "text" };
+  }
+}
+
+/**
+ * The plugin's settings tab, rendered two ways from one row table
+ * (see ./settingsSpecs):
+ *
+ *  - `display()` — the imperative path for Obsidian below 1.13.
+ *  - `getSettingDefinitions()` — the declarative path for 1.13 and later, which
+ *    is what puts the rows into Obsidian's settings search. Obsidian skips
+ *    `display()` entirely once it returns a non-empty array, so the two paths
+ *    never both run; both read the same table and call the same row builders.
+ *
+ * Sections owned by sibling modules (the image menu and the vault maintenance
+ * passes) contribute definitions of their own in the declarative path too, so
+ * the framework — which wraps a group and draws its heading — keeps owning the
+ * card around their rows instead of the module appending one inside a row.
+ *
+ * Persistence goes through `saveSettings()` rather than the framework's default
+ * control binding: the plugin's on-disk envelope is `{ settings, imageMenu,
+ * preservedSizes }` and a plain write of `plugin.settings` would drop the other
+ * two namespaces.
+ */
 export class DragImageSettingTab extends PluginSettingTab {
   plugin: IDragImagePlugin;
   private bridge: ImageMenuBridge | null;
+  /** Tab-owned so an in-flight maintenance pass keeps its progress across the
+   *  re-renders the declarative path performs. */
+  private maintenance: MaintenanceSection | null = null;
+  private reflowObserver: MutationObserver | null = null;
 
   constructor(app: App, plugin: IDragImagePlugin, bridge?: ImageMenuBridge | null) {
     super(app, plugin);
@@ -71,7 +134,10 @@ export class DragImageSettingTab extends PluginSettingTab {
     this.bridge = bridge ?? null;
   }
 
+  // ── Imperative path (Obsidian < 1.13) ────────────────────────────────
+
   display(): void {
+    this.disconnectReflow();
     const { containerEl } = this;
     containerEl.empty();
     // Scope the full-width-description reflow styles to this settings tab only.
@@ -79,339 +145,16 @@ export class DragImageSettingTab extends PluginSettingTab {
 
     // No plugin-name heading: the settings tab already carries it as its title.
 
-    // ── Layout & interaction (global) ──────────────────────────
-    new Setting(containerEl).setName("行布局与交互设置").setHeading();
-    const layoutGroup = containerEl.createDiv();
-    layoutGroup.addClass("diaa-settings-group");
-
-    new Setting(layoutGroup)
-      .setName("Default row height")
-      .setDesc("Default uniform height (px) for image rows. Individual rows adapt based on image aspect ratios.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(80, 600, 10)
-          .setValue(this.plugin.settings.defaultRowHeight)
-          .onChange(async (value) => {
-            this.plugin.settings.defaultRowHeight = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Max images per row")
-      .setDesc("Maximum number of images allowed in a single row (1-10). Groups exceeding this limit are split.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(2, 10, 1)
-          .setValue(this.plugin.settings.maxImagesPerRow)
-          .onChange(async (value) => {
-            this.plugin.settings.maxImagesPerRow = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Gap size")
-      .setDesc("Spacing between images in a row (px).")
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 20, 1)
-          .setValue(this.plugin.settings.gapSize)
-          .onChange(async (value) => {
-            this.plugin.settings.gapSize = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Snap sensitivity")
-      .setDesc("When dragging a divider or resize handle, snap into place when the height difference between adjacent images falls within this percentage of their equilibrium (equal) height. Set to 0 to disable snapping.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 10, 1)
-          .setValue(this.plugin.settings.snapSensitivity)
-          .onChange(async (value) => {
-            this.plugin.settings.snapSensitivity = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Top bar activation zone")
-      .setDesc("Pixel distance from the top of a flex row within which the global-balance top bar appears (4-40 px).")
-      .addSlider((slider) =>
-        slider
-          .setLimits(4, 40, 2)
-          .setValue(this.plugin.settings.topBarSensitivity)
-          .onChange(async (value) => {
-            this.plugin.settings.topBarSensitivity = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Ghost image width")
-      .setDesc("Width (px) of the drag ghost image that follows the Cursor (100-500 px).")
-      .addSlider((slider) =>
-        slider
-          .setLimits(100, 500, 10)
-          .setValue(this.plugin.settings.ghostImageWidth)
-          .onChange(async (value) => {
-            this.plugin.settings.ghostImageWidth = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Drag ghost opacity")
-      .setDesc("Transparency of the original image during drag (10% = nearly opaque, 90% = very transparent).")
-      .addSlider((slider) =>
-        slider
-          .setLimits(10, 90, 5)
-          .setValue(this.plugin.settings.dragOpacity)
-          .onChange(async (value) => {
-            this.plugin.settings.dragOpacity = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Enable drag reorder")
-      .setDesc("Allow dragging images within a row to reorder them.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableDragReorder)
-          .onChange(async (value) => {
-            this.plugin.settings.enableDragReorder = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Enable resize handles")
-      .setDesc("Show corner resize handles on hover to adjust individual image sizes.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableResize)
-          .onChange(async (value) => {
-            this.plugin.settings.enableResize = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Enable column dividers")
-      .setDesc("Show draggable dividers between images to adjust width ratios.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableDividers)
-          .onChange(async (value) => {
-            this.plugin.settings.enableDividers = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Context menu size")
-      .setDesc("Scale of the right-click image menu (50%–150%). Menu padding, spacing, fonts and icons scale together in 10% steps.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(50, 150, 10)
-          .setValue(this.plugin.settings.menuScalePercent)
-          .onChange(async (value) => {
-            this.plugin.settings.menuScalePercent = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(layoutGroup)
-      .setName("Image extensions")
-      .setDesc("Comma-separated list of image file extensions to detect (e.g., PNG,JPG,GIF,webp).")
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.imageExtensions)
-          .onChange(async (value) => {
-            this.plugin.settings.imageExtensions = value || DEFAULT_SETTINGS.imageExtensions;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // ── Image Alignment (grouped) ──────────────────────────────
-
-    new Setting(containerEl).setName("图片统一对齐设置").setHeading();
-
-    const alignGroup = containerEl.createDiv();
-    alignGroup.addClass("diaa-settings-group");
-
-    let alignDropdown: DropdownComponent | null = null;
-
-    new Setting(alignGroup)
-      .setName("Image alignment")
-      .setDesc("Global horizontal alignment for image rows. Per-image overrides set via right-click take priority.")
-      .addDropdown((dropdown) => {
-        alignDropdown = dropdown;
-        return dropdown
-          .addOption("left", "Left")
-          .addOption("center", "Center")
-          .addOption("right", "Right")
-          .setValue(this.plugin.settings.alignment)
-          .onChange(async (value) => {
-            this.plugin.settings.alignment = value as Alignment;
-            await this.plugin.saveSettings();
-          });
-      });
-
-    const alignSep = alignGroup.createDiv();
-    alignSep.setCssStyles({ borderBottom: "1px solid var(--background-modifier-border)" });
-    alignSep.setCssStyles({ margin: "12px 0" });
-
-    new Setting(alignGroup)
-      .setName("Reset image alignments")
-      .setDesc(
-        "One-shot: clear every image's per-image alignment override and revert to the global setting above."
-      )
-      .addButton((button) => {
-        return applySettingButtonStyle(button)
-          .setButtonText("Reset all to current setting")
-          .onClick(() => {
-            this.plugin.resetAllImageAlignments();
-            alignDropdown?.setValue(
-              this.plugin.settings.alignment
-            );
-            this.flashResetFeedback(button);
-          });
-      });
-
-    new Setting(alignGroup)
-      .setName("Enable reading mode context menu")
-      .setDesc(
-        "When enabled, right-clicking an image in reading mode shows the alignment menu. When disabled, reading mode is read-only — alignment can only be changed in live preview or source mode."
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableReadingModeContextMenu)
-          .onChange(async (value) => {
-            this.plugin.settings.enableReadingModeContextMenu = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(alignGroup)
-      .setName("Reading mode: double-click image to preview")
-      .setDesc(
-        "When enabled, opening an image's preview in reading mode requires a double click instead of a single click. When disabled, reading mode keeps Obsidian's native single-click behavior."
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableReadingModeDoubleClickZoom)
-          .onChange(async (value) => {
-            this.plugin.settings.enableReadingModeDoubleClickZoom = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // ── Single Image Display (grouped) ──────────────────────────
-
-    new Setting(containerEl).setName("单图行图片尺寸设置").setHeading();
-
-    const singleImageGroup = containerEl.createDiv();
-    singleImageGroup.addClass("diaa-settings-group");
-
-    const mode = this.plugin.settings.singleImageSizeMode;
-
-    // Capture component refs so dropdown onChange and reset button onClick can
-    // update the UI in-place (no full this.display() rebuild → no page jitter).
-    let sizeDropdown: DropdownComponent | null = null;
-    let widthText: TextComponent | null = null;
-
-    const setWidthDisabled = (disabled: boolean) => {
-      if (!widthText) return;
-      widthText.setDisabled(disabled);
-      widthText.inputEl.style.color = disabled
-        ? "var(--text-faint)"
-        : "";
-    };
-
-    new Setting(singleImageGroup)
-      .setName("Single image size")
-      .setDesc(
-        "How a lone image (a single-image row) is sized. Natural size shows images at their real pixel size, shrunk to fit the editor width; Fixed width renders single images at a set width. Manual corner-resizes stick per image."
-      )
-      .addDropdown((dropdown) => {
-        sizeDropdown = dropdown;
-        return dropdown
-          .addOption("natural", "Natural size")
-          .addOption("fixed", "Fixed width")
-          .setValue(mode)
-          .onChange(async (value) => {
-            this.plugin.settings.singleImageSizeMode =
-              value as SingleImageSizeMode;
-            await this.plugin.saveSettings();
-            // Toggle the width input in-place — no full-page rebuild
-            setWidthDisabled(value === "natural");
-          });
-      })
-      .addText((text) => {
-        widthText = text;
-        text.inputEl.type = "number";
-        text.inputEl.min = "100";
-        text
-          .setValue(String(this.plugin.settings.singleImageWidth))
-          .onChange(async (value) => {
-            const parsed = parseInt(value, 10);
-            this.plugin.settings.singleImageWidth = isFinite(parsed)
-              ? Math.max(100, parsed)
-              : DEFAULT_SETTINGS.singleImageWidth;
-            await this.plugin.saveSettings();
-          });
-        if (mode === "natural") setWidthDisabled(true);
-      });
-
-    // Horizontal separator between the two sub-items
-    const sep = singleImageGroup.createDiv();
-    sep.setCssStyles({ borderBottom: "1px solid var(--background-modifier-border)" });
-    sep.setCssStyles({ margin: "12px 0" });
-
-    new Setting(singleImageGroup)
-      .setName("Reset single image sizes")
-      .setDesc(
-        "One-shot: clear every single image's manual size override and re-apply the current mode."
-      )
-      .addButton((button) => {
-        return applySettingButtonStyle(button)
-          .setButtonText("Reset all to current setting")
-          .onClick(() => {
-            this.plugin.resetAllSingleImages();
-            // Sync dropdown + width input in-place to reflect the reset
-            sizeDropdown?.setValue(
-              this.plugin.settings.singleImageSizeMode
-            );
-            widthText?.setValue(
-              String(this.plugin.settings.singleImageWidth)
-            );
-            setWidthDisabled(
-              this.plugin.settings.singleImageSizeMode === "natural"
-            );
-            this.flashResetFeedback(button);
-          });
-      });
-
-    // 图片右键菜单设置（文件信息 / 删除前确认 / 文件操作）——门面就绪后追加到
-    // 页面末尾。
-    if (this.bridge) {
-      renderImageMenuSettings(containerEl, this.bridge);
+    for (const section of SETTINGS_SECTIONS) {
+      if (section.kind === "host") {
+        if (this.hostAvailable(section.id)) this.mountHost(containerEl, section.id);
+        continue;
+      }
+      new Setting(containerEl).setName(section.heading).setHeading();
+      const group = containerEl.createDiv();
+      group.addClass("diaa-settings-group");
+      for (const row of section.rows) this.mountRow(group, row);
     }
-
-    this.renderLogSettings(containerEl);
-
-    // Vault-wide maintenance: restore every DIAA-managed row to the native
-    // `![[file]]` form (the counterpart to the always-filled write policy), and
-    // pre-place the word slots on every hostable row.
-    renderMaintenanceSettings(containerEl, this.app, () => ({
-      extensions: this.plugin.settings.imageExtensions,
-      alignment: this.plugin.settings.alignment,
-      maxImagesPerRow: this.plugin.settings.maxImagesPerRow,
-    }));
 
     // Move every description element out of the left info column and onto its
     // own full-width line, so long descriptions no longer wrap inside a narrow
@@ -419,83 +162,299 @@ export class DragImageSettingTab extends PluginSettingTab {
     this.reflowDescriptions();
   }
 
-  /**
-   * Logging & debugging group. A 4-stop severity slider (ERROR → WARN → INFO →
-   * DEBUG, least → most verbose) gates both sinks; a toggle controls the log.txt
-   * sink. Both write straight through to the logger singleton, so a change takes
-   * effect on the next log call — no plugin reload needed.
-   */
-  private renderLogSettings(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName("日志与调试设置").setHeading();
-    const group = containerEl.createDiv();
-    group.addClass("diaa-settings-group");
+  private mountRow(containerEl: HTMLElement, row: RowSpec): void {
+    const setting = new Setting(containerEl).setName(row.name).setDesc(row.desc);
+    if (row.kind === "render") {
+      this.buildRenderRow(setting, row.id);
+      return;
+    }
+    this.buildControlRow(setting, row);
+  }
 
+  private buildControlRow(setting: Setting, row: ControlRow): void {
+    switch (row.kind) {
+      case "slider":
+        setting.addSlider((slider) =>
+          slider
+            .setLimits(row.min, row.max, row.step)
+            .setValue(this.plugin.settings[row.key])
+            .onChange((value) => void this.assign(row.key, value))
+        );
+        break;
+      case "toggle":
+        setting.addToggle((toggle) =>
+          toggle
+            .setValue(this.plugin.settings[row.key])
+            .onChange((value) => void this.assign(row.key, value))
+        );
+        break;
+      case "dropdown":
+        setting.addDropdown((dropdown) => {
+          for (const [value, label] of row.options) dropdown.addOption(value, label);
+          dropdown
+            .setValue(this.plugin.settings[row.key])
+            .onChange((value) => void this.assign(row.key, value as Alignment));
+        });
+        break;
+      case "text":
+        setting.addText((text) =>
+          text
+            .setValue(this.plugin.settings[row.key])
+            .onChange((value) =>
+              void this.assign(row.key, value || DEFAULT_SETTINGS.imageExtensions)
+            )
+        );
+        break;
+    }
+  }
+
+  // ── Declarative path (Obsidian >= 1.13) ──────────────────────────────
+
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    if (this.containerEl) this.containerEl.addClass("diaa-settings");
+
+    const items: SettingDefinitionItem[] = [];
+    for (const section of SETTINGS_SECTIONS) {
+      if (section.kind === "host") {
+        if (!this.hostAvailable(section.id)) continue;
+        items.push(...this.hostDefinitions(section.id));
+        continue;
+      }
+      items.push({
+        type: "group",
+        heading: section.heading,
+        items: section.rows.map((row) => this.definitionFor(row)),
+      });
+    }
+    return items;
+  }
+
+  /** What a host module brings: its own group — heading and card included — and
+   *  its own rows, rather than a placeholder row the tab has to swap out. */
+  private hostDefinitions(id: HostId): SettingDefinitionItem[] {
+    if (id === "imageMenuSection") {
+      if (!this.bridge) return [];
+      // A reorder redraws the rows in their new order, which means asking the tab
+      // to re-read these definitions. `update()` arrived in 1.13 — but so did the
+      // render path that reads them, and `refresh` runs only from a row button,
+      // so the call below is unreachable on anything older.
+      const refresh = (): void => {
+        if (requireApiVersion("1.13.0")) this.update();
+      };
+      return imageMenuSectionDefinitions(this.bridge, refresh);
+    }
+    return this.maintenanceSection().definitions();
+  }
+
+  private definitionFor(row: RowSpec): SettingDefinition {
+    if (row.kind === "render") {
+      return {
+        name: row.name,
+        desc: row.desc,
+        render: (setting) => this.buildRenderRow(setting, row.id),
+      };
+    }
+    return { name: row.name, desc: row.desc, control: controlSpec(row) };
+  }
+
+  // ── Value binding ────────────────────────────────────────────────────
+
+  getControlValue(key: string): unknown {
+    return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+  }
+
+  setControlValue(key: string, value: unknown): void | Promise<void> {
+    const row = CONTROL_ROWS.find((candidate) => candidate.key === key);
+    switch (row?.kind) {
+      case "slider":
+        return this.assign(row.key, asNumber(value));
+      case "toggle":
+        return this.assign(row.key, asBoolean(value));
+      case "dropdown":
+        return this.assign(row.key, asAlignment(value));
+      case "text":
+        return this.assign(row.key, asString(value) || DEFAULT_SETTINGS.imageExtensions);
+      default:
+        return undefined;
+    }
+  }
+
+  private assign<K extends keyof DragImageSettings>(key: K, value: DragImageSettings[K]): Promise<void> {
+    this.plugin.settings[key] = value;
+    this.applySideEffect(key, value);
+    return this.plugin.saveSettings();
+  }
+
+  /** Effects a setting change has beyond persisting the value. */
+  private applySideEffect(key: keyof DragImageSettings, value: DragImageSettings[keyof DragImageSettings]): void {
+    switch (key) {
+      case "logLevel":
+        // Both sinks read the logger singleton, so a change takes effect on the
+        // next log call — no plugin reload needed.
+        logger.setMinLevel(value as LogLevel);
+        break;
+      case "logToFile": {
+        const enabled = value as boolean;
+        logger.setFileEnabled(enabled);
+        // Clear once on enable, so log.txt only ever holds the current session.
+        if (enabled) void logger.clearLogFile();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // ── Rows whose body needs imperative code ────────────────────────────
+
+  private buildRenderRow(setting: Setting, id: RenderRowId): void {
+    this.ensureReflow();
+    switch (id) {
+      case "singleImageSize":
+        this.buildSingleImageSize(setting);
+        break;
+      case "resetAlignments":
+        this.buildResetRow(setting, () => this.plugin.resetAllImageAlignments());
+        break;
+      case "resetSingleImages":
+        this.buildResetRow(setting, () => this.plugin.resetAllSingleImages());
+        break;
+      case "logLevel":
+        this.buildLogLevel(setting);
+        break;
+    }
+  }
+
+  /**
+   * A lone image's size: a mode dropdown plus the fixed-width input. One row
+   * carries both controls, so it can't be a `control` row; the width input is
+   * disabled while the mode is natural size.
+   */
+  private buildSingleImageSize(setting: Setting): void {
+    const mode = this.plugin.settings.singleImageSizeMode;
+    let widthText: TextComponent | null = null;
+    const setWidthDisabled = (disabled: boolean) => {
+      if (!widthText) return;
+      widthText.setDisabled(disabled);
+      widthText.inputEl.style.color = disabled ? "var(--text-faint)" : "";
+    };
+
+    setting
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("natural", "Natural size")
+          .addOption("fixed", "Fixed width")
+          .setValue(mode)
+          .onChange((value) => {
+            void this.assign("singleImageSizeMode", value as SingleImageSizeMode);
+            // Toggle the width input in-place — no full-page rebuild
+            setWidthDisabled(value === "natural");
+          })
+      )
+      .addText((text) => {
+        widthText = text;
+        text.inputEl.type = "number";
+        text.inputEl.min = "100";
+        text
+          .setValue(String(this.plugin.settings.singleImageWidth))
+          .onChange((value) => {
+            const parsed = parseInt(value, 10);
+            void this.assign(
+              "singleImageWidth",
+              isFinite(parsed) ? Math.max(100, parsed) : DEFAULT_SETTINGS.singleImageWidth
+            );
+          });
+        if (mode === "natural") setWidthDisabled(true);
+      });
+  }
+
+  /**
+   * One-click feedback for a "Reset all..." row: paint the accent color, shrink
+   * momentarily, swap the label to "已重置", then restore everything. Rapid
+   * double-clicks are ignored (the button is disabled for the 1.5s window).
+   */
+  private buildResetRow(setting: Setting, reset: () => void): void {
+    setting.settingEl.addClass("diaa-row-sep-above");
+    setting.addButton((button) => {
+      applySettingButtonStyle(button)
+        .setButtonText("Reset all to current setting")
+        .onClick(() => {
+          reset();
+          this.flashResetFeedback(button);
+        });
+    });
+  }
+
+  /**
+   * Logging & debugging: a 4-stop severity slider (ERROR → WARN → INFO → DEBUG,
+   * least → most verbose) gating both sinks. The control takes the whole card
+   * row so the track gets its full width, with four tick labels and a row of
+   * stop dots underneath.
+   */
+  private buildLogLevel(setting: Setting): void {
     let active = LOG_LEVELS.indexOf(this.plugin.settings.logLevel);
     if (active < 0) active = 0;
 
-    let ticksEl: HTMLElement | null = null;
-    let nodesEl: HTMLElement | null = null;
+    let ticks: HTMLElement | null = null;
+    let nodes: HTMLElement | null = null;
     // Paint the current stop on the labels (accent + caret) and on the track dots:
     // dots to the thumb's left take the filled-track colour, and the dot under the
     // thumb itself is dropped so it can't show through it.
     const markActive = (idx: number) => {
-      ticksEl?.querySelectorAll<HTMLElement>(".diaa-log-tick").forEach((el, i) => {
+      ticks?.querySelectorAll<HTMLElement>(".diaa-log-tick").forEach((el, i) => {
         el.toggleClass("is-active", i === idx);
       });
-      nodesEl?.querySelectorAll<HTMLElement>(".diaa-log-node").forEach((el, i) => {
+      nodes?.querySelectorAll<HTMLElement>(".diaa-log-node").forEach((el, i) => {
         el.toggleClass("is-on", i < idx);
         el.toggleClass("is-hidden", i === idx);
       });
     };
 
-    const levelSetting = new Setting(group)
-      .setName("日志级别")
-      .setDesc(
-        "低于所选级别的日志不会输出，同时作用于控制台与 log.txt。默认 error，仅记录错误。"
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, LOG_LEVELS.length - 1, 1)
-          .setValue(active)
-          .onChange(async (value) => {
-            const level = LOG_LEVELS[value] ?? "ERROR";
-            this.plugin.settings.logLevel = level;
-            logger.setMinLevel(level);
-            markActive(value);
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // The control takes the whole card row so the track gets its full width, with
-    // four tick labels and a row of stop dots underneath.
-    const controlEl = levelSetting.controlEl;
-    controlEl.addClass("diaa-log-control");
-    // How far the info column is inset from the control column varies by version
-    // and theme, so measure the gap and indent the track to start flush with the
-    // "日志级别" name rather than assuming a value.
-    const inset = Math.round(
-      levelSetting.nameEl.getBoundingClientRect().left -
-        controlEl.getBoundingClientRect().left
+    setting.addSlider((slider) =>
+      slider
+        .setLimits(0, LOG_LEVELS.length - 1, 1)
+        .setValue(active)
+        .onChange((value) => {
+          const level = LOG_LEVELS[value] ?? "ERROR";
+          void this.assign("logLevel", level);
+          markActive(value);
+        })
     );
-    if (inset > 0 && inset < 40) controlEl.style.marginLeft = `${inset}px`;
 
-    ticksEl = controlEl.createDiv("diaa-log-ticks");
+    const controlEl = setting.controlEl;
+    controlEl.addClass("diaa-log-control");
+
+    const ticksEl = controlEl.createDiv("diaa-log-ticks");
     for (const name of LOG_LEVELS) {
       ticksEl.createSpan({ text: name, cls: "diaa-log-tick" });
     }
     // Dots live in their own layer anchored to the stops: the outer two labels are
     // pushed inside the track ends, so they no longer sit over their stops.
-    nodesEl = ticksEl.createDiv("diaa-log-nodes");
+    const nodesEl = ticksEl.createDiv("diaa-log-nodes");
     for (let i = 0; i < LOG_LEVELS.length; i++) {
       nodesEl.createSpan({ cls: "diaa-log-node" });
     }
-    // Where the track centre sits above the ticks row depends on the theme's
-    // slider height and on whatever gap the flex layout adds, so measure the lift
-    // instead of assuming either.
-    const sliderEl = controlEl.querySelector<HTMLInputElement>('input[type="range"]');
-    if (sliderEl) {
+    ticks = ticksEl;
+    nodes = nodesEl;
+
+    // How far the info column is inset from the control column varies by version
+    // and theme, so measure the gap and indent the track to start flush with the
+    // "日志级别" name rather than assuming a value. Same for where the track centre
+    // sits above the ticks row and for the native thumb's radius.
+    const measure = (): boolean => {
+      const inset = Math.round(
+        setting.nameEl.getBoundingClientRect().left - controlEl.getBoundingClientRect().left
+      );
+      if (inset > 0 && inset < 40) controlEl.style.marginLeft = `${inset}px`;
+
+      const sliderEl = controlEl.querySelector<HTMLInputElement>('input[type="range"]');
+      if (!sliderEl) return false;
       const sliderRect = sliderEl.getBoundingClientRect();
       const ticksRect = ticksEl.getBoundingClientRect();
+      // The declarative path can run this builder before the row is in the
+      // document, in which case nothing has been laid out yet and every
+      // measurement is zero; report that so the caller retries next frame.
+      if (sliderRect.height === 0 || ticksRect.height === 0) return false;
       const lift = ticksRect.top - sliderRect.top - sliderRect.height / 2;
       if (lift > 0) {
         controlEl.style.setProperty("--diaa-log-lift", `${Math.round(lift)}px`);
@@ -520,25 +479,48 @@ export class DragImageSettingTab extends PluginSettingTab {
         controlEl.style.setProperty("--diaa-log-thumb-r", `${thumbR}px`);
       }
       logger.debug("LOG_SLIDER_GEOM", { thumbW, thumbR, lift: Math.round(lift) });
-    }
-    markActive(active);
+      return true;
+    };
+    if (!measure()) window.requestAnimationFrame(() => void measure());
 
-    new Setting(group)
-      .setName("写入 log.txt")
-      .setDesc(
-        "开启后，符合级别的日志写入插件目录下的 log.txt（开启时清空一次，便于读取本次会话）。"
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.logToFile)
-          .onChange(async (value) => {
-            this.plugin.settings.logToFile = value;
-            logger.setFileEnabled(value);
-            if (value) await logger.clearLogFile();
-            await this.plugin.saveSettings();
-          })
-      );
+    markActive(active);
   }
+
+  // ── Sections mounted from sibling modules ────────────────────────────
+
+  private hostAvailable(id: HostId): boolean {
+    return id !== "imageMenuSection" || this.bridge !== null;
+  }
+
+  private mountHost(containerEl: HTMLElement, id: HostId): void {
+    if (id === "imageMenuSection") {
+      if (this.bridge) renderImageMenuSettings(containerEl, this.bridge);
+      return;
+    }
+    this.maintenanceSection().mount(containerEl);
+  }
+
+  /** Vault-wide maintenance: restore every DIAA-managed row to the native
+   *  `![[file]]` form (the counterpart to the always-filled write policy), and
+   *  pre-place the word slots on every hostable row. One instance per tab, so a
+   *  pass in flight is not restarted by a rebuild of the page. */
+  private maintenanceSection(): MaintenanceSection {
+    if (!this.maintenance) {
+      this.maintenance = createMaintenanceSection(this.app, () => this.maintenanceBridge());
+    }
+    return this.maintenance;
+  }
+
+  /** Read per run, so a settings change reaches the next pass without a rebuild. */
+  private maintenanceBridge(): MaintenanceBridge {
+    return {
+      extensions: this.plugin.settings.imageExtensions,
+      alignment: this.plugin.settings.alignment,
+      maxImagesPerRow: this.plugin.settings.maxImagesPerRow,
+    };
+  }
+
+  // ── Description reflow ───────────────────────────────────────────────
 
   /**
    * Re-parent each setting's description element from setting-item-info to the
@@ -550,8 +532,33 @@ export class DragImageSettingTab extends PluginSettingTab {
   private reflowDescriptions(): void {
     this.containerEl.querySelectorAll<HTMLElement>(".setting-item").forEach((item) => {
       const desc = item.querySelector<HTMLElement>(".setting-item-description");
-      if (desc) item.appendChild(desc);
+      // Skip an already-reflowed description: re-appending it would mutate the
+      // DOM again and keep the observer below firing on every pass.
+      if (!desc || desc.parentElement === item) return;
+      // A maintenance row carries a progress bar after its control, and that bar
+      // has to stay the row's last line — so the description goes in above it
+      // rather than at the end.
+      const bar = item.querySelector<HTMLElement>(":scope > .diaa-vault-progress");
+      if (bar) item.insertBefore(desc, bar);
+      else item.appendChild(desc);
     });
+  }
+
+  /**
+   * Declarative rendering has no "finished" hook to reflow from, so watch the
+   * container instead: any batch of rows the framework (or a mounted section)
+   * adds is reflowed as it lands.
+   */
+  private ensureReflow(): void {
+    this.reflowDescriptions();
+    if (this.reflowObserver) return;
+    this.reflowObserver = new MutationObserver(() => this.reflowDescriptions());
+    this.reflowObserver.observe(this.containerEl, { childList: true, subtree: true });
+  }
+
+  private disconnectReflow(): void {
+    this.reflowObserver?.disconnect();
+    this.reflowObserver = null;
   }
 
   /**

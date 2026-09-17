@@ -14,10 +14,11 @@
 
 import { FileSystemAdapter, Notice, Platform, type App, type Editor, type TFile } from 'obsidian';
 import {
-    applyOrientationOp,
+    applyOrientationState,
     findEmbedLine,
     lineOrientation,
     resetOrientationOnLine,
+    type OrientationSizing,
 } from './orientationEdit';
 import { MENU_TEXT, NOTICE_DONE, NOTICE_FAILED } from './menuLabels';
 import { viewOfElement } from './quietWrite';
@@ -48,10 +49,13 @@ import {
     CUT_IMAGE_TITLE,
 } from './cutImage';
 import {
+    composeOrientation,
+    IDENTITY_STATE,
     isIdentityOrientation,
     type OrientationState,
     type TransformOp,
 } from '../imageTransform/orientation';
+import { pinScreenWidthForTurn } from '../imageTransform/transformPreview';
 import type { EditorView } from '@codemirror/view';
 import * as scrollDiag from '../scrollSync/scrollDiag';
 
@@ -319,6 +323,9 @@ interface TransformTarget {
     editor: Editor;
     line: number;
     state: OrientationState;
+    /** The element that was right-clicked: the renderer hangs its live width
+     *  off it, which a frame-changing turn has to move. */
+    img: HTMLImageElement;
     /** The line's text before the write — the diag probe's pre-write snapshot. */
     lineText: string;
     /** CodeMirror view behind the editor: the scroll-jump probe reads it, and
@@ -360,15 +367,50 @@ function resolveTransformTarget(
         editor,
         line,
         state: lineOrientation(lines[line]),
+        img,
         lineText: lines[line],
         view: viewOfElement(img),
     };
 }
 
+/**
+ * The width a frame-changing turn has to write for the picture to come out the
+ * size it went in at.
+ *
+ * A lone image's `W` is the width it takes on the page, while the layout box it
+ * is drawn from holds the un-rotated bitmap; a quarter turn repaints that box on
+ * its side, so the page width moves by one aspect when the box is held put.
+ * Holding the box put is what "rotating does not resize" means.  Null when the
+ * turn leaves the box's handedness alone (180° and both flips — the width is
+ * already right), when the marked element is not a lone row, or when the bitmap
+ * has not loaded and so has no aspect to convert by.
+ *
+ * The width comes from the renderer's model, never from a measurement: a box
+ * clamped by a transiently-narrow container would write that clamp into the note.
+ */
+function pinnedSizing(
+    target: TransformTarget,
+    next: OrientationState
+): OrientationSizing | undefined {
+    const screenWidth = target.img.__diaa_screenWidth?.() ?? null;
+    if (screenWidth === null) return undefined;
+    const { naturalWidth, naturalHeight } = target.img;
+    if (!(naturalWidth > 0 && naturalHeight > 0)) return undefined;
+    const moved = pinScreenWidthForTurn(
+        screenWidth,
+        naturalWidth / naturalHeight,
+        target.state,
+        next
+    );
+    return moved === null ? undefined : { sFlag: '1', widthPx: Math.max(1, Math.round(moved)) };
+}
+
 function applyTransformOp(target: TransformTarget, op: TransformOp): void {
+    const next = composeOrientation(target.state, op);
     scrollDiag.openRotationWindow(target.view, target.line, target.lineText);
-    const ok = applyOrientationOp(target.editor, target.line, op, target.view);
-    scrollDiag.note('op applied', { op, ok });
+    const sizing = pinnedSizing(target, next);
+    const ok = applyOrientationState(target.editor, target.line, next, target.view, sizing);
+    scrollDiag.note('op applied', { op, ok, sizing });
     if (!ok) {
         new Notice(NOTICE_FAILED.transformFailed);
     }
@@ -378,8 +420,11 @@ function applyTransformOp(target: TransformTarget, op: TransformOp): void {
  *  that carries the slot keeps it (`|orig|…`) rather than silently dropping it. */
 function resetTransform(target: TransformTarget): void {
     scrollDiag.openRotationWindow(target.view, target.line, target.lineText);
-    const ok = resetOrientationOnLine(target.editor, target.line, target.view);
-    scrollDiag.note('reset applied', { ok });
+    // Returning to the original orientation unwinds a quarter turn too, so it
+    // moves the page width by the same aspect the turn did.
+    const sizing = pinnedSizing(target, IDENTITY_STATE);
+    const ok = resetOrientationOnLine(target.editor, target.line, target.view, sizing);
+    scrollDiag.note('reset applied', { ok, sizing });
     if (!ok) {
         new Notice(NOTICE_FAILED.transformFailed);
     }

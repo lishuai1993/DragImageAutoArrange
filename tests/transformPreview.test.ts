@@ -12,7 +12,12 @@
  * half turns leave the bounding box alone and must stay unscaled.
  */
 import { describe, it, expect } from 'vitest';
-import { applyOrientationPreview, displayedImageSize } from '../src/imageTransform/transformPreview';
+import {
+  applyOrientationPreview,
+  boxForScreenWidth,
+  displayedImageSize,
+  pinScreenWidthForTurn,
+} from '../src/imageTransform/transformPreview';
 import type { OrientationState } from '../src/imageTransform/orientation';
 
 /** jsdom lays nothing out, so the sizes the helper reads are written directly. */
@@ -127,5 +132,56 @@ describe('displayedImageSize', () => {
 
   it('answers with the box when there is nothing to measure', () => {
     expect(displayedImageSize(0, 0, state(1), 944)).toEqual({ width: 0, height: 0, scale: 1 });
+  });
+});
+
+describe('boxForScreenWidth', () => {
+  it('is the box itself when nothing is turned', () => {
+    // A 2:1 bitmap: 400 across the page is a 400×200 box, whatever mirror is on.
+    expect(boxForScreenWidth(400, 2, state(0))).toEqual({ width: 400, height: 200 });
+    expect(boxForScreenWidth(400, 2, state(2, true))).toEqual({ width: 400, height: 200 });
+  });
+
+  it('turns the box on its side for a quarter turn', () => {
+    // The page width moves under the box's *height*, so the box keeps the
+    // bitmap's aspect and is `screenWidth × aspect` wide.
+    expect(boxForScreenWidth(400, 2, state(1))).toEqual({ width: 800, height: 400 });
+    expect(boxForScreenWidth(300, 0.5, state(3))).toEqual({ width: 150, height: 300 });
+  });
+
+  it('round-trips through displayedImageSize', () => {
+    for (const turns of [0, 1, 2, 3] as const) {
+      const box = boxForScreenWidth(400, 2, state(turns));
+      expect(displayedImageSize(box.width, box.height, state(turns)).width).toBe(400);
+    }
+  });
+
+  it('falls back to a square box when the aspect is unusable', () => {
+    expect(boxForScreenWidth(400, 0, state(1))).toEqual({ width: 400, height: 400 });
+    expect(boxForScreenWidth(400, Number.NaN, state(0))).toEqual({ width: 400, height: 400 });
+  });
+});
+
+describe('pinScreenWidthForTurn', () => {
+  it('moves the width by one aspect when the turn swaps the box', () => {
+    // 2:1 landscape 400 wide on the page: turned, holding the 400-wide box put
+    // leaves the page reading the box's height, 200.
+    expect(pinScreenWidthForTurn(400, 2, state(0), state(1))).toBe(200);
+    expect(pinScreenWidthForTurn(200, 2, state(1), state(2))).toBe(400);
+    expect(pinScreenWidthForTurn(400, 0.5, state(2), state(3))).toBe(800);
+  });
+
+  it('is null when the turn leaves the box alone', () => {
+    expect(pinScreenWidthForTurn(400, 2, state(0), state(2))).toBeNull();
+    expect(pinScreenWidthForTurn(400, 2, state(0), state(0, true))).toBeNull();
+    expect(pinScreenWidthForTurn(400, 2, state(1, true), state(3))).toBeNull();
+  });
+
+  it('holds the box put across a there-and-back pair', () => {
+    const boxWidth = (w: number, s: OrientationState) => boxForScreenWidth(w, 2, s).width;
+    const there = pinScreenWidthForTurn(400, 2, state(0), state(1))!;
+    const back = pinScreenWidthForTurn(there, 2, state(1), state(0))!;
+    expect(boxWidth(there, state(1))).toBe(boxWidth(400, state(0)));
+    expect(back).toBe(400);
   });
 });

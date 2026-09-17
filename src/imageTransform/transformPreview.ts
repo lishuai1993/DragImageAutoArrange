@@ -16,6 +16,12 @@
  *   - a container with a fixed box (Reading Mode, multi-image members) keeps the
  *     box and needs the legacy fit scale that shrinks the drawing back inside
  *     it, which `applyOrientationPreview` measures when no scale is supplied.
+ *
+ * A lone image's width is written down in the second of these two frames: the
+ * *box* holds the un-rotated bitmap, the *screen* is what the reader sees, and
+ * `boxForScreenWidth` / `pinScreenWidthForTurn` convert between them.  The two
+ * coincide for every even orientation and differ by one aspect for a quarter
+ * turn.
  */
 
 import type { OrientationState } from './orientation';
@@ -113,4 +119,49 @@ export function displayedImageSize(
         if (Number.isFinite(k) && k < 1) scale = Number(k.toFixed(4));
     }
     return { width: swapped.width * scale, height: swapped.height * scale, scale };
+}
+
+/** Aspect with the degenerate values filtered out, so callers can divide. */
+function usableAspect(aspect: number): number {
+    return aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
+}
+
+/**
+ * The layout box that draws `screenWidth` across the page for `state`.
+ *
+ * The box holds the un-rotated bitmap, so its own aspect is always the bitmap's
+ * (`aspect` = natural width / natural height) and an even orientation draws it
+ * verbatim.  A quarter turn repaints it on its side, which puts the picture's
+ * on-page width under the box's *height* — the box therefore has to be
+ * `screenWidth × aspect` wide for the height it reports to land on
+ * `screenWidth`.  Passing the result through `displayedImageSize` gets back the
+ * size the reader sees.
+ */
+export function boxForScreenWidth(
+    screenWidth: number,
+    aspect: number,
+    state: OrientationState
+): { width: number; height: number } {
+    const a = usableAspect(aspect);
+    return state.turns % 2 === 1
+        ? { width: screenWidth * a, height: screenWidth }
+        : { width: screenWidth, height: screenWidth / a };
+}
+
+/**
+ * The screen width a row must carry after a turn for the picture to come out
+ * the size it went in at — the box is what holds that size, and a quarter turn
+ * repaints the box on its side, so holding the box put means moving the written
+ * width by one aspect.  Null when the turn leaves the box's handedness alone
+ * (an even turn: 180° and both flips), where the written width is already right.
+ */
+export function pinScreenWidthForTurn(
+    currentScreenWidth: number,
+    aspect: number,
+    current: OrientationState,
+    next: OrientationState
+): number | null {
+    if (current.turns % 2 === next.turns % 2) return null;
+    const a = usableAspect(aspect);
+    return next.turns % 2 === 1 ? currentScreenWidth / a : currentScreenWidth * a;
 }

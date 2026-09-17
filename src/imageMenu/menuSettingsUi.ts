@@ -5,9 +5,15 @@
  * The host is reached only through `ImageMenuBridge`, so this module never sees
  * the facade, the persistence key or Obsidian's data object — it just asks for
  * the current settings, mutates them in place, and asks for a save.
+ *
+ * One row table, two render paths. Obsidian 1.13 renders a settings tab from
+ * definitions, and puts a group's heading and card around the rows itself, so
+ * `imageMenuSectionDefinitions` only supplies copy and row bodies. Older
+ * versions draw the tab imperatively, so `renderImageMenuSettings` builds the
+ * heading and the group div by hand and mounts the same rows into it.
  */
 
-import { ButtonComponent, Setting } from 'obsidian';
+import { ButtonComponent, Setting, type SettingDefinitionItem } from 'obsidian';
 import { applySettingButtonStyle } from '../settingsButton';
 import { FILE_OPERATION_LABELS } from './menuLabels';
 import { restoreDefaultFileOperationOrder, type ImageMenuSettings } from './settingsModel';
@@ -19,117 +25,156 @@ export interface ImageMenuBridge {
     saveSettings(): Promise<void>;
 }
 
-/** Mount the image-menu settings section at the end of `containerEl`. */
-export function renderImageMenuSettings(containerEl: HTMLElement, bridge: ImageMenuBridge): void {
-    new ImageMenuSettingsSection(containerEl, bridge).render();
+/** The section heading. The declarative path hands it to the framework; the
+ *  imperative path creates the heading element itself. */
+const HEADING = '图片右键菜单设置';
+
+/** One row: its copy, plus the body that fills its control area. */
+interface SectionRow {
+    name: string;
+    desc?: string;
+    /** Called with a row that already carries its name and description. */
+    body(setting: Setting): void;
 }
 
-class ImageMenuSettingsSection {
-    private readonly group: HTMLElement;
-
-    constructor(
-        containerEl: HTMLElement,
-        private readonly bridge: ImageMenuBridge
-    ) {
-        new Setting(containerEl).setName('图片右键菜单设置').setHeading();
-        this.group = containerEl.createDiv();
-        this.group.addClass('diaa-settings-group');
-    }
-
-    render(): void {
-        this.renderToggles();
-        this.renderOperations();
-    }
-
-    private get settings(): ImageMenuSettings {
-        return this.bridge.getSettings();
-    }
-
-    private renderToggles(): void {
-        new Setting(this.group)
-            .setName('显示文件信息')
-            .setDesc('在菜单顶部显示图片的文件名、当前缩放比例与原始像素尺寸。')
-            .addToggle(toggle =>
-                toggle.setValue(this.settings.showImageInfo).onChange(async value => {
-                    this.settings.showImageInfo = value;
-                    await this.bridge.saveSettings();
-                })
-            );
-
-        new Setting(this.group)
-            .setName('删除前确认')
-            .setDesc('「删除」会一并移除图片文件时，先弹出确认；仅删除笔记中的引用时不询问。')
-            .addToggle(toggle =>
-                toggle.setValue(this.settings.confirmDelete).onChange(async value => {
-                    this.settings.confirmDelete = value;
-                    await this.bridge.saveSettings();
-                })
-            );
-    }
-
-    /**
-     * The file-operation editor, rebuilt from the settings on every change. Each
-     * mutation is saved and then re-rendered whole, so the buttons' disabled ends
-     * and the row order can never drift out of step with the stored list.
-     */
-    private renderOperations(): void {
-        const list = this.group.createDiv();
-        new Setting(list)
-            .setName('文件操作')
-            .setDesc('菜单底部的文件操作项：开关控制是否显示，箭头调整先后顺序。')
-            .addButton(button =>
-                applySettingButtonStyle(button)
-                    .setButtonText('恢复默认顺序')
-                    .onClick(async () => {
-                        this.settings.fileOperationItems = restoreDefaultFileOperationOrder(
-                            this.settings.fileOperationItems
-                        );
-                        await this.bridge.saveSettings();
-                        this.refreshOperations(list);
-                    })
-            );
-
-        const rows = list.createDiv();
-        const items = this.settings.fileOperationItems;
-        items.forEach((item, index) => {
-            new Setting(rows)
-                .setName(FILE_OPERATION_LABELS[item.id])
-                .addToggle(toggle =>
-                    toggle.setValue(item.visible).onChange(async value => {
-                        item.visible = value;
-                        await this.bridge.saveSettings();
-                    })
-                )
-                .addButton(button => this.wireMove(button, list, index, -1))
-                .addButton(button => this.wireMove(button, list, index, 1));
-        });
-    }
-
-    private refreshOperations(list: HTMLElement): void {
-        list.remove();
-        this.renderOperations();
-    }
+/**
+ * The rows, read from the live settings every time.
+ *
+ * `refresh` redraws the section after a mutation the DOM cannot express on its
+ * own — a reorder. Which redraw that is depends on the path: the declarative
+ * one asks the tab to re-read its definitions, the imperative one rebuilds the
+ * group div it owns. Everything else (a toggle flip) is already reflected by
+ * the model and needs no redraw.
+ */
+function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
+    const settings = bridge.getSettings();
 
     /** Move one row one step (`delta` −1 up / +1 down); disabled at either end. */
-    private wireMove(button: ButtonComponent, list: HTMLElement, index: number, delta: number): void {
-        const label = delta < 0 ? '上移' : '下移';
+    const wireMove = (button: ButtonComponent, index: number, delta: number): void => {
+        const items = settings.fileOperationItems;
         applySettingButtonStyle(button)
             .setButtonText(delta < 0 ? '↑' : '↓')
-            .setTooltip(label);
-        const items = this.settings.fileOperationItems;
+            .setTooltip(delta < 0 ? '上移' : '下移');
         const target = index + delta;
         if (target < 0 || target >= items.length) {
             button.setDisabled(true);
             return;
         }
-        button.onClick(async () => {
+        button.onClick(() => {
             const moved = items[index];
             const displaced = items[target];
             if (!moved || !displaced) return;
             items[index] = displaced;
             items[target] = moved;
-            await this.bridge.saveSettings();
-            this.refreshOperations(list);
+            void bridge.saveSettings().then(refresh);
         });
-    }
+    };
+
+    const rows: SectionRow[] = [
+        {
+            name: '显示文件信息',
+            desc: '在菜单顶部显示图片的文件名、当前缩放比例与原始像素尺寸。',
+            body: (setting) => {
+                setting.addToggle((toggle) =>
+                    toggle.setValue(settings.showImageInfo).onChange((value) => {
+                        settings.showImageInfo = value;
+                        void bridge.saveSettings();
+                    })
+                );
+            },
+        },
+        {
+            name: '删除前确认',
+            desc: '「删除」会一并移除图片文件时，先弹出确认；仅删除笔记中的引用时不询问。',
+            body: (setting) => {
+                setting.addToggle((toggle) =>
+                    toggle.setValue(settings.confirmDelete).onChange((value) => {
+                        settings.confirmDelete = value;
+                        void bridge.saveSettings();
+                    })
+                );
+            },
+        },
+        {
+            name: '文件操作',
+            desc: '菜单底部的文件操作项：开关控制是否显示，箭头调整先后顺序。',
+            body: (setting) => {
+                setting.addButton((button) =>
+                    applySettingButtonStyle(button)
+                        .setButtonText('恢复默认顺序')
+                        .onClick(() => {
+                            settings.fileOperationItems = restoreDefaultFileOperationOrder(
+                                settings.fileOperationItems
+                            );
+                            void bridge.saveSettings().then(refresh);
+                        })
+                );
+            },
+        },
+    ];
+
+    // One row per operation. The row order is the stored order, so a move is a
+    // swap in the model plus a redraw — never a DOM move the framework would
+    // undo on its next render.
+    settings.fileOperationItems.forEach((item, index) => {
+        rows.push({
+            name: FILE_OPERATION_LABELS[item.id],
+            body: (setting) => {
+                setting.addToggle((toggle) =>
+                    toggle.setValue(item.visible).onChange((value) => {
+                        item.visible = value;
+                        void bridge.saveSettings();
+                    })
+                );
+                setting.addButton((button) => wireMove(button, index, -1));
+                setting.addButton((button) => wireMove(button, index, 1));
+            },
+        });
+    });
+
+    return rows;
+}
+
+/**
+ * The image-menu rows as definitions for Obsidian 1.13+, which renders the
+ * group heading and the card around them. `refresh` re-reads these definitions
+ * after a reorder, so the rows come back in the new order.
+ */
+export function imageMenuSectionDefinitions(
+    bridge: ImageMenuBridge,
+    refresh: () => void
+): SettingDefinitionItem[] {
+    return [
+        {
+            type: 'group',
+            heading: HEADING,
+            items: buildRows(bridge, refresh).map((row) => ({
+                name: row.name,
+                desc: row.desc,
+                render: (setting: Setting) => row.body(setting),
+            })),
+        },
+    ];
+}
+
+/** Mount the image-menu settings section at the end of `containerEl`, the
+ *  heading and group div included — the path for Obsidian below 1.13. */
+export function renderImageMenuSettings(containerEl: HTMLElement, bridge: ImageMenuBridge): void {
+    new Setting(containerEl).setName(HEADING).setHeading();
+    const group = containerEl.createDiv();
+    group.addClass('diaa-settings-group');
+
+    const mount = (): void => {
+        for (const row of buildRows(bridge, refresh)) {
+            const setting = new Setting(group).setName(row.name);
+            if (row.desc) setting.setDesc(row.desc);
+            row.body(setting);
+        }
+    };
+    const refresh = (): void => {
+        group.empty();
+        mount();
+    };
+
+    mount();
 }

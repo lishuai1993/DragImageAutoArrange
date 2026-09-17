@@ -31,7 +31,7 @@ export type ImageDisplay =
   | { kind: "multi"; share: number; fill: number | null }
   //  行宽份额 (flexGrow)      列内填充比 (scale)，null = 满格默认
   | { kind: "single-follow" }                 // S=0 跟随设置
-  | { kind: "single-manual"; widthPx: number }; // S=1 绝对像素宽
+  | { kind: "single-manual"; widthPx: number }; // S=1 手动态：图片在屏幕上的横向占宽（px）
 
 export interface RowImage {
   line: number;

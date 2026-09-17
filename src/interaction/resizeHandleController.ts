@@ -337,17 +337,27 @@ export class ResizeHandleController {
               });
             }
           } else {
-            // ── Single-image row: persist the manual pixel width as |W|1 ──
-            // Only in normal mode (image ≤ container width; container height is
-            // cleared).  Zoom mode (image enlarged past container width) isn't
-            // representable as a capped width, so it isn't persisted.
+            // ── Single-image row: persist the manual screen width as |1|W ──
+            // The stored number is the width the picture takes across the page,
+            // and `getImageContentRect` measures the layout box — which a
+            // quarter turn paints on its side, putting the page width under its
+            // height.  Only in normal mode (image ≤ container width; container
+            // height is cleared).  Zoom mode (image enlarged past container
+            // width) isn't representable as a capped width, so it isn't
+            // persisted.
             const isZoom = !!this.host.getContainer()?.style.height;
             const contentRect = this.host.getImageContentRect(0);
-            if (!isZoom && contentRect && contentRect.width > 0) {
-              this.host.setSingleImageWidth(Math.round(contentRect.width));
-              log.debug("resize-mouseup single width saved", {
-                widthPx: Math.round(contentRect.width),
-              });
+            if (!isZoom && contentRect) {
+              const screenW = this.host.isTurnedImage(0)
+                ? contentRect.height
+                : contentRect.width;
+              if (screenW > 0) {
+                this.host.setSingleImageWidth(Math.round(screenW));
+                log.debug("resize-mouseup single width saved", {
+                  widthPx: Math.round(screenW),
+                  turned: this.host.isTurnedImage(0),
+                });
+              }
             }
           }
 

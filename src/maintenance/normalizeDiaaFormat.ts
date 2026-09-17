@@ -14,7 +14,8 @@
 // The one numeric this pass does touch is a single row's bare width: `|400` and
 // `|400x300` are Obsidian's native sizing, which DIAA's first render would
 // otherwise overwrite with a setting-driven `|0|W`.  Promoting them to `|1|400`
-// keeps the hand-written width as a manual one.
+// keeps the hand-written width as a manual one — read, like every manual width,
+// as the width the picture takes across the page.
 //
 // A line whose params carry anything unrecognised — an alias, a size form on a
 // multi member, a shape DIAA never writes — is not ours to rewrite and is left

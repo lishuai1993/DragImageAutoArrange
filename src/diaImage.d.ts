@@ -21,6 +21,9 @@ declare global {
     __diaa_resetTarget?: (() => { mode: SingleImageSizeMode; width: number }) | null;
     /** Drop a manual single-image width, returning to the setting-driven size. */
     __diaa_resetSingleManual?: (() => unknown) | null;
+    /** The width this image currently takes on the page, or null when the
+     *  renderer cannot say. Mirrors `screenWidth` in imageMarkers.ts. */
+    __diaa_screenWidth?: (() => number | null) | null;
   }
 }
 

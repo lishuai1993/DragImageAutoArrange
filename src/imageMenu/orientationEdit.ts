@@ -28,6 +28,7 @@ import {
     type TransformOp,
 } from '../imageTransform/orientation';
 import { embedParamString } from '../imageParse/embedRaw';
+import { isAlignmentWord } from '../imageParse/rowParams';
 import { minimalTextChange } from './noteEdit';
 import { writeQuietly } from './quietWrite';
 
@@ -50,13 +51,34 @@ export function lineOrientation(line: string): OrientationState {
     return parseOrientationWord(embedParamString(line)) ?? IDENTITY_STATE;
 }
 
+/**
+ * A single row's sizing slots, for when a rotation has to move the row's width
+ * along with its orientation.  `sFlag` is the S word (`1` = the width is
+ * pinned), `widthPx` the width the picture takes on the page.
+ */
+export interface OrientationSizing {
+    sFlag: '0' | '1';
+    widthPx: number;
+}
+
 /** Replace (or introduce) the orientation word, leaving every other param in
  *  place and in order.  The word always leads: Obsidian reads the LAST number
- *  as the width, so it can never sit between numbers. */
-function withOrientation(params: string, state: OrientationState): string {
+ *  as the width, so it can never sit between numbers.
+ *
+ *  A sizing override owns everything past the alignment word.  That is what a
+ *  single row's remaining slots are — its `S|W` — so an older spelling sitting
+ *  there (a bare legacy width, say) is exactly what it is replacing. */
+function withOrientation(
+    params: string,
+    state: OrientationState,
+    sizing?: OrientationSizing
+): string {
     const tokens = params === '' ? [] : params.split('|');
-    const rest = isOrientationWord(tokens[0]) ? tokens.slice(1) : tokens;
-    return [orientationWord(state), ...rest].filter((p) => p !== '').join('|');
+    let rest = isOrientationWord(tokens[0]) ? tokens.slice(1) : tokens;
+    if (sizing) rest = isAlignmentWord(rest[0]) ? rest.slice(0, 1) : [];
+    const out = [orientationWord(state), ...rest];
+    if (sizing) out.push(sizing.sFlag, String(Math.max(1, Math.round(sizing.widthPx))));
+    return out.filter((p) => p !== '').join('|');
 }
 
 /** Split a text-bearing paragraph so the embed stands on its own line, then
@@ -77,12 +99,19 @@ function upgradeLine(line: string, state: OrientationState): string | null {
 }
 
 /** The line rewritten to declare `state`, or null when it cannot be done. */
-export function setLineOrientation(line: string, state: OrientationState): string | null {
+export function setLineOrientation(
+    line: string,
+    state: OrientationState,
+    sizing?: OrientationSizing
+): string | null {
     const row = ROW_LINE.exec(line);
     if (row) {
         const [, lead, , target, params = '', trail] = row;
-        return `${lead}![[${target}|${withOrientation(params, state)}]]${trail}`;
+        return `${lead}![[${target}|${withOrientation(params, state, sizing)}]]${trail}`;
     }
+    // An upgraded line is a new row with no sizing slots of its own, and a
+    // sizing override only ever comes from a renderer that already owns one —
+    // so it is dropped, never invented.
     return upgradeLine(line, state);
 }
 
@@ -96,11 +125,12 @@ export function applyOpToLine(line: string, op: TransformOp): string | null {
 export function rewriteLineTo(
     text: string,
     line0: number,
-    state: OrientationState
+    state: OrientationState,
+    sizing?: OrientationSizing
 ): string | null {
     const lines = text.split('\n');
     if (line0 < 0 || line0 >= lines.length) return null;
-    const next = setLineOrientation(lines[line0], state);
+    const next = setLineOrientation(lines[line0], state, sizing);
     if (next === null || next === lines[line0]) return null;
     lines[line0] = next;
     return lines.join('\n');
@@ -123,15 +153,20 @@ export function findEmbedLine(text: string, targets: readonly string[]): number 
     return hits.length === 1 ? hits[0] : null;
 }
 
-/** Write `state` onto line `line0` as one undoable editor transaction. */
+/**
+ * Write `state` onto line `line0` as one undoable editor transaction.  A
+ * `sizing` override rides along in the same transaction, so a rotation that has
+ * to move the row's width as well still undoes in a single step.
+ */
 export function applyOrientationState(
     editor: Editor,
     line0: number,
     state: OrientationState,
-    view: EditorView | null = null
+    view: EditorView | null = null,
+    sizing?: OrientationSizing
 ): boolean {
     const before = editor.getValue();
-    const after = rewriteLineTo(before, line0, state);
+    const after = rewriteLineTo(before, line0, state, sizing);
     if (after === null) return false;
     const change = minimalTextChange(before, after);
     if (!change) return false;
@@ -141,28 +176,12 @@ export function applyOrientationState(
     return true;
 }
 
-/** Compose `op` onto the line's current orientation and write it back. */
-export function applyOrientationOp(
-    editor: Editor,
-    line0: number,
-    op: TransformOp,
-    view: EditorView | null = null
-): boolean {
-    const lines = editor.getValue().split('\n');
-    if (line0 < 0 || line0 >= lines.length) return false;
-    return applyOrientationState(
-        editor,
-        line0,
-        composeOrientation(lineOrientation(lines[line0]), op),
-        view
-    );
-}
-
 /** Return the line to its original orientation, keeping the slot explicit. */
 export function resetOrientationOnLine(
     editor: Editor,
     line0: number,
-    view: EditorView | null = null
+    view: EditorView | null = null,
+    sizing?: OrientationSizing
 ): boolean {
-    return applyOrientationState(editor, line0, IDENTITY_STATE, view);
+    return applyOrientationState(editor, line0, IDENTITY_STATE, view, sizing);
 }

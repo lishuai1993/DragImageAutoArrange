@@ -10,7 +10,6 @@ import { describe, it, expect } from 'vitest';
 import type { Editor } from 'obsidian';
 import {
   applyOpToLine,
-  applyOrientationOp,
   applyOrientationState,
   findEmbedLine,
   lineOrientation,
@@ -82,6 +81,42 @@ describe('setLineOrientation (row line)', () => {
   });
 });
 
+describe('setLineOrientation (sizing override)', () => {
+  const pin = { sFlag: '1' as const, widthPx: 250 };
+
+  it('replaces the S and W slots, keeping alignment where it was', () => {
+    expect(setLineOrientation('![[a.png|orig|center|0|800]]', { turns: 1, mirror: false }, pin))
+      .toBe('![[a.png|r90|center|1|250]]');
+  });
+
+  it('introduces the slots on a bare embed', () => {
+    expect(setLineOrientation('![[a.png]]', { turns: 1, mirror: false }, pin))
+      .toBe('![[a.png|r90|1|250]]');
+  });
+
+  it('takes over a legacy width sitting where the S|W pair belongs', () => {
+    expect(setLineOrientation('![[a.png|800]]', { turns: 1, mirror: false }, pin))
+      .toBe('![[a.png|r90|1|250]]');
+  });
+
+  it('leaves the slots alone when no override is given', () => {
+    expect(setLineOrientation('![[a.png|left|120|100]]', { turns: 1, mirror: false }))
+      .toBe('![[a.png|r90|left|120|100]]');
+  });
+
+  it('rounds the width and never writes a non-positive one', () => {
+    expect(setLineOrientation('![[a.png]]', IDENTITY_STATE, { sFlag: '1', widthPx: 250.4 }))
+      .toBe('![[a.png|orig|1|250]]');
+    expect(setLineOrientation('![[a.png]]', IDENTITY_STATE, { sFlag: '1', widthPx: 0 }))
+      .toBe('![[a.png|orig|1|1]]');
+  });
+
+  it('is ignored on the upgrade path, which has no slots to move', () => {
+    expect(setLineOrientation('see ![[a.png]] here', { turns: 1, mirror: false }, pin))
+      .toBe('see\n![[a.png|r90]]\nhere');
+  });
+});
+
 describe('setLineOrientation (text-bearing upgrade)', () => {
   it('splits a paragraph so the embed stands alone, then orients it', () => {
     expect(setLineOrientation('see ![[a.png]] here', { turns: 1, mirror: false }))
@@ -150,7 +185,7 @@ describe('findEmbedLine', () => {
 describe('editor transaction', () => {
   it('writes the composed orientation back through one range', () => {
     const editor = new FakeEditor('![[a.png]]\nbody');
-    expect(applyOrientationOp(asEditor(editor), 0, 'rotate90cw')).toBe(true);
+    expect(applyOrientationState(asEditor(editor), 0, { turns: 1, mirror: false })).toBe(true);
     expect(editor.getValue()).toBe('![[a.png|r90]]\nbody');
   });
 
@@ -158,6 +193,17 @@ describe('editor transaction', () => {
     const editor = new FakeEditor('![[a.png|r90|left]]');
     expect(resetOrientationOnLine(asEditor(editor), 0)).toBe(true);
     expect(editor.getValue()).toBe('![[a.png|orig|left]]');
+  });
+
+  it('carries a sizing override in the same transaction', () => {
+    const editor = new FakeEditor('![[a.png|orig|center|0|800]]');
+    expect(
+      applyOrientationState(asEditor(editor), 0, { turns: 1, mirror: false }, null, {
+        sFlag: '1',
+        widthPx: 400,
+      })
+    ).toBe(true);
+    expect(editor.getValue()).toBe('![[a.png|r90|center|1|400]]');
   });
 
   it('reports false when the state is already what it would write', () => {

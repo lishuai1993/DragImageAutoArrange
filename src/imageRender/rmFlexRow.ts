@@ -330,6 +330,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
           width: options.singleImageWidth,
         }),
         resetSingleManual: null,
+        screenWidth: null,
       });
     }
     row.appendChild(embed);

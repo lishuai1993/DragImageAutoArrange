@@ -21,7 +21,7 @@ import type { Editor } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { writeQuietly, viewOfElement } from '../src/imageMenu/quietWrite';
 import { IDENTITY_STATE } from '../src/imageTransform/orientation';
-import { applyOrientationOp, applyOrientationState } from '../src/imageMenu/orientationEdit';
+import { applyOrientationState } from '../src/imageMenu/orientationEdit';
 
 /** Minimal editor whose text is one linear string; offsets map straight to ch. */
 class FakeEditor {
@@ -166,7 +166,7 @@ describe('writeQuietly', () => {
   it('is wired through the rotate path', () => {
     const { view, dispatch } = fakeView();
     const editor = new FakeEditor('![[a.png]]');
-    expect(applyOrientationOp(asEditor(editor), 0, 'rotate90cw', view)).toBe(true);
+    expect(applyOrientationState(asEditor(editor), 0, { turns: 1, mirror: false }, view)).toBe(true);
     expect(editor.getValue()).toBe('![[a.png|r90]]');
     expect(dispatch).toHaveBeenCalledTimes(1);
   });

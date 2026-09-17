@@ -292,6 +292,9 @@ export function createReadingModeProcessor(
               width: options.singleImageWidth,
             }),
             resetSingleManual: null,
+            // Reading Mode persists nothing, so a rotation here cannot pin the
+            // row's width — it stays a read-only surface.
+            screenWidth: null,
           });
           applyEmbedOrientation(embed, img);
         }

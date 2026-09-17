@@ -9,7 +9,8 @@ import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/
 import * as scrollDiag from "../scrollSync/scrollDiag";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { attachDiaImageMarkers } from "./imageMarkers";
-import { applyOrientationPreview, displayedImageSize } from "../imageTransform/transformPreview";
+import { applyOrientationPreview, boxForScreenWidth, displayedImageSize } from "../imageTransform/transformPreview";
+import { orientedSize } from "../imageTransform/orientation";
 import { DividerController, DividerHost } from "../interaction/dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "../interaction/resizeHandleController";
 import { DragReorderController, DragReorderHost } from "../interaction/dragReorderController";
@@ -306,6 +307,26 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const d = this.group.images[0]?.display;
     return this.isSingleRow() && d?.kind === "single-manual";
   }
+  /**
+   * The width this single image currently takes on the page — the screen frame,
+   * from the model rather than measured off a container that may be transiently
+   * narrow, and so the number a turn has to move by one aspect to hold the
+   * picture's size. A manual row carries it in `display.widthPx`; a follow row
+   * derives it from the setting, which for natural mode needs the bitmap.
+   * Null for anything but a single row, or when that derivation has no answer.
+   */
+  private currentScreenWidth(): number | null {
+    if (!this.isSingleRow()) return null;
+    const img = this.group.images[0];
+    if (!img) return null;
+    if (img.display.kind === "single-manual") return img.display.widthPx;
+    if (this.options.singleImageSizeMode === "fixed") {
+      return Math.max(SINGLE_IMAGE_MIN_WIDTH, Math.round(this.options.singleImageWidth));
+    }
+    const meta = this.loadedMetas.get(0);
+    if (!meta || meta.naturalWidth <= 0 || meta.naturalHeight <= 0) return null;
+    return Math.round(orientedSize(img.orientation, meta.naturalWidth, meta.naturalHeight).width);
+  }
   /** A member's live flex share: multi rows carry it in display.share; a single
    *  manual row maps its pixel width back to the flex-grammar value (W/100) the
    *  DOM used to seed. */
@@ -349,12 +370,15 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
   /**
    * Persist a single image's manually-resized width as `|1|W` (S=1 = manual).
-   * Width lives on the display model (item CSS flex-grow is clobbered by "0 0 auto").
+   * `screenWidthPx` is the width the picture takes across the page, not the
+   * width of the box it is laid out in — the two differ whenever a quarter turn
+   * has the box painted on its side.  Width lives on the display model (item CSS
+   * flex-grow is clobbered by "0 0 auto").
    */
-  setSingleImageWidth(widthPx: number): void {
+  setSingleImageWidth(screenWidthPx: number): void {
     const img = this.group.images[0];
     if (!img) return;
-    const w = Math.max(1, Math.round(widthPx));
+    const w = Math.max(1, Math.round(screenWidthPx));
     img.display = { kind: "single-manual", widthPx: w };
     img.hasSizing = true;
     this.singleWidthPx = w;
@@ -894,6 +918,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         width: this.options.singleImageWidth,
       }),
       resetSingleManual: () => this.resetSingleManualWidth(),
+      screenWidth: () => this.currentScreenWidth(),
     });
 
     // Watch for Obsidian asynchronously modifying the img element.
@@ -1210,11 +1235,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
   /**
    * Size and render a single-image row, and keep its markdown in sync as
-   * `![[file|W|S]]`.  W = the rendered pixel width; S = 0 (follows the size
-   * setting) or 1 (manually resized).  Manual (S=1) images use their stored W;
-   * S=0 images derive W from the current setting.  When the resulting `|W|S`
-   * differs from the parsed line, a deferred markdown write is scheduled.
-   * Returns the rendered image height (px).
+   * `![[file|rot|align|S|W]]`.  W is the width the picture takes on the page —
+   * the *screen* width — not the width of the box it is laid out in; the two
+   * differ by one aspect whenever a quarter turn has the box painted on its
+   * side (`boxForScreenWidth`).  S = 0 (follows the size setting) or 1
+   * (manually resized).  Manual (S=1) rows use their stored screen width; S=0
+   * rows derive it from the setting.  When the resulting line differs from the
+   * parsed one, a deferred markdown write is scheduled.  Returns the rendered
+   * image height (px).
    */
   private layoutSingleImage(containerWidth: number): number {
     const img = this.group.images[0];
@@ -1222,47 +1250,55 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (!meta || meta.naturalWidth <= 0 || meta.naturalHeight <= 0) return this.rowHeight;
     const aspect = meta.naturalWidth / meta.naturalHeight;
     const manual = this.isSingleManual();
+    const turned = this.isTurnedImage(0);
+    const state = this.group.images[0].orientation;
+    // "Natural" in the screen frame: a quarter turn swaps the bitmap's own
+    // width and height, so a 2:1 landscape reads as half as wide turned as it
+    // does upright.
+    const naturalScreenW = orientedSize(state, meta.naturalWidth, meta.naturalHeight).width;
 
-    // Intended width — deliberately NOT clamped to the (possibly transient)
-    // container width. Persisting this instead of the clamped render width keeps
-    // `|S|W` stable across scroll/re-layout; otherwise a momentarily-narrow
-    // container on widget rebuild rewrites W every frame and churns the document
-    // (the scroll flicker).
-    let intendedWidth: number;
+    // Intended screen width — deliberately NOT clamped to the (possibly
+    // transient) container width. Persisting this instead of the clamped render
+    // width keeps `|S|W` stable across scroll/re-layout; otherwise a
+    // momentarily-narrow container on widget rebuild rewrites W every frame and
+    // churns the document (the scroll flicker).
+    let intendedScreenW: number;
     if (manual) {
-      intendedWidth = img.display.kind === "single-manual" ? img.display.widthPx : 1;
+      intendedScreenW = img.display.kind === "single-manual" ? img.display.widthPx : 1;
     } else if (this.options.singleImageSizeMode === "fixed") {
-      intendedWidth = Math.max(SINGLE_IMAGE_MIN_WIDTH, Math.round(this.options.singleImageWidth));
+      intendedScreenW = Math.max(SINGLE_IMAGE_MIN_WIDTH, Math.round(this.options.singleImageWidth));
     } else {
-      intendedWidth = Math.round(meta.naturalWidth);
+      intendedScreenW = Math.round(naturalScreenW);
     }
 
-    // Rendered width: clamp to the container so the image always fits. Behaviour
-    // is identical to before (setting-driven reuses computeSingleImageWidth).
-    let renderWidth: number;
+    // Rendered screen width: clamp to the container so the picture always fits.
+    // The setting-driven branch is the old computation — only the "natural
+    // width" it shrinks has moved to the screen frame.
+    let renderScreenW: number;
     if (manual) {
-      renderWidth = Math.min(intendedWidth, Math.round(containerWidth));
+      renderScreenW = Math.min(intendedScreenW, Math.round(containerWidth));
     } else {
-      renderWidth = computeSingleImageWidth(
+      renderScreenW = computeSingleImageWidth(
         this.options.singleImageSizeMode,
         this.options.singleImageWidth,
-        meta.naturalWidth,
+        naturalScreenW,
         containerWidth
       );
     }
-    renderWidth = Math.max(1, renderWidth);
-    const imageH = Math.max(1, Math.round(renderWidth / aspect));
+    renderScreenW = Math.max(1, renderScreenW);
 
-    // The item is meant to be the picture, not the box around it. Normally the
-    // two are the same; a quarter turn swaps the drawing's width and height, so
-    // the item takes the swapped size and, when that width would overrun the
-    // page, a uniform fit scale brings the whole picture back to page width.
-    // The img keeps the un-rotated box — it has to, it holds the un-rotated
-    // bitmap — and is centred in the item by applyAlignmentToAll.
-    const turned = this.isTurnedImage(0);
-    const state = this.group.images[0].orientation;
+    // The box that draws that width, and the size it ends up drawn at. The item
+    // is meant to be the picture, not the box around it: normally the two are
+    // the same; a quarter turn swaps the drawing's width and height, so the item
+    // takes the swapped size and, when that width would overrun the page, a
+    // uniform fit scale brings the whole picture back to page width. The img
+    // keeps the un-rotated box — it has to, it holds the un-rotated bitmap — and
+    // is centred in the item by applyAlignmentToAll.
+    const box = boxForScreenWidth(renderScreenW, aspect, state);
+    const imageW = Math.max(1, Math.round(box.width));
+    const imageH = Math.max(1, Math.round(box.height));
     const shown = displayedImageSize(
-      renderWidth,
+      imageW,
       imageH,
       state,
       Math.max(1, Math.round(containerWidth))
@@ -1290,13 +1326,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     // Update the data model and materialize `|S|W` into markdown when it drifts.
     // Persist the container-independent intended width so it stays stable.
-    this.singleWidthPx = intendedWidth;
+    this.singleWidthPx = intendedScreenW;
     img.display = manual
-      ? { kind: "single-manual", widthPx: intendedWidth }
+      ? { kind: "single-manual", widthPx: intendedScreenW }
       : { kind: "single-follow" };
     img.hasSizing = true;
     const align = img.alignment ?? this.options.alignment;
-    const target = writeRowImage({ ...img, alignment: align }, { followWidthPx: intendedWidth });
+    const target = writeRowImage({ ...img, alignment: align }, { followWidthPx: intendedScreenW });
     if (target !== img.raw) {
       img.raw = target;
       window.requestAnimationFrame(() => this.persistCallback?.());

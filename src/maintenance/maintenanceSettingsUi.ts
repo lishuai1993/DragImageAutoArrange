@@ -7,11 +7,27 @@
  * owns, confirm, write — so they share one runner and differ only in copy and in
  * the plan they hand it (see ./clearDiaaFormat and ./normalizeDiaaFormat).
  *
+ * One row table, two render paths, plus state that outlives the DOM.  A pass runs
+ * for seconds and paints its own progress, so what a row shows cannot live in the
+ * row: it lives in the section, keyed by action, and every render repaints from
+ * it.  A rebuild of the tab — which the framework's diff does freely, throwing
+ * the rows away — therefore restores the bar where it stood instead of snapping
+ * back to 尚未执行.  Obsidian 1.13 renders the tab from definitions, so the
+ * section supplies `definitions()`; older versions draw it imperatively, so it
+ * supplies `mount()` as well.
+ *
  * User-facing copy names the plugin's own acronym in caps ("DIAA 格式"); the
  * sentence-case lint rule is configured to keep it — see eslint.config.mjs.
  */
 
-import { App, Modal, Notice, Setting, type ButtonComponent } from 'obsidian';
+import {
+  App,
+  Modal,
+  Notice,
+  Setting,
+  type ButtonComponent,
+  type SettingDefinitionItem,
+} from 'obsidian';
 import type { Alignment } from '../constants';
 import { clearPlan } from './clearDiaaFormat';
 import { makeNormalizePlan } from './normalizeDiaaFormat';
@@ -33,13 +49,15 @@ export interface MaintenanceBridge {
   maxImagesPerRow: number;
 }
 
-/** Mount the maintenance section at the end of `containerEl`. */
-export function renderMaintenanceSettings(
-  containerEl: HTMLElement,
-  app: App,
-  bridge: () => MaintenanceBridge
-): void {
-  new MaintenanceSection(containerEl, app, bridge).render();
+/** The section heading. The declarative path hands it to the framework; the
+ *  imperative path creates the heading element itself. */
+const HEADING = 'DIAA 格式维护';
+
+/** The maintenance section as the settings tab sees it: definitions for the
+ *  1.13 path, a mount point for the path below it. */
+export interface MaintenanceSection {
+  definitions(): SettingDefinitionItem[];
+  mount(containerEl: HTMLElement): void;
 }
 
 /** One vault-wide action: what it is called, what it says, which lines it owns. */
@@ -62,148 +80,207 @@ interface MaintenanceAction {
   failureNotice: string;
 }
 
+/** Everything a row shows that a rebuild would otherwise wipe. Held by the
+ *  section, one per action, for as long as the tab lives. */
+interface ActionState {
+  label: string;
+  /** Completed share of the bar, 0–1. */
+  fraction: number;
+  /** Accent fill once the whole pass is done. */
+  blue: boolean;
+  busy: boolean;
+  /** Held down because another action's pass is in flight. */
+  locked: boolean;
+}
+
+/** The elements of one rendered row the section paints into. Replaced on every
+ *  render, so it always points at the row that is currently on screen. */
+interface ActionView {
+  button: ButtonComponent;
+  barEl: HTMLElement;
+  labelEl: HTMLElement;
+}
+
+/** The resting copy of every action: nothing has run yet. */
+function restingState(): ActionState {
+  return { label: '尚未执行。', fraction: 0, blue: false, busy: false, locked: false };
+}
+
+/** Create the section. One instance per settings tab, so an in-flight pass and
+ *  its progress survive every rebuild of the page. */
+export function createMaintenanceSection(
+  app: App,
+  bridge: () => MaintenanceBridge
+): MaintenanceSection {
+  return new MaintenanceSectionImpl(app, bridge);
+}
+
 /** 「DIAA 格式维护」: the actions, one runner, one busy flag. */
-class MaintenanceSection {
-  private readonly group: HTMLElement;
-  private readonly views: MaintenanceActionView[] = [];
+class MaintenanceSectionImpl implements MaintenanceSection {
+  private readonly states = new Map<MaintenanceAction, ActionState>();
+  private readonly views = new Map<MaintenanceAction, ActionView>();
   private running = false;
 
-  constructor(
-    containerEl: HTMLElement,
-    private readonly app: App,
-    private readonly bridge: () => MaintenanceBridge
-  ) {
-    new Setting(containerEl).setName('DIAA 格式维护').setHeading();
-    this.group = containerEl.createDiv();
-    this.group.addClass('diaa-settings-group');
+  constructor(private readonly app: App, private readonly bridge: () => MaintenanceBridge) {}
+
+  /**
+   * The rows as definitions for Obsidian 1.13+, which renders the group heading
+   * and the card around them. Read fresh on every render — the rows the framework
+   * builds then repaint themselves from the held state.
+   */
+  definitions(): SettingDefinitionItem[] {
+    return [
+      {
+        type: 'group',
+        heading: HEADING,
+        items: ACTIONS.map((action) => ({
+          name: action.name,
+          desc: action.desc,
+          render: (setting: Setting) => this.renderRow(setting, action),
+        })),
+      },
+    ];
   }
 
-  render(): void {
-    this.mount(CLEAR_ACTION);
-    const sep = this.group.createDiv();
-    sep.setCssStyles({ borderBottom: '1px solid var(--background-modifier-border)' });
-    sep.setCssStyles({ margin: '12px 0' });
-    this.mount(NORMALIZE_ACTION);
+  /** Draw the group by hand, heading and div included — the path below 1.13. */
+  mount(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName(HEADING).setHeading();
+    const group = containerEl.createDiv();
+    group.addClass('diaa-settings-group');
+
+    ACTIONS.forEach((action, index) => {
+      // Rows in a card are divided by the framework's own rule; a bare group div
+      // has none, so the legacy path draws the divider it needs.
+      if (index > 0) {
+        const sep = group.createDiv();
+        sep.addClass('diaa-vault-sep');
+      }
+      this.renderRow(new Setting(group).setName(action.name).setDesc(action.desc), action);
+    });
   }
 
-  private mount(action: MaintenanceAction): void {
-    const view = new MaintenanceActionView(this.group, action);
-    this.views.push(view);
-    view.render(() => void this.run(action, view));
+  /** Fill one row — the button and the progress bar — and register it as the
+   *  action's current picture of its state. */
+  private renderRow(setting: Setting, action: MaintenanceAction): void {
+    // The framework re-renders a matched row into the same element, and clears
+    // only the control column before doing so — the bar from the previous pass
+    // is still standing and has to go, or every rebuild leaves another behind.
+    setting.settingEl.querySelector(".diaa-vault-progress")?.remove();
+
+    let button: ButtonComponent | null = null;
+    setting.addButton((component) => {
+      button = component;
+      applySettingButtonStyle(component)
+        .setButtonText(action.buttonText)
+        .onClick(() => void this.run(action));
+    });
+
+    // The bar sits inside the row, so it travels with the row through the
+    // framework's diff rather than drifting out of it.
+    const progress = setting.settingEl.createDiv();
+    progress.addClass('diaa-vault-progress');
+    const track = progress.createDiv();
+    track.addClass('diaa-vault-track');
+    const barEl = track.createDiv();
+    barEl.addClass('diaa-vault-bar');
+    const labelEl = progress.createDiv();
+    labelEl.addClass('diaa-vault-label');
+
+    if (button) this.views.set(action, { button, barEl, labelEl });
+    this.paint(action);
   }
 
-  private lockOthers(exclude: MaintenanceActionView, locked: boolean): void {
-    for (const view of this.views) if (view !== exclude) view.setLocked(locked);
+  private state(action: MaintenanceAction): ActionState {
+    let state = this.states.get(action);
+    if (!state) {
+      state = restingState();
+      this.states.set(action, state);
+    }
+    return state;
+  }
+
+  /** Merge a change into the held state and show it, if the row is on screen. */
+  private update(action: MaintenanceAction, patch: Partial<ActionState>): void {
+    Object.assign(this.state(action), patch);
+    this.paint(action);
+  }
+
+  private paint(action: MaintenanceAction): void {
+    const view = this.views.get(action);
+    if (!view) return;
+    const state = this.state(action);
+    view.button.setDisabled(state.busy || state.locked);
+    view.button.setButtonText(state.busy ? '处理中…' : action.buttonText);
+    view.labelEl.setText(state.label);
+    const pct = Math.max(0, Math.min(1, state.fraction)) * 100;
+    view.barEl.style.width = `${pct.toFixed(1)}%`;
+    view.barEl.toggleClass('is-done', state.blue);
+  }
+
+  private onProgress(action: MaintenanceAction, p: VaultPassProgress): void {
+    const verb = p.phase === 'scan' ? '正在扫描' : action.applyLabel;
+    this.update(action, {
+      fraction: p.total === 0 ? 1 : p.processed / p.total,
+      blue: false,
+      label: `${verb} ${p.processed} / ${p.total} 个文件…`,
+    });
+  }
+
+  /** Hold every other action's button down while one pass runs. */
+  private lockOthers(exclude: MaintenanceAction, locked: boolean): void {
+    for (const action of ACTIONS) {
+      if (action !== exclude) this.update(action, { locked });
+    }
   }
 
   /** Scan → confirm → write. Every exit path leaves copy explaining what
    *  happened; a second click while one pass is in flight is ignored. */
-  private async run(action: MaintenanceAction, view: MaintenanceActionView): Promise<void> {
+  private async run(action: MaintenanceAction): Promise<void> {
     if (this.running) return;
     this.running = true;
     const bridge = this.bridge();
-    view.setBusy(true);
-    this.lockOthers(view, true);
-    view.setBar(0, false);
-    view.setLabel('正在扫描…');
+    this.update(action, { busy: true, fraction: 0, blue: false, label: '正在扫描…' });
+    this.lockOthers(action, true);
 
     try {
       const plan = action.plan(bridge);
       const scan = await scanVault(this.app, bridge.extensions, plan, (p) =>
-        view.onProgress(p, action.applyLabel)
+        this.onProgress(action, p)
       );
 
       if (scan.entries.length === 0) {
-        view.setBar(1, true);
-        view.setLabel(action.emptyText(scan));
+        this.update(action, { fraction: 1, blue: true, label: action.emptyText(scan) });
         return;
       }
 
       const confirmed = await new MaintenanceConfirmModal(this.app, action, scan).ask();
       if (!confirmed) {
-        view.setBar(0, false);
-        view.setLabel(action.cancelledText(scan));
+        this.update(action, {
+          fraction: 0,
+          blue: false,
+          label: action.cancelledText(scan),
+        });
         return;
       }
 
       const summary = await applyPass(this.app, scan, bridge.extensions, plan, (p) =>
-        view.onProgress(p, action.applyLabel)
+        this.onProgress(action, p)
       );
-      view.setBar(1, true);
       const text = action.doneText(summary);
-      view.setLabel(text);
+      this.update(action, { fraction: 1, blue: true, label: text });
       new Notice(text);
     } catch (error) {
-      view.setBar(0, false);
-      view.setLabel(`操作失败：${String(error)}`);
+      this.update(action, {
+        fraction: 0,
+        blue: false,
+        label: `操作失败：${String(error)}`,
+      });
       new Notice(action.failureNotice);
     } finally {
-      view.setBusy(false);
-      this.lockOthers(view, false);
+      this.update(action, { busy: false });
+      this.lockOthers(action, false);
       this.running = false;
     }
-  }
-}
-
-/** The button + progress bar for one action. Purely a widget: the section drives it. */
-class MaintenanceActionView {
-  private button: ButtonComponent | null = null;
-  private readonly restingText: string;
-  private readonly barEl: HTMLElement;
-  private readonly labelEl: HTMLElement;
-
-  constructor(group: HTMLElement, action: MaintenanceAction) {
-    this.restingText = action.buttonText;
-    new Setting(group)
-      .setName(action.name)
-      .setDesc(action.desc)
-      .addButton((button) => {
-        this.button = button;
-        applySettingButtonStyle(button).setButtonText(action.buttonText);
-      });
-
-    const progress = group.createDiv();
-    progress.addClass('diaa-vault-progress');
-    const track = progress.createDiv();
-    track.addClass('diaa-vault-track');
-    this.barEl = track.createDiv();
-    this.barEl.addClass('diaa-vault-bar');
-    this.labelEl = progress.createDiv();
-    this.labelEl.addClass('diaa-vault-label');
-    this.setLabel('尚未执行。');
-  }
-
-  render(onClick: () => void): void {
-    this.button?.onClick(onClick);
-  }
-
-  setBusy(busy: boolean): void {
-    this.button?.setDisabled(busy);
-    this.button?.setButtonText(busy ? '处理中…' : this.restingText);
-  }
-
-  /** Disable without touching the label — used to hold the other action's
-   *  button quiet while a pass is in flight. */
-  setLocked(locked: boolean): void {
-    this.button?.setDisabled(locked);
-  }
-
-  setLabel(text: string): void {
-    this.labelEl.setText(text);
-  }
-
-  /** `fraction` 0–1 paints the completed share; `blue` swaps the grey fill for
-   *  the accent colour once the whole pass is done. */
-  setBar(fraction: number, blue: boolean): void {
-    const pct = Math.max(0, Math.min(1, fraction)) * 100;
-    this.barEl.style.width = `${pct.toFixed(1)}%`;
-    this.barEl.toggleClass('is-done', blue);
-  }
-
-  onProgress(p: VaultPassProgress, applyLabel: string): void {
-    const verb = p.phase === 'scan' ? '正在扫描' : applyLabel;
-    this.setBar(p.total === 0 ? 1 : p.processed / p.total, false);
-    this.setLabel(`${verb} ${p.processed} / ${p.total} 个文件…`);
   }
 }
 
@@ -237,8 +314,7 @@ class MaintenanceConfirmModal extends Modal {
     this.action.writeConfirmBody(contentEl, this.scan);
 
     // Plain CTA rather than `setDestructive()`: that method only exists from
-    // Obsidian 1.13 and this plugin declares minAppVersion 1.5.0. The copy above
-    // carries the "this is destructive" signal instead.
+    // Obsidian 1.13 and this plugin declares minAppVersion 1.5.0.
     new Setting(contentEl)
       .addButton((button) => button.setButtonText('取消').onClick(() => this.decide(false)))
       .addButton((button) =>
@@ -310,6 +386,7 @@ const CLEAR_ACTION: MaintenanceAction = {
     );
     paragraph(contentEl, '这些行会被改写为 Obsidian 原生格式，例如：');
     sampleBlock(contentEl, '![[示例图片.webp|orig|center|100|67]]', '![[示例图片.webp]]');
+    paragraph(contentEl, '整库改写不可撤销，建议先提交一次。');
   },
 };
 
@@ -354,29 +431,10 @@ const NORMALIZE_ACTION: MaintenanceAction = {
     sampleBlock(contentEl, '![[示例图片.webp|center]]', '![[示例图片.webp|orig|left]]');
     paragraph(contentEl, '单图行手写的原生宽度会转写为手动宽度，免得被首次渲染覆盖掉：');
     sampleBlock(contentEl, '![[示例图片.webp|400]]', '![[示例图片.webp|orig|left|1|400]]');
-
-    paragraph(contentEl, '以下内容会被保留：');
-    const list = contentEl.createEl('ul');
-    for (const item of [
-      '行内已有的份额码与填充码：原样保留，不重算',
-      '已有的朝向词（r90 / fh / …）与对齐词：原样保留',
-      '单图行已有的 |S|W 尾码及其像素宽',
-    ]) {
-      list.createEl('li', { text: item });
-    }
-
-    paragraph(
-      contentEl,
-      '本次不会写入缺失的数值槽。份额要按各成员的自然像素尺寸才算得准，' +
-        '填充比要等图像画出来才量得到，扫描期两者都拿不到；' +
-        '笔记下次被打开时，首帧渲染会把它们按真实值补上。' +
-        '若在这里硬写一个数，它会因为是显式参数而被固定下来，之后不再自动纠正。'
-    );
-    paragraph(
-      contentEl,
-      '原始图片文件不会被改动，受影响的只有笔记文本。' +
-        '已保存到磁盘的笔记无法撤销；正在编辑器中打开的笔记可用一次 cmd+z 撤销。'
-    );
-    paragraph(contentEl, '建议先备份整个库，或在 Git 中提交一次当前状态，再执行本操作。');
+    paragraph(contentEl, '整库改写不可撤销，建议先提交一次。');
   },
 };
+
+/** The actions in the order the section draws them. Declared after the two
+ *  definitions above, which it reads. */
+const ACTIONS: MaintenanceAction[] = [CLEAR_ACTION, NORMALIZE_ACTION];

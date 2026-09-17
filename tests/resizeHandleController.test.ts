@@ -146,11 +146,13 @@ describe('single-image resize drag', () => {
     expect(h.calls).not.toContain('syncItemToDrawing');
   });
 
-  it('writes the box width back after a drag, except when it zoomed', () => {
+  it('writes the page width back after a drag, except when it zoomed', () => {
     const turned = makeRow(true);
     dragSE(turned, 0, 40);
-    // The row hugged its drawing and never zoomed, so the width is persisted.
-    expect(turned.calls).toContain('setSingleImageWidth:131');
+    // The row hugged its drawing and never zoomed, so the width is persisted —
+    // as the width the picture takes on the page, which for a turned row is the
+    // box's height (176), not the box width the content rect also reports.
+    expect(turned.calls).toContain('setSingleImageWidth:176');
 
     const zoomed = makeRow(false);
     dragSE(zoomed, 0, 3000);

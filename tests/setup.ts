@@ -98,6 +98,15 @@ if (typeof document !== 'undefined') {
     };
   }
 
+  // Obsidian augments every element with `setText`, which src code uses to
+  // write a label's copy. Same category as the helpers above, and here a plain
+  // wrapper over `textContent`.
+  if (typeof elProto.setText !== 'function') {
+    elProto.setText = function (this: HTMLElement, text: string): void {
+      this.textContent = text;
+    };
+  }
+
   // Obsidian's `setCssStyles` takes a `Partial<CSSStyleDeclaration>`, i.e.
   // camelCase keys, and assigns them onto the element's inline style. jsdom
   // exposes the same camelCase view of CSSStyleDeclaration, so writing through

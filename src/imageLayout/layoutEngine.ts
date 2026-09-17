@@ -103,11 +103,14 @@ export function computeFlexGrowsFromWidths(widths: number[]): number[] {
 }
 
 /**
- * Compute the rendered width (px) of a setting-driven single-image row (S=0).
+ * Compute the width (px) a setting-driven single-image row (S=0) takes across
+ * the page.
  * - "natural": the image's own pixel width, shrunk to fit the container.
  * - "fixed": a user-specified width, clamped to [SINGLE_IMAGE_MIN_WIDTH, containerWidth].
- * The image keeps width:auto (height-driven), so the caller derives height from
- * this width via the aspect ratio.  Returns 0 when dimensions are unknown.  Pure.
+ * Both widths are read in the same frame the row stores — the page, not the
+ * layout box behind it (transformPreview.ts) — so the "natural" figure handed in
+ * comes from `orientedSize`, the bitmap's width as the orientation displays it.
+ * Returns 0 when dimensions are unknown.  Pure.
  */
 export function computeSingleImageWidth(
   mode: SingleImageSizeMode,

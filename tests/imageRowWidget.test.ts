@@ -564,15 +564,81 @@ describe('ImageRowWidget sizes a lone item to what is drawn', () => {
     expect(img.style.transform).toBe('rotate(90deg)');
   });
 
-  it('fit-scales the drawing to the page when the swap would overrun it', () => {
-    // 700×1400 portrait rendered 700 wide: turned, 1400 would be drawn across a
-    // 944 page, so one uniform factor brings the picture back to page width.
+  it('records the page width, not the layout box width, on a turned row', () => {
+    const { widget, img } = buildSingle({ turns: 1, mirror: false });
+    const { images } = (widget as unknown as { group: RowGroup }).group;
+    // Natural mode: on the page the picture is 654 across — the bitmap's own
+    // height — while the box it is drawn from stays 500. The line records the
+    // former, so the number in the note is the one the reader sees.
+    expect(images[0].raw).toBe('![[a.png|r90|left|0|654]]');
+    // The context menu reads the same number off the element, to move it by one
+    // aspect when a turn would otherwise change what the page shows.
+    expect(img.__diaa_screenWidth?.()).toBe(654);
+  });
+
+  it('sizes a pinned turned row from its page width', () => {
+    // A 2:1 landscape pinned at 400 across the page. Turned, the box that holds
+    // the un-rotated bitmap is 800×400 and the drawing comes off it at 400×800.
+    const group = makeGroup([{
+      ...makeImage('a.png', 5, 1, false, { turns: 1, mirror: false }),
+      raw: '![[a.png|r90|left|1|400]]',
+      hasSizing: true,
+    }]);
+    // makeGroup reads a lone member under single grammar; pin it, as `|1|400` does.
+    group.images[0].display = { kind: 'single-manual', widthPx: 400 };
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [{ w: 800, h: 400 }]);
+
+    const item = el.querySelector('.diaa-item') as HTMLElement;
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(img.style.height).toBe('400px');
+    expect(item.style.width).toBe('400px');
+    expect(item.style.height).toBe('800px');
+    expect(img.style.transform).toBe('rotate(90deg)');
+    // The line already says the page width, so layout has nothing to rewrite.
+    expect(group.images[0].raw).toBe('![[a.png|r90|left|1|400]]');
+    expect(img.__diaa_screenWidth?.()).toBe(400);
+  });
+
+  it('reads a follow width on a turned row as the width across the page', () => {
+    // The reset case: a 2:1 landscape rotated, then handed back to "Fixed 400".
+    // Upright or turned, 400 is what the row must show across the page — which
+    // for a turned picture means an 800×400 box drawn back down to 400×800.
+    const group = makeGroup([{
+      ...makeImage('a.png', 5, 1, false, { turns: 1, mirror: false }),
+      raw: '![[a.png|r90|center|0|400]]',
+      hasSizing: true,
+    }]);
+    const widget = new ImageRowWidget(group, {
+      ...makeOptions('center'),
+      singleImageSizeMode: 'fixed',
+      singleImageWidth: 400,
+    });
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [{ w: 800, h: 400 }]);
+
+    const item = el.querySelector('.diaa-item') as HTMLElement;
+    const img = el.querySelector('img') as HTMLImageElement;
+    expect(item.style.width).toBe('400px');
+    expect(item.style.height).toBe('800px');
+    expect(img.style.height).toBe('400px');
+  });
+
+  it('keeps a turned picture on the page by shrinking the box, not the drawing', () => {
+    // 700×1400 portrait: turned, the picture is "naturally" 1400 wide, which
+    // overruns a 944 page.  The box is what gets shrunk — to 472×944, an exact
+    // un-rotated 700×1400 at half scale — so the drawing lands on the page width
+    // and needs no fit scale of its own.
     const { item, img } = buildSingle({ turns: 1, mirror: false }, { w: 700, h: 1400 });
-    const k = Number((944 / 1400).toFixed(4));
-    expect(img.style.height).toBe('1400px');
-    expect(img.style.transform).toBe(`scale(${k}) rotate(90deg)`);
+    expect(img.style.height).toBe('944px');
+    expect(img.style.transform).toBe('rotate(90deg)');
     expect(Math.round(parseFloat(item.style.width))).toBe(944);
-    expect(Math.round(parseFloat(item.style.height))).toBe(Math.round(700 * k));
+    expect(Math.round(parseFloat(item.style.height))).toBe(472);
   });
 
   it('restores the layout box height when Obsidian overwrites it on a turned row', async () => {

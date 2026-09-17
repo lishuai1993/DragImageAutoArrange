@@ -360,15 +360,33 @@
   margin-top: 2px;
 }
 
-/* Settings tab: two-level grouping grid. Headings sit flush-left; every group's
-   cards share one fixed indent (.diaa-settings-group), so no card row is ever
-   misaligned against another group's — regardless of which group it belongs to. */
-.diaa-settings h3 {
-  margin: 1.2em 0 0.2em;
-}
-
+/* Settings tab: the imperative path (Obsidian below 1.13) has no heading element
+   to align rows against — `setHeading()` only marks the row, leaving the name in
+   a plain div — so it indents each group div by the heading's own inset instead.
+   The declarative path needs none of this: the framework draws the heading and
+   the card itself. */
 .diaa-settings .diaa-settings-group {
   padding-left: 16px;
+}
+
+/* Settings tab: a reset row sits apart from the settings it acts on. The line
+   and its gaps live on the row itself rather than on a separate element between
+   rows, because the declarative path (Obsidian 1.13+) can style the rows it
+   builds but cannot insert siblings between them. Margin + padding reproduce
+   the spacing the old standalone divider produced. Matched without the group
+   ancestor so it reaches card rows, which the framework parents itself. */
+.diaa-settings .setting-item.diaa-row-sep-above {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Settings tab: the divider the imperative maintenance group draws between its
+   two actions. Rows inside a 1.13 card are divided by the framework's own rule,
+   so this element only ever exists on the older path. */
+.diaa-settings .diaa-vault-sep {
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin: 12px 0;
 }
 
 /* Settings tab: log-level slider. The control takes the full card row so the
@@ -592,6 +610,10 @@
   align-items: center;
   gap: 10px;
   padding: 4px 0 0;
+  /* The bar is the row's last child, and the row wraps (see the description
+     reflow above) — so claim a whole line rather than squeezing in beside the
+     button. */
+  flex-basis: 100%;
 }
 
 .diaa-settings .diaa-vault-track {

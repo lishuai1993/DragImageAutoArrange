@@ -25,6 +25,11 @@ export interface DiaImageMarkerOptions {
     resetTarget: () => SingleResetTarget;
     /** Real remove-custom-size closure (LP), or null for read-only (RM). */
     resetSingleManual: (() => void) | null;
+    /** The width this image currently takes on the page, or null when the
+     *  renderer cannot say (not a single row, or the bitmap has not loaded).
+     *  A rotation that turns the layout box on its side has to move this number
+     *  to leave the picture the size it was. */
+    screenWidth: (() => number | null) | null;
 }
 
 export function attachDiaImageMarkers(
@@ -37,4 +42,6 @@ export function attachDiaImageMarkers(
     img.__diaa_resetSingleManual = (): void => {
         reset();
     };
+    const screenWidth = opts.screenWidth;
+    img.__diaa_screenWidth = screenWidth ? () => screenWidth() : null;
 }
