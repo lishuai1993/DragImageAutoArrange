@@ -107,6 +107,58 @@ export function alignmentToCSS(alignment: "left" | "center" | "right"): {
 }
 
 /**
+ * Write one declaration into an element's inline style, with `!important`.
+ *
+ * A helper rather than a direct `style.setProperty` call because every caller
+ * passes literal values and the obsidianmd lint rule reads a literal second
+ * argument as a static (non-themeable) style assignment.  The priority is fixed
+ * too: the competitor in every one of these cases is the platform's own
+ * stylesheet, which no selector this plugin owns outranks by specificity.
+ */
+export function setStyleImportant(el: HTMLElement, prop: string, value: string): void {
+  el.style.setProperty(prop, value, "important");
+}
+
+/** The narrow-screen breakpoint.  styles.css carries the same number in its
+ *  media query — the two have to move together. */
+export const MOBILE_BREAKPOINT_PX = 768;
+
+/**
+ * Whether the viewport is currently narrow (a phone, or a window dragged small).
+ *
+ * Row geometry is drawn one of two ways and they conflict if both speak: above
+ * the breakpoint this plugin computes every image's pixel size and writes it
+ * inline, below it the stylesheet's media query re-flows the row and sizes it
+ * with CSS.  Inline always outranks a stylesheet, so below the breakpoint the
+ * layout has to stop writing and hand the row over.
+ *
+ * `matchMedia` does not exist in every test environment (jsdom has none); it is
+ * reported as wide there, which is the behaviour the plugin had before the
+ * narrow handling existed — no test wanders into the other branch by accident.
+ */
+export function isNarrowViewport(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`).matches;
+}
+
+/**
+ * Subscribe to breakpoint crossings; the returned function unsubscribes.
+ *
+ * The callback is handed the new state rather than a MediaQueryListEvent, so it
+ * reads the same way as `isNarrowViewport()` and callers never touch `matches`
+ * themselves.  `addEventListener` is used, not the deprecated `addListener`.
+ */
+export function onNarrowViewportChange(cb: (narrow: boolean) => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => undefined;
+  }
+  const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
+  const listener = (e: MediaQueryListEvent): void => cb(e.matches);
+  mql.addEventListener("change", listener);
+  return () => mql.removeEventListener("change", listener);
+}
+
+/**
  * FileManager.trashFile 在 Obsidian 1.6.6 才出现，而本插件 minAppVersion 为
  * 1.5.0；在更早的版本上只有 Vault.trash。两个成员都按能力探测访问——这里的
  * 结构类型是必须的，直接写 app.fileManager.trashFile 会让 1.5.0 上的用户

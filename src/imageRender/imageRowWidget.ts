@@ -2,7 +2,7 @@ import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IM
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
 import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
 import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computePairEquilibrium } from "../imageLayout/layoutEngine";
-import { alignmentToCSS } from "../utils";
+import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, setStyleImportant } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
 import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
@@ -213,6 +213,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private resizeHandles: HTMLElement[][] = [];
   private handleDefs: HandleDef[][] = [];
   private resizeObserver: ResizeObserver | null = null;
+  /** The members' inline flex geometry as it stood before the narrow-screen
+   *  media query took the layout over; null while the JS layout is in charge. */
+  private narrowSaved: Array<{ flex: string; flexGrow: string; width: string; height: string }> | null = null;
+  private narrowUnsub: (() => void) | null = null;
   private classMutationObservers: MutationObserver[] = [];
   private edgeLeft: HTMLElement | null = null;
   private edgeRight: HTMLElement | null = null;
@@ -830,6 +834,15 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       this.resizeObserver.observe(item);
     }
 
+    // Narrow-screen hand-off: crossing the breakpoint re-runs the layout, which
+    // either stands down (narrow — the media query owns the row) or takes the
+    // geometry back from the stash.  Both directions happen in
+    // syncNarrowViewport, called from the layout's own entry.
+    this.narrowUnsub = onNarrowViewportChange(() => {
+      if (this.syncNarrowViewport()) return;
+      this.recalculateRowHeight();
+    });
+
     // Initial layout pass — will be refined as images load
     this.applyLayout();
     // Always apply alignment, even before images load.  Otherwise on tab
@@ -1361,11 +1374,68 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
 
   /**
+   * Reconcile the row with the narrow-screen media query, and report whether the
+   * caller should stand down.
+   *
+   * Below the breakpoint the media query re-flows the row with CSS alone; the
+   * inline pixel heights and per-item flex this widget writes would outrank it
+   * and pin the row to its desktop geometry, so they are stashed and cleared on
+   * the way in, and put back before the row is re-laid-out on the way out.  The
+   * images then follow their item's width, which the re-flow has made 45 %
+   * wide, instead of letterboxing a desktop pixel height inside it.
+   *
+   * Returns true while the viewport is narrow, i.e. while the stylesheet owns
+   * the geometry and no inline value may be written.
+   */
+  private syncNarrowViewport(): boolean {
+    if (!isNarrowViewport()) {
+      if (this.narrowSaved) {
+        const saved = this.narrowSaved;
+        this.narrowSaved = null;
+        for (let i = 0; i < this.itemEls.length && i < saved.length; i++) {
+          const s = saved[i];
+          this.itemEls[i].style.flex = s.flex;
+          this.itemEls[i].style.flexGrow = s.flexGrow;
+          this.itemEls[i].style.width = s.width;
+          this.itemEls[i].style.height = s.height;
+        }
+      }
+      return false;
+    }
+
+    if (!this.narrowSaved) {
+      this.narrowSaved = this.itemEls.map((el) => ({
+        flex: el.style.flex,
+        flexGrow: el.style.flexGrow,
+        width: el.style.width,
+        height: el.style.height,
+      }));
+      this.container?.style.removeProperty("height");
+      for (const el of this.itemEls) {
+        el.style.removeProperty("flex");
+        el.style.removeProperty("flex-grow");
+        el.style.removeProperty("width");
+        el.style.removeProperty("height");
+      }
+      // The item's width now comes from the media query, so the image follows it
+      // and takes its height from its own aspect ratio — the desktop pixel
+      // height would letterbox it inside a 45 %-wide item.  object-fit and
+      // object-position are left alone: alignment still applies.
+      for (const img of this.imageEls) {
+        setStyleImportant(img, "width", "100%");
+        setStyleImportant(img, "height", "auto");
+      }
+    }
+    return true;
+  }
+
+  /**
    * Recalculate layout based on loaded image dimensions.
    */
   private applyLayout(): void {
     if (!this.container || this.group.images.length === 0) return;
     try {
+    if (this.syncNarrowViewport()) return;
 
     // Snapshot container height before layout so we can skip onLayoutChange
     // when nothing actually changed (avoids the same feedback cascade that
@@ -1689,6 +1759,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    */
   recalculateRowHeight(): void {
     if (!this.container || this.itemEls.length === 0) return;
+    if (this.syncNarrowViewport()) return;
     try {
 
     const containerWidth = this.container.getBoundingClientRect().width;
@@ -2206,6 +2277,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.narrowUnsub?.();
+    this.narrowUnsub = null;
     for (const obs of this.classMutationObservers) obs.disconnect();
     this.classMutationObservers = [];
     this.dragReorderController.destroy();

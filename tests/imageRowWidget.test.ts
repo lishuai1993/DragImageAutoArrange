@@ -9,7 +9,7 @@
  * where the third image in a resized row appeared not to respond to
  * alignment setting changes.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('obsidian', () => ({
   Menu: vi.fn().mockImplementation(() => ({
@@ -726,6 +726,121 @@ describe('ImageRowWidget divider double-click', () => {
     expect(items[0].style.height).toBe('516px');
     expect(items[1].style.height).toBe('516px');
     expect(el.style.height).toBe('516px');
+  });
+});
+
+/**
+ * Below the breakpoint the media query re-flows the row and the widget must get
+ * out of its way: the inline pixel geometry it writes would outrank the
+ * stylesheet and pin the row to its desktop layout.  The widget therefore
+ * stashes the members' flex values, clears every inline dimension, and puts the
+ * flex back before re-laying-out when the viewport widens again.
+ */
+describe('ImageRowWidget narrow viewport hand-off', () => {
+  interface MediaStub {
+    set(narrow: boolean): void;
+  }
+
+  /** A MediaQueryList stand-in whose `matches` is whatever the test last set;
+   *  `set` fires the change event at whoever subscribed (the widget did, once,
+   *  in build()). */
+  function stubMatchMedia(initiallyNarrow: boolean): MediaStub {
+    const listeners = new Set<(e: MediaQueryListEvent) => void>();
+    let narrow = initiallyNarrow;
+    const list = {
+      get matches() { return narrow; },
+      media: '',
+      onchange: null,
+      addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => { listeners.add(cb); },
+      removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => { listeners.delete(cb); },
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    };
+    (window as unknown as { matchMedia: unknown }).matchMedia = () => list;
+    return {
+      set(next: boolean) {
+        narrow = next;
+        for (const cb of listeners) cb({ matches: next } as MediaQueryListEvent);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+
+  /** The 图片并排测试文档 repro row, built at the given viewport width class.
+   *  The returned `media` drives the stub the widget subscribed to at build. */
+  function buildReproRow(narrow = false) {
+    const media = stubMatchMedia(narrow);
+    const a = makeImage('a.webp', 23, 1.34, true);
+    a.display = { kind: 'multi', share: 1.34, fill: 0.64 };
+    const b = makeImage('b.webp', 24, 0.72, true);
+    b.display = { kind: 'multi', share: 0.72, fill: 1 };
+    const widget = new ImageRowWidget(makeGroup([a, b]), makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 972.890625);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+    ]);
+    const items = (): HTMLElement[] =>
+      Array.from(el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`));
+    const imgs = (): HTMLImageElement[] => Array.from(el.querySelectorAll<HTMLImageElement>('img'));
+    return { el, items, imgs, media };
+  }
+
+  it('clears the inline geometry below the breakpoint and restores it above', () => {
+    const { el, items, imgs, media } = buildReproRow();
+    const wide = {
+      container: el.style.height,
+      itemFlex: items().map((i) => i.style.flex),
+      itemGrow: items().map((i) => i.style.flexGrow),
+      imgHeight: imgs().map((i) => i.style.height),
+    };
+    expect(wide.container).not.toBe('');
+    expect(wide.itemGrow).toEqual(['1.34', '0.72']);
+
+    media.set(true);
+
+    expect(el.style.height).toBe('');
+    for (const item of items()) {
+      expect(item.style.flex).toBe('');
+      expect(item.style.flexGrow).toBe('');
+      expect(item.style.height).toBe('');
+    }
+    // The image follows the item's new width and takes its height from its own
+    // aspect ratio; a desktop pixel height would letterbox it in a 45 % item.
+    for (const img of imgs()) {
+      expect(img.style.width).toBe('100%');
+      expect(img.style.height).toBe('auto');
+    }
+
+    media.set(false);
+    expect(el.style.height).toBe(wide.container);
+    expect(items().map((i) => i.style.flex)).toEqual(wide.itemFlex);
+    expect(items().map((i) => i.style.flexGrow)).toEqual(wide.itemGrow);
+    expect(imgs().map((i) => i.style.height)).toEqual(wide.imgHeight);
+  });
+
+  it('never writes inline geometry when it is built already narrow', () => {
+    const { el, items, imgs } = buildReproRow(true);
+
+    expect(el.style.height).toBe('');
+    for (const item of items()) {
+      expect(item.style.flex).toBe('');
+      expect(item.style.height).toBe('');
+    }
+    for (const img of imgs()) {
+      expect(img.style.width).toBe('100%');
+      expect(img.style.height).toBe('auto');
+    }
   });
 });
 

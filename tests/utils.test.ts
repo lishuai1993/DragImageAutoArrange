@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { displayNameFromPath, resolveImageSrc, throttle, moveLineInRange, alignmentToCSS } from '../src/utils';
+import { displayNameFromPath, resolveImageSrc, throttle, moveLineInRange, alignmentToCSS, isNarrowViewport, onNarrowViewportChange, MOBILE_BREAKPOINT_PX } from '../src/utils';
 import { DEFAULT_SETTINGS, Alignment } from '../src/constants';
 
 // ── displayNameFromPath ──
@@ -260,5 +260,86 @@ describe('single-image alignment visibility', () => {
     const constrainedH = Math.min(defaultRowHeight, fillWidthH); // 137
     expect(constrainedH).toBeLessThan(defaultRowHeight);
     expect(constrainedH).toBe(fillWidthH);
+  });
+});
+
+// ── Narrow viewport ──
+
+/** Stand-in for the platform's MediaQueryList: `matches` follows the flag the
+ *  test sets, and the change listeners are the ones the module registered. */
+function stubMatchMedia(initiallyNarrow: boolean): {
+  set(narrow: boolean): void;
+  listenerCount(): number;
+  query: string;
+} {
+  const listeners = new Set<(e: MediaQueryListEvent) => void>();
+  let narrow = initiallyNarrow;
+  const list = {
+    get matches() { return narrow; },
+    media: '',
+    onchange: null,
+    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => { listeners.add(cb); },
+    removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => { listeners.delete(cb); },
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  };
+  (window as unknown as { matchMedia: unknown }).matchMedia = (q: string) => {
+    list.media = q;
+    return list;
+  };
+  return {
+    set(next: boolean) {
+      narrow = next;
+      for (const cb of listeners) cb({ matches: next } as MediaQueryListEvent);
+    },
+    listenerCount: () => listeners.size,
+    get query() { return list.media; },
+  };
+}
+
+describe('isNarrowViewport', () => {
+  afterEach(() => {
+    delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it('reads as wide when the platform exposes no matchMedia', () => {
+    // jsdom's case, and the reason the helper is guarded: the wide-screen
+    // layout is the one the plugin had before the narrow handling existed.
+    expect(isNarrowViewport()).toBe(false);
+  });
+
+  it('asks the platform about its own breakpoint', () => {
+    const media = stubMatchMedia(false);
+    expect(isNarrowViewport()).toBe(false);
+    expect(media.query).toBe(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
+    media.set(true);
+    expect(isNarrowViewport()).toBe(true);
+  });
+});
+
+describe('onNarrowViewportChange', () => {
+  afterEach(() => {
+    delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it('reports each crossing and stops after the subscription is dropped', () => {
+    const media = stubMatchMedia(false);
+    const seen: boolean[] = [];
+    const off = onNarrowViewportChange((narrow) => seen.push(narrow));
+
+    media.set(true);
+    media.set(false);
+    expect(seen).toEqual([true, false]);
+
+    off();
+    media.set(true);
+    expect(seen).toEqual([true, false]);
+    expect(media.listenerCount()).toBe(0);
+  });
+
+  it('is a no-op subscription when the platform exposes no matchMedia', () => {
+    const off = onNarrowViewportChange(() => undefined);
+    expect(() => off()).not.toThrow();
   });
 });

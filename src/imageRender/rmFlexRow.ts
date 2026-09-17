@@ -3,7 +3,7 @@ import { CLASSES } from "../constants";
 import { ImageRowOptions } from "../types";
 import { ImageMeta } from "../imageParse/imageDetector";
 import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights } from "../imageLayout/layoutEngine";
-import { alignmentToCSS } from "../utils";
+import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, setStyleImportant } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("rmFlexRow");
 import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
@@ -250,7 +250,11 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   if (firstImg?.naturalWidth) {
     rowH = Math.min(options.defaultRowHeight * 3, Math.max(50, rowH));
   }
-  row.style.height = `${rowH}px`;
+  // The starting height is the row's floor until the sizing pass lands.  Below
+  // the breakpoint there is no such pass to land, so it is not written at all:
+  // the media query's `height: auto` would lose to it and hold the row at a
+  // desktop height across the whole narrow session.
+  if (!isNarrowViewport()) row.style.height = `${rowH}px`;
 
   for (const embed of embeds) {
     const next = embed.nextElementSibling;
@@ -279,6 +283,16 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     for (const img of embedImgs) {
       stripObsidianClasses(img);
       img.style.setProperty("object-position", oi, "important");
+      // The image's geometry is written inline rather than left to the
+      // stylesheet: Obsidian's own embed rules set the same properties, and an
+      // inline declaration is the only thing that outranks them.  Fill-the-item
+      // is the pre-sizing state; applySizes swaps the width to `auto` for the
+      // size-by-height rows.
+      setStyleImportant(img, "width", "100%");
+      setStyleImportant(img, "height", "100%");
+      setStyleImportant(img, "object-fit", "contain");
+      setStyleImportant(img, "display", "block");
+      setStyleImportant(img, "margin", "0");
 
       const styleGuard = new MutationObserver((mutations, obs) => {
         for (const m of mutations) {
@@ -418,6 +432,23 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
 
     const n = embeds.length;
 
+    // Below the narrow-screen breakpoint the media query wraps the row and the
+    // stylesheet sizes it; any inline pixel height left here outranks that, so
+    // the row is handed over wholesale.  The images then follow their item's
+    // width with the height coming from their own aspect ratio, which is what a
+    // wrapped row wants — a desktop pixel height would letterbox them.
+    if (isNarrowViewport()) {
+      row.style.removeProperty("height");
+      for (const embed of embeds) {
+        embed.style.removeProperty("height");
+        for (const img of Array.from(embed.querySelectorAll<HTMLImageElement>("img"))) {
+          setStyleImportant(img, "width", "100%");
+          setStyleImportant(img, "height", "auto");
+        }
+      }
+      return;
+    }
+
     if (n > 1 && hasScale) {
       const { heights, maxH } = computeScaleBasedHeights(
         finalGrows, currentMetas, scales, containerWidth, options.gap, options.defaultRowHeight
@@ -430,6 +461,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         if (embedImg) {
           stripObsidianClasses(embedImg);
           embedImg.style.setProperty("height", hPx, "important");
+          setStyleImportant(embedImg, "width", "auto");
           embedImg.addClass(CLASSES.imgAuto);
         }
       }
@@ -454,6 +486,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         if (embedImg) {
           stripObsidianClasses(embedImg);
           embedImg.style.setProperty("height", `${rowHeightPx}px`, "important");
+          setStyleImportant(embedImg, "width", "auto");
           embedImg.addClass(CLASSES.imgAuto);
         }
       }
@@ -556,7 +589,14 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   });
   sizeObserver.observe(row);
 
-  const cleanupObserver = () => { sizeObserver.disconnect(); };
+  // Crossing the breakpoint changes what the row's geometry should be — the
+  // row width alone does not capture it (a pane can cross the breakpoint with
+  // its own width unchanged), so the switch re-runs the sizing itself.
+  const offNarrow = onNarrowViewportChange(() => {
+    if (row.isConnected) applySizes();
+  });
+
+  const cleanupObserver = () => { sizeObserver.disconnect(); offNarrow(); };
   if (row.parentElement) {
     const parentObserver = new MutationObserver((_mutations, obs) => {
       if (!row.isConnected) {

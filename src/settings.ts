@@ -33,6 +33,7 @@ import {
 } from "./settingsSpecs";
 
 import { Alignment, SingleImageSizeMode } from "./constants";
+import { setStyleImportant } from "./utils";
 
 export interface DragImageSettings {
   defaultRowHeight: number;
@@ -565,6 +566,11 @@ export class DragImageSettingTab extends PluginSettingTab {
    * One-click feedback for the "Reset all..." buttons: paint the accent color,
    * shrink momentarily, swap the label to "已重置", then restore everything.
    * Rapid double-clicks are ignored (the button is disabled for the 1.5s window).
+   *
+   * The fill and text colour are written inline because the competitor is the
+   * theme's own CTA rule (`--color-btn-primary-bg`), which a stylesheet
+   * declaration cannot outrank by specificity; only the transform — nobody else
+   * animates it — is left to the class in styles.css.
    */
   private flashResetFeedback(button: ButtonComponent): void {
     const el = button.buttonEl;
@@ -574,11 +580,17 @@ export class DragImageSettingTab extends PluginSettingTab {
     el.style.minWidth = `${el.offsetWidth}px`;
     button.setDisabled(true);
     button.setButtonText("已重置");
+    setStyleImportant(el, "background-color", "var(--color-green)");
+    setStyleImportant(el, "color", "#fff");
+    setStyleImportant(el, "opacity", "1");
     el.classList.add("diaa-btn-pressed");
     window.setTimeout(() => {
       button.setDisabled(false);
       button.setButtonText(originalText);
       el.classList.remove("diaa-btn-pressed");
+      el.style.removeProperty("background-color");
+      el.style.removeProperty("color");
+      el.style.removeProperty("opacity");
       el.setCssStyles({ minWidth: "" });
     }, 1500);
   }

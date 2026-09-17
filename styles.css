@@ -4,22 +4,24 @@
    ---------------------------------------------------------------------------
    Every declaration carrying `!important` below overrides a rule this plugin
    does not own, and none of them is removable by raising specificity a notch.
-   There are six kinds, each with a note at its site:
+   There are five kinds, each with a note at its site:
 
-   1. Reading-mode row internals (`.internal-embed`, `img`): Obsidian's embed
-      rules set the same properties, so the row layout only holds if these win.
-      The per-row computed values (flex, justify-content, object-position) are
-      written inline instead and never appear here.
+   1. Reading-mode row internals (`.internal-embed`): Obsidian's embed rules
+      set the same properties, so the row layout only holds if these win.  The
+      per-row computed values (flex, justify-content, object-position) and the
+      images' geometry are written inline instead and never appear here.
    2. Neutralized wrappers (`display: contents`): the img becomes a flex child
       only once Obsidian's intermediate wrapper is flattened.  See the two sites.
    3. CodeMirror line highlight (`background-color`, `border-*`): the drop target
       and the left/right insert indicators paint over CM's own line styles.
-   4. Mobile media query (`height`, `flex`): both fight values the layout writes
-      inline, which no plain stylesheet declaration can outrank.
-   5. Settings buttons: the theme's `--input-shadow` ring and the pressed-state
-      flash; a theme owns the CTA fill and its own selectors would otherwise win.
-   6. A row extracted from a text block (`display: inline-block`): it has to
+   4. Settings buttons: the theme's `--input-shadow` ring, which a theme paints
+      with its own selectors and this plugin cannot outrank by specificity.
+   5. A row extracted from a text block (`display: inline-block`): it has to
       shrink-wrap so the surrounding block's text-align can place it.
+
+   The mobile media query is deliberately absent from this list: the layout
+   writes heights and flex inline, which no plain stylesheet declaration can
+   outrank, so below the breakpoint it stands down and clears them instead.
 
    The competitor in every case is the platform's or the theme's stylesheet,
    which this plugin neither inspects nor can outrank by construction.  Dropping
@@ -190,22 +192,26 @@
 }
 
 /* Ensure images in the row fill their containers. Reading-Mode scoped: the
-   Live Preview widget sets its own image sizes inline. */
+   Live Preview widget sets its own image sizes inline, and rmFlexRow writes the
+   same five declarations inline as soon as it wraps a row — Obsidian's embed
+   rules set them too, and inline is the only thing that outranks those without
+   `!important`. What is left here is the fallback for an image the row has not
+   reached yet: the first frame of a row whose images are still loading. */
 .markdown-preview-view .diaa-row img,
 .markdown-reading-view .diaa-row img {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: contain !important;
-  display: block !important;
-  margin: 0 !important;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  margin: 0;
 }
 
 /* Size-by-height rows (explicit flex-grow or scale): the image keeps its
-   natural aspect ratio instead of filling the item width. Specificity must
-   exceed the fill-the-container rule above. */
+   natural aspect ratio instead of filling the item width. rmFlexRow writes the
+   same value inline once it has sized the row. */
 .markdown-preview-view .diaa-row img.diaa-img-auto,
 .markdown-reading-view .diaa-row img.diaa-img-auto {
-  width: auto !important;
+  width: auto;
 }
 
 /* Image extracted out of a mixed text+image block: shrink-wrap it so the
@@ -306,16 +312,21 @@
   display: none !important;
 }
 
-/* === Mobile responsiveness === */
+/* === Mobile responsiveness ===
+
+   Below this width the layout belongs to CSS: the widget and the Reading-Mode
+   row builder both stand down (see `isNarrowViewport` in src/utils.ts, which
+   must carry the same breakpoint) and drop the inline heights and flex they had
+   written, so these declarations take effect without `!important`. */
 
 @media (max-width: 768px) {
   .diaa-row {
     flex-wrap: wrap;
-    height: auto !important;
+    height: auto;
   }
 
   .diaa-item {
-    flex: 1 1 45% !important;
+    flex: 1 1 45%;
     min-width: 120px;
   }
 
@@ -328,14 +339,11 @@
   }
 }
 
-/* Settings "Reset all to current setting" buttons — one-click feedback.
-   Normal state is a CTA (accent) button via button.setCta() in settings.ts;
-   this permanent class carries the transition so both the press (class added)
-   and the release (class removed) animate smoothly. The pressed state flashes
-   a semantic green to signal success. */
 /* Settings tab: every clickable button shares one treatment. The accent fill
    and its hover/disabled states come from Obsidian's CTA style (applied by
-   settingsButton.ts); these rules add the transition and the pressed flash. */
+   settingsButton.ts); this rule adds the transition so the pressed flash —
+   green fill, white label, momentary shrink — animates in and out. The class
+   itself is the hook for the shrink; the colours are written inline. */
 .diaa-setting-btn {
   transition: transform 0.1s ease, background-color 0.1s ease, color 0.1s ease;
 }
@@ -364,11 +372,12 @@
     var(--input-shadow-hover) !important;
 }
 
+/* The pressed flash's fill and text colour are written inline by
+   flashResetFeedback (settings.ts) — the theme's CTA rule owns those properties
+   and no stylesheet declaration outranks it. Only the momentary shrink lives
+   here, because nothing else competes for `transform`. */
 .diaa-setting-btn.diaa-btn-pressed {
-  background: var(--color-green) !important;
-  color: #fff !important;
   transform: scale(0.96);
-  opacity: 1 !important;
 }
 
 /* Settings tab: long descriptions span the full card width below the label
