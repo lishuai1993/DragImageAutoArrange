@@ -1,16 +1,18 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode, computeInterItemSpace } from "../constants";
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
 import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
-import { computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeSingleImageWidth, computePairEquilibrium } from "../imageLayout/layoutEngine";
+import { DIVIDER_MIN_GROW, computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeScaleBasedHeightsContinuous, computeSingleImageWidth, computePairEquilibrium, computePairHeights, drawnHeightCoefficient } from "../imageLayout/layoutEngine";
 import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, setStyleImportant } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("imageRowWidget");
-import { clampFlexGrow, clampScale, validateRowFlexGrows } from "../imageLayout/parameterValidator";
+import { SIZING_STEP, clampFlexGrow, clampScale, quantizeSizing, validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import * as scrollDiag from "../scrollSync/scrollDiag";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { attachDiaImageMarkers } from "./imageMarkers";
 import { applyOrientationPreview, boxForScreenWidth, displayedImageSize } from "../imageTransform/transformPreview";
-import { orientedSize } from "../imageTransform/orientation";
+import { orientationWord, orientedSize, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
+import { emitSnapshot, hasChanged, isGeometryProbeEnabled } from "../diagnostics/probe";
+import { round2, snapshotPayload, type MemberFrames } from "../diagnostics/rowSnapshot";
 import { DividerController, DividerHost } from "../interaction/dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "../interaction/resizeHandleController";
 import { DragReorderController, DragReorderHost } from "../interaction/dragReorderController";
@@ -171,9 +173,9 @@ export interface Rect {
  * The rect the resize handles hug: the content rect normally, and the img's own
  * measured rect after a quarter turn.
  *
- * A quarter turn swaps the drawn content's width and height (and a fit scale
- * shrinks it back inside the layout box), so `contentRect` — computed from the
- * box with no transform in mind — would have the handles wrap the un-rotated
+ * A quarter turn swaps the drawn content's width and height (and a fit scale may
+ * shrink it further), so `contentRect` — computed from the box with no transform
+ * in mind — would have the handles wrap the un-rotated
  * image: a portrait handle frame around a landscape picture. The img's own rect
  * already has the transform applied, and the drawn content fills that box (it
  * is sized to the image's aspect), so measuring it is both exact and free of
@@ -243,6 +245,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    *  the same drawing without re-measuring a box the turn itself obscures. */
   private singleImgBoxH = 0;
   private singleScale = 1;
+  /** The container width the last layout pass solved at, so a backfill can tell
+   *  whether the DOM it is about to measure is still the frame that pass made. */
+  private lastLayoutWidthPx = 0;
+  /** Diagnostics (temporary): the layout box height and drawn height the layout
+   *  engine asked for, and the last value our own code put on the img.  Keeping
+   *  the two apart is what tells a wrong write apart from a clobbered one. */
+  private modelBoxH = new Map<number, number>();
+  private modelDrawn = new Map<number, number>();
+  private imgBoxWitness = new Map<number, { value: number; writer: string }>();
+  private snapshotTimer: number | null = null;
+  private snapshotReason = "";
   onLayoutChange: (() => void) | null = null;
   /** Per-image indices whose scale ratios have been updated and need persistence. */
   _scaleDirtyImages: Set<number> = new Set();
@@ -302,6 +315,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const img = this.group.images[index];
     return img ? this.fillOf(img) : null;
   }
+  getOrientation(index: number): OrientationState | null {
+    return this.group.images[index]?.orientation ?? null;
+  }
   getSingleWidthPx(): number {
     const d = this.group.images[0]?.display;
     return d && d.kind === "single-manual" ? d.widthPx : this.singleWidthPx;
@@ -314,6 +330,41 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    *  image has swapped width and height. */
   isTurnedImage(index: number): boolean {
     return (this.group.images[index]?.orientation.turns ?? 0) % 2 === 1;
+  }
+  /** Every member's orientation, in item order — the frame the height model
+   *  reads, since a quarter turn changes how tall a member paints. */
+  private orientationsOf(): Array<OrientationState | null> {
+    return this.group.images.map((img) => img.orientation);
+  }
+  /**
+   * What a member paints out of a `boxHeight` layout box, at uniform fill: the
+   * box itself upright, and on a quarter turn the box repainted on its side and
+   * scaled down (`quarterTurnFitScale`) to fit back inside itself — the box's
+   * own width times `aspect²` for a portrait, the box's own height for a
+   * landscape.  A turn may change the size but never the ratio, and it only ever
+   * shrinks, so a member can never paint taller than it did upright.
+   */
+  private drawnFromBox(boxHeight: number, index: number): number {
+    const meta = this.loadedMetas.get(index);
+    const member = this.group.images[index];
+    if (!meta || !(meta.naturalWidth > 0) || !(meta.naturalHeight > 0) || !member) return boxHeight;
+    const ar = meta.naturalWidth / meta.naturalHeight;
+    return Math.round(boxHeight * drawnHeightCoefficient(meta, 1, member.orientation) * ar);
+  }
+  /**
+   * The layout box a member needs in order to paint `drawnHeight` — the inverse
+   * of `drawnFromBox`, and the identity for every member that is not turned,
+   * whose box and drawing are one rectangle.  A resize drag drives the drawing
+   * (it is the rectangle the handles hug and the one the cell takes), so it
+   * needs this to put the box back on the img.
+   */
+  boxHeightForDrawn(drawnHeight: number, index: number): number {
+    const meta = this.loadedMetas.get(index);
+    const member = this.group.images[index];
+    if (!meta || !(meta.naturalWidth > 0) || !(meta.naturalHeight > 0) || !member) return Math.round(drawnHeight);
+    const ar = meta.naturalWidth / meta.naturalHeight;
+    const perBox = drawnHeightCoefficient(meta, 1, member.orientation) * ar;
+    return perBox > 0 ? Math.round(drawnHeight / perBox) : Math.round(drawnHeight);
   }
   /** Current container width in px, or 0 when it cannot be measured. */
   private containerWidthPx(): number {
@@ -386,7 +437,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
   setImageScale(index: number, scale: number): void {
     const img = this.group.images[index];
-    if (img && img.display.kind === "multi") img.display.fill = clampScale(scale);
+    if (img && img.display.kind === "multi") img.display.fill = quantizeSizing(clampScale(scale));
     this._scaleDirtyImages.add(index);
   }
   /**
@@ -509,16 +560,150 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   }
 
   /** The height the img's layout box should carry, for the mutation observer to
-   *  restore when Obsidian writes its own inline style, or null when there is
-   *  nothing to police.  Normally it is the item's height — item and img box are
-   *  the same rectangle.  A quarter-turned single row is the exception: its item
-   *  hugs the *drawn* picture while the img keeps the un-rotated box, so the box
-   *  height is the one layout recorded. */
+   *  restore when a third party writes its own inline style, or null when there
+   *  is nothing to police.  Upright it is the item's height — item and img box
+   *  are the same rectangle.  A quarter turn is the exception: the item hugs the
+   *  *drawn* picture while the img keeps the un-rotated box, so the box height is
+   *  the one the layout recorded.  Restoring the item's height instead would
+   *  erase that box and shrink the drawing with it — the observer fires on our
+   *  own writes too, so this is a self-inflicted overwrite whenever the two
+   *  rectangles disagree. */
   private expectedImgBoxHeight(index: number): string | null {
     if (this.isSingleRow() && this.isTurnedImage(index) && this.singleImgBoxH > 0) {
       return `${this.singleImgBoxH}px`;
     }
+    if (this.isTurnedImage(index)) {
+      const boxH = this.modelBoxH.get(index);
+      if (boxH != null && boxH > 0) return `${boxH}px`;
+    }
     return this.itemEls[index]?.style.height || null;
+  }
+
+  // ── Diagnostics (temporary) ────────────────────────────────────────────
+  // Every write to an img's layout-box height funnels through here so the
+  // snapshot can tell the value the layout chose from one a third party put
+  // back; `recordGeometry` keeps the layout engine's own numbers beside it.
+
+  private setImgBoxHeight(index: number, value: string | number, writer: string): void {
+    const img = this.imageEls[index];
+    if (!img) return;
+    const css = typeof value === "number" ? `${value}px` : value;
+    img.style.height = css;
+    const px = parseFloat(css);
+    this.imgBoxWitness.set(index, { value: Number.isFinite(px) ? px : 0, writer });
+    if (hasChanged(`imgH:${this.group.lineStart}:${index}`, { css, writer })) {
+      log.debug("img box height written", {
+        index,
+        writer,
+        css,
+        modelBoxH: this.modelBoxH.get(index) ?? null,
+        itemH: this.itemEls[index]?.style.height ?? null,
+      });
+    }
+  }
+
+  private recordGeometry(index: number, boxH: number, drawn: number): void {
+    this.modelBoxH.set(index, boxH);
+    this.modelDrawn.set(index, drawn);
+  }
+
+  /** Whether a member's rendered frame may be read back into the note as its
+   *  fill ratio — `content width / item width`.  That ratio only means "how much
+   *  of its column this picture fills" while the frame is the one the layout
+   *  pass produced: the picture has loaded, the container is still the width the
+   *  pass solved for, and the img still carries the box the pass wrote.  A frame
+   *  that fails any of these draws a picture nobody asked for, and freezing its
+   *  ratio would pin that accident on the member for good. */
+  private fillFrameTrustworthy(index: number): boolean {
+    const img = this.imageEls[index];
+    const meta = this.loadedMetas.get(index);
+    if (!img || !meta) return false;
+    if (!img.complete || meta.naturalWidth <= 0 || meta.naturalHeight <= 0) return false;
+    const layoutW = this.lastLayoutWidthPx;
+    const nowW = this.containerWidthPx();
+    if (layoutW <= 0 || nowW <= 0 || Math.abs(nowW - layoutW) > 1) return false;
+    const modelBoxH = this.modelBoxH.get(index);
+    if (modelBoxH == null || modelBoxH <= 0) return false;
+    return Math.abs(img.clientHeight - modelBoxH) <= 1;
+  }
+
+  private measureMemberGeometry(index: number): MemberFrames | null {
+    const img = this.imageEls[index];
+    const item = this.itemEls[index];
+    const member = this.group.images[index];
+    if (!img || !item || !member) return null;
+    const meta = this.loadedMetas.get(index);
+    const aspect = meta && meta.naturalWidth > 0 && meta.naturalHeight > 0
+      ? meta.naturalWidth / meta.naturalHeight
+      : 1;
+    const boxH = this.modelBoxH.get(index) ?? 0;
+    const witness = this.imgBoxWitness.get(index) ?? null;
+    const itemRect = item.getBoundingClientRect();
+    const imgRect = img.getBoundingClientRect();
+    const styleW = parseFloat(img.style.width);
+    const styleItemW = parseFloat(item.style.width);
+    return {
+      label: `${index}:${member.fileName}`,
+      model: {
+        fill: this.fillOf(member),
+        share: this.shareOf(member),
+        word: orientationWord(member.orientation),
+        aspect: Number(aspect.toFixed(4)),
+        boxW: Number((boxH * aspect).toFixed(2)),
+        boxH,
+        drawn: this.modelDrawn.get(index) ?? 0,
+        expectedScale: this.isSingleRow() && this.isTurnedImage(index) ? this.singleScale : null,
+      },
+      wrote: {
+        imgW: Number.isFinite(styleW) ? styleW : null,
+        imgH: witness ? witness.value : null,
+        itemW: Number.isFinite(styleItemW) ? styleItemW : null,
+        itemH: parseFloat(item.style.height) || null,
+        imgTransform: img.style.transform,
+      },
+      measured: {
+        itemW: round2(itemRect.width),
+        itemH: round2(itemRect.height),
+        imgClientW: img.clientWidth,
+        imgClientH: img.clientHeight,
+        paintW: round2(imgRect.width),
+        paintH: round2(imgRect.height),
+        paintOffsetX: round2(imgRect.left - itemRect.left),
+        paintOffsetY: round2(imgRect.top - itemRect.top),
+        transform: getComputedStyle(img).transform,
+        display: getComputedStyle(img).display,
+      },
+    };
+  }
+
+  /** Coalesce a settle burst into one snapshot, taken after layout has stopped
+   *  moving — inside a timer, never during a CodeMirror update. */
+  private scheduleRowSnapshot(reason: string): void {
+    if (!isGeometryProbeEnabled()) return;
+    this.snapshotReason = reason;
+    if (this.snapshotTimer !== null) return;
+    this.snapshotTimer = window.setTimeout(() => {
+      this.snapshotTimer = null;
+      this.emitRowSnapshot();
+    }, 200);
+  }
+
+  private emitRowSnapshot(): void {
+    if (!this.container) return;
+    const members: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < this.group.images.length; i++) {
+      const frames = this.measureMemberGeometry(i);
+      if (frames) members.push(snapshotPayload(frames));
+    }
+    emitSnapshot(`row:${this.options.sourcePath}:${this.group.lineStart}`, "DIAAGEO row", {
+      side: "LP",
+      reason: this.snapshotReason,
+      line: this.group.lineStart,
+      kind: this.group.kind,
+      containerW: this.containerWidthPx(),
+      viewportW: this.getRowWidth(),
+      members,
+    });
   }
 
   /**
@@ -558,19 +743,20 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // Level 1: position img element within its item via flex
       if (item) {
         item.setCssStyles({ display: "flex" });
-        // A quarter-turned picture is drawn smaller than its layout box, so the
-        // row's item is sized to the drawing itself and the box — which still
-        // holds the un-rotated bitmap — is centred inside it. Alignment has no
-        // say there: the item is already exactly the picture. Only single rows
-        // do this; a multi-image member's item is the row's shared height.
-        const turned = this.isSingleRow() && this.isTurnedImage(i);
-        item.style.setProperty("justify-content", turned ? "center" : css.justifyContent, "important");
+        // The item is sized to the drawing itself, which a quarter turn paints
+        // as a different rectangle from its layout box, so that box — still
+        // holding the un-rotated bitmap, and what the transform measures — is
+        // centred inside it. A lone image's item *is* the picture, so alignment
+        // has no say there; a row member still positions its picture in the slot.
+        const turned = this.isTurnedImage(i);
+        const centred = this.isSingleRow() && turned;
+        item.style.setProperty("justify-content", centred ? "center" : css.justifyContent, "important");
         item.setCssStyles({ alignItems: turned ? "center" : "flex-start" });
       }
       // Level 2: position image content within img element
       img.setCssStyles({ objectFit: "contain" });
       img.style.setProperty("object-position", css.objectPosition, "important");
-      // Neutralize any Obsidian wrapper (.image-resize-container) inserted
+      // Neutralize any Obsidian wrapper (.image-wrapper) inserted
       // between the item and the img.  Obsidian may set inline flex/alignment
       // on the wrapper that overrides our item-level justify-content.  Using
       // an inline !important ensures we win the cascade.
@@ -583,19 +769,27 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const imgClassBefore = img.className;
       stripObsidianClasses(img);
       const imgClassAfter = img.className;
-      log.debug("applyAlignmentToAll per-image", {
-        index: i,
+      // Only log a change, not every frame: this runs on each layout pass.
+      if (hasChanged(`align:${this.group.lineStart}:${i}`, {
         perImageAlign,
-        settingsAlignment: this.options.alignment,
         writtenObjectPosition: img.style.objectPosition,
-        expectedObjectPosition: css.objectPosition,
-        imgClassBefore,
         imgClassAfter,
-        classesStripped: imgClassBefore !== imgClassAfter,
-        hasWrapper: img.parentElement !== item,
-        wrapperTag: img.parentElement !== item ? img.parentElement?.tagName : null,
-        wrapperClass: img.parentElement !== item ? img.parentElement?.className : null,
-      });
+        wrapper: img.parentElement?.className ?? null,
+      })) {
+        log.debug("applyAlignmentToAll per-image", {
+          index: i,
+          perImageAlign,
+          settingsAlignment: this.options.alignment,
+          writtenObjectPosition: img.style.objectPosition,
+          expectedObjectPosition: css.objectPosition,
+          imgClassBefore,
+          imgClassAfter,
+          classesStripped: imgClassBefore !== imgClassAfter,
+          hasWrapper: img.parentElement !== item,
+          wrapperTag: img.parentElement !== item ? img.parentElement?.tagName : null,
+          wrapperClass: img.parentElement !== item ? img.parentElement?.className : null,
+        });
+      }
     }
     // Delayed check: what does the browser ACTUALLY render?
     // Inline "right top" with !important should win, but if computed
@@ -783,9 +977,18 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           return isFinite(px) ? `${Math.round(px * k)}px` : v;
         };
         for (let i = 0; i < this.itemEls.length; i++) {
-          if (cached.imgHs[i]) this.imageEls[i].style.height = scaleH(cached.imgHs[i]);
+          const cachedImgH = cached.imgHs[i];
+          const cachedItemH = scaleH(cached.itemHs[i]);
+          if (cachedImgH) this.setImgBoxHeight(i, scaleH(cachedImgH), "cached");
           if (cached.imgWs[i]) this.imageEls[i].style.width = cached.imgWs[i];
-          this.itemEls[i].style.height = scaleH(cached.itemHs[i]);
+          this.itemEls[i].style.height = cachedItemH;
+          // Only a real pair is worth recording: a missing cache entry leaves
+          // the height unset, and a zero model would read as a violation.
+          const boxH = cachedImgH ? parseFloat(scaleH(cachedImgH)) : NaN;
+          const drawnH = parseFloat(cachedItemH);
+          if (Number.isFinite(boxH) && boxH > 0 && Number.isFinite(drawnH) && drawnH > 0) {
+            this.recordGeometry(i, boxH, drawnH);
+          }
           // Widths ride along for the same reason: a quarter-turned lone item is
           // sized to the drawing, and letting it rebuild at the image box's width
           // would put the picture off-centre for the one frame before layout.
@@ -876,7 +1079,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const img = createEl("img");
     img.className = CLASSES.imageInner;
     img.alt = image.fileName;
-    // Prevent Obsidian from wrapping this img in .image-resize-container,
+    // Prevent Obsidian from wrapping this img in its resizable-image wrapper,
     // which causes DOM mutations on hover that produce visual flashing.
     img.contentEditable = "false";
     img.setCssStyles({ display: "block" });
@@ -949,6 +1152,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       }),
       resetSingleManual: () => this.resetSingleManualWidth(),
       screenWidth: () => this.currentScreenWidth(),
+      // A turn may not resize the member's container, so it rewrites the fill
+      // instead — this is where the menu reads the fill it was drawn with.
+      memberFill: () => this.fillOf(image),
     });
 
     // Watch for Obsidian asynchronously modifying the img element.
@@ -993,8 +1199,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
               index,
               obsidianSet: imgEl.style.height,
               restored: expectedH,
+              // Which value the restore came from: the engine's box height
+              // (either turn case) or whatever the item happens to be now.
+              source: this.isTurnedImage(index)
+                ? (this.isSingleRow() ? "singleImgBoxH" : "modelBoxH")
+                : "itemHeight",
+              modelBoxH: this.modelBoxH.get(index) ?? null,
             });
-            imgEl.style.height = expectedH;
+            this.setImgBoxHeight(index, expectedH, "class-observer");
             imgEl.setCssStyles({ width: "auto" });
             imgEl.setCssStyles({ objectFit: "contain" });
             imgEl.style.setProperty("object-position", this.getObjectPosition(index), "important");
@@ -1037,7 +1249,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const img = this.imageEls[index];
     if (!item || !img) return null;
 
-    // Obsidian may asynchronously wrap the img in .image-resize-container
+    // Obsidian may asynchronously wrap the img in its own wrapper
     // with alignment classes (e.g. image-position-center) that override our
     // item-level flex alignment.  Force display:contents on any wrapper so
     // the img behaves as a direct flex child of the item.
@@ -1112,7 +1324,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       width: contentRect.width,
       height: contentRect.height,
     };
-    log.debug("getImageContentRect", {
+    if (hasChanged(`contentRect:${this.group.lineStart}:${index}`, {
+      iw, ih, offsetLeft, offsetTop, width: result.width, height: result.height,
+      parent: img.parentElement?.className ?? null,
+    })) log.debug("getImageContentRect", {
       index,
       itemW: item.clientWidth,
       itemH: item.clientHeight,
@@ -1180,7 +1395,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (!img || !item) return;
     const member = this.group.images[index];
     if (!member || !this.isSingleRow() || !this.isTurnedImage(index)) {
-      if (member) applyOrientationPreview(img, member.orientation);
+      // A row member carries the quarter-turn fit as the scale, as
+      // `applyOrientationTransforms` does; an even turn reads no scale, so a lone
+      // upright image is unaffected.
+      if (member) {
+        applyOrientationPreview(img, member.orientation, { scale: this.memberTurnScale(index) });
+      }
       item.setCssStyles({ width: "", height: "" });
       return;
     }
@@ -1336,7 +1556,8 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     this.imageEls[0].setCssStyles({ objectFit: "contain" });
     this.imageEls[0].style.setProperty("object-position", this.getObjectPosition(0), "important");
-    this.imageEls[0].style.height = `${imageH}px`;
+    this.setImgBoxHeight(0, imageH, "single");
+    this.recordGeometry(0, imageH, Math.max(1, Math.round(shown.height)));
     this.imageEls[0].setCssStyles({ width: "auto" });
     // With the item sized to the drawing, the layout box may legitimately be
     // wider than the item; letting max-width clamp it would re-letterbox the
@@ -1490,21 +1711,23 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
             branch: hasFill ? "hasFill→交由 recalculateRowHeight" : "复用像素尺寸",
           });
           if (!hasFill) {
-          // Apply saved inline style values directly — no recomputation
-          // Use item height as the authoritative height for both item and
-          // image to prevent mismatch (item.style.height may have been
-          // updated by a subsequent layout pass while img.style.height was
-          // not, or vice versa).
+          // Apply saved inline style values directly — no recomputation.
+          // Each rectangle is restored from its own record: the item carries the
+          // drawing and the img the box it is folded inside, which a quarter turn
+          // makes two different rectangles.  (Upright they are one, so this is
+          // the old behaviour with a name for each half.)
           for (let i = 0; i < this.imageEls.length && i < preserved.items.length; i++) {
+            const boxH = parseFloat(preserved.images[i].styleH) || parseFloat(preserved.items[i].styleH);
             this.imageEls[i].style.width = preserved.images[i].styleW;
-            this.imageEls[i].style.height = preserved.items[i].styleH;
+            this.setImgBoxHeight(i, boxH, "preserved");
+            this.recordGeometry(i, boxH, parseFloat(preserved.items[i].styleH) || boxH);
           }
           for (let i = 0; i < this.itemEls.length && i < preserved.items.length; i++) {
             this.itemEls[i].style.flexGrow = preserved.items[i].flexGrow;
             this.itemEls[i].style.height = preserved.items[i].styleH;
             const g = parseFloat(preserved.items[i].flexGrow) || 1;
             const m = this.group.images[i];
-            if (m.display.kind === "multi") m.display.share = g;
+            if (m.display.kind === "multi") m.display.share = quantizeSizing(g);
           }
           this.container.style.height = preserved.containerStyleH;
           this.rowHeight = parseFloat(preserved.containerStyleH) || this.options.defaultRowHeight;
@@ -1550,6 +1773,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         window.requestAnimationFrame(() => this.applyLayout());
         return;
       }
+      this.lastLayoutWidthPx = containerWidth;
       // ── Single-image row ──
       if (this.isSingleRow() && this.imageEls[0] && this.itemEls[0]) {
         const imageH = this.layoutSingleImage(containerWidth);
@@ -1578,14 +1802,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       );
       this.rowHeight = result.rowHeight;
       const h = `${result.rowHeight}px`;
-      this.container.style.height = h;
 
       const rawGrows = computeFlexGrows(metas);
       const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.getInterItemSpace());
       for (let i = 0; i < this.itemEls.length && i < grows.length; i++) {
         this.itemEls[i].style.flexGrow = String(grows[i]);
         const gImg = this.group.images[i];
-        if (gImg.display.kind === "multi") gImg.display.share = grows[i];
+        if (gImg.display.kind === "multi") gImg.display.share = quantizeSizing(grows[i]);
       }
       // Auto-backfill: images without explicit |width, |scale, or |alignment
       // in markdown get their computed params persisted.
@@ -1606,22 +1829,29 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           for (let i = 0; i < this.group.images.length; i++) {
             const mi = this.group.images[i];
             if (mi.display.kind !== "multi" || mi.display.fill != null) continue;
+            if (!this.fillFrameTrustworthy(i)) continue;
             const cr = this.getImageContentRect(i);
             const ir = this.itemEls[i]?.getBoundingClientRect();
             if (cr && cr.width > 0 && ir && ir.width > 0) {
-              mi.display.fill = clampScale(cr.width / ir.width);
+              mi.display.fill = quantizeSizing(clampScale(cr.width / ir.width));
             }
           }
           this.persistCallback?.();
         });
       }
-      for (let i = 0; i < this.itemEls.length; i++) {
-        this.itemEls[i].style.height = h;
-      }
+      // The item takes the drawing, not the box: upright the two are the same
+      // rectangle, and a turned member's cell follows what it paints so its
+      // column lines up with the others instead of holding a taller box.
+      let rowCellH = 0;
       for (let i = 0; i < this.imageEls.length; i++) {
-        this.imageEls[i].style.height = h;
+        const drawn = this.drawnFromBox(result.rowHeight, i);
+        this.setImgBoxHeight(i, h, "applyLayout-uniform");
+        this.recordGeometry(i, result.rowHeight, drawn);
         this.imageEls[i].setCssStyles({ width: "auto" });
+        if (this.itemEls[i]) this.itemEls[i].style.height = `${drawn}px`;
+        if (drawn > rowCellH) rowCellH = drawn;
       }
+      this.container.style.height = `${rowCellH > 0 ? rowCellH : result.rowHeight}px`;
 
       log.debug("ImageRowWidget layout applied", {
         containerWidth,
@@ -1658,13 +1888,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // quarter turn, which the browser only measures once the transform is on
       // the element.
       this.updateAllHandlePositions();
+      this.scheduleRowSnapshot("applyLayout");
     }
   }
 
   /** Replay every member's orientation as a CSS transform on its <img>.  A
    *  quarter-turned single row hands over the explicit fit scale its item was
-   *  sized with; everyone else (multi members, and any single row laid out
-   *  before its box was measurable) uses the transform's own measured scale. */
+   *  sized with; a row member gets the fit that folds the turned rectangle back
+   *  inside the rectangle it came from (`quarterTurnFitScale`, the same number
+   *  `drawnHeightCoefficient` is built on), so it keeps its height and narrows
+   *  or keeps its width and shortens, and the row never grows.
+   *  (Only odd turns read the scale, so a non-turned image is unaffected.) */
   private applyOrientationTransforms(): void {
     for (let i = 0; i < this.imageEls.length; i++) {
       const member = this.group.images[i];
@@ -1672,9 +1906,20 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       if (this.isSingleRow() && this.isTurnedImage(i)) {
         applyOrientationPreview(this.imageEls[i], member.orientation, { scale: this.singleScale });
       } else {
-        applyOrientationPreview(this.imageEls[i], member.orientation);
+        applyOrientationPreview(this.imageEls[i], member.orientation, {
+          scale: this.memberTurnScale(i),
+        });
       }
     }
+  }
+
+  /** The scale a quarter turn applies to a row member's drawing: the fit of the
+   *  turned rectangle inside its own un-rotated one, and 1 before the bitmap
+   *  reports a size. */
+  private memberTurnScale(index: number): number {
+    const meta = this.loadedMetas.get(index);
+    if (!meta || !(meta.naturalWidth > 0) || !(meta.naturalHeight > 0)) return 1;
+    return quarterTurnFitScale(meta.naturalWidth / meta.naturalHeight);
   }
 
   /**
@@ -1716,15 +1961,15 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         // a later pass, rather than pinning a made-up ratio.
         if (!img.hasSizing && this.itemEls[i]) {
           const fg = parseFloat(this.itemEls[i].style.flexGrow || String(img.display.share));
-          img.display.share = clampFlexGrow(fg);
+          img.display.share = quantizeSizing(clampFlexGrow(fg));
           img.hasSizing = true;
           changed = true;
         }
-        if (img.display.fill == null && this.itemEls[i]) {
+        if (img.display.fill == null && this.itemEls[i] && this.fillFrameTrustworthy(i)) {
           const cr = this.getImageContentRect(i);
           const ir = this.itemEls[i].getBoundingClientRect();
           if (cr && ir && cr.width > 0 && ir.width > 0) {
-            img.display.fill = clampScale(cr.width / ir.width);
+            img.display.fill = quantizeSizing(clampScale(cr.width / ir.width));
             changed = true;
           }
         }
@@ -1746,9 +1991,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const h = `${this.options.defaultRowHeight}px`;
     this.container.style.height = h;
     for (const item of this.itemEls) item.style.height = h;
-    for (const img of this.imageEls) {
-      img.style.height = h;
-      img.setCssStyles({ width: "auto" });
+    for (let i = 0; i < this.imageEls.length; i++) {
+      this.setImgBoxHeight(i, h, "uniform-fallback");
+      this.recordGeometry(i, this.options.defaultRowHeight, this.options.defaultRowHeight);
+      this.imageEls[i].setCssStyles({ width: "auto" });
     }
   }
 
@@ -1785,6 +2031,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // Record the document-uniform width so build() can scale stale cached
     // heights if the editor width has changed since they were cached.
     lastMeasuredWidth = containerWidth;
+    this.lastLayoutWidthPx = containerWidth;
 
     // FLICKER_DIAG: capture the transient PAINTED state right before recalc
     // changes anything — this is the frame the user sees flicker on.  Compare
@@ -1854,37 +2101,62 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const someMissing = this.group.images.some(img => !img.hasSizing);
       if (someExplicit && someMissing && clamped > 0) {
         let explicitSum = 0;
-        let missingArSum = 0;
+        let missingCoefSum = 0;
         for (let i = 0; i < n; i++) {
           if (this.group.images[i].hasSizing) {
             explicitSum += grows[i];
           } else {
-            const m = metas[i];
-            missingArSum += m.naturalWidth / m.naturalHeight;
+            // Per unit of item width, at the fill this row is about to give the
+            // member.  A quarter turn's unit is the fit of the turned rectangle
+            // inside its own box — the bitmap's aspect for a portrait, which
+            // asks for less width than its ratio would, and 1 / aspect for a
+            // landscape, the same as upright.
+            missingCoefSum += drawnHeightCoefficient(metas[i], 1, this.group.images[i].orientation);
           }
         }
         const AW = containerWidth - (n - 1) * this.getInterItemSpace();
-        const denom = AW - clamped * missingArSum;
-        if (denom > 0 && missingArSum > 0) {
+        const denom = AW - clamped * missingCoefSum;
+        if (denom > 0 && missingCoefSum > 0) {
           const k = clamped * explicitSum / denom;
           for (let i = 0; i < n; i++) {
             if (!this.group.images[i].hasSizing) {
-              const ar = metas[i].naturalWidth / metas[i].naturalHeight;
-              grows[i] = k * ar;
+              const coef = drawnHeightCoefficient(metas[i], 1, this.group.images[i].orientation);
+              grows[i] = k * coef;
               this.itemEls[i].style.flexGrow = String(grows[i]);
               this.itemEls[i].style.flex = `${grows[i]} 1 0%`;
               const mi = this.group.images[i];
-              if (mi.display.kind === "multi") mi.display.share = grows[i];
+              if (mi.display.kind === "multi") mi.display.share = quantizeSizing(grows[i]);
             }
           }
           log.debug("ImageRowWidget autoFillMissingFlexGrow", {
             originalGrows: this.itemEls.map(el => el.style.flexGrow).slice(0, n),
             adjustedGrows: grows,
             explicitSum,
-            missingArSum,
+            missingCoefSum,
             k,
           });
         }
+      } else if (someMissing && clamped > 0) {
+        // Nothing in the row is persisted yet — a freshly merged pair, most
+        // often.  There is no split to honour, so seed the row at its own
+        // equilibrium instead of leaving every member on the uniform flex-grow
+        // they start from: equal *drawn* heights are what merging two pictures
+        // is meant to give, and a quarter-turned member takes the width its
+        // painted frame asks for.
+        const totalGrow = grows.reduce((s, g) => s + g, 0);
+        const seedFills = this.group.images.map((img) => this.fillOf(img) ?? 1);
+        const seeded = computeGlobalEquilibrium(
+          metas, totalGrow, seedFills, this.orientationsOf()
+        );
+        for (let i = 0; i < n; i++) {
+          const g = quantizeSizing(clampFlexGrow(seeded[i] ?? 1));
+          grows[i] = g;
+          this.itemEls[i].style.flexGrow = String(g);
+          this.itemEls[i].style.flex = `${g} 1 0%`;
+          const mi = this.group.images[i];
+          if (mi.display.kind === "multi") mi.display.share = g;
+        }
+        log.debug("ImageRowWidget seedNewRowEquilibrium", { totalGrow, seeded: [...grows] });
       }
       // Auto-backfill: persist newly-computed flexGrows and scales.
       if (someMissing || this.group.images.some(img => this.fillOf(img) == null)) {
@@ -1900,7 +2172,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
             const cr = this.getImageContentRect(i);
             const ir = this.itemEls[i]?.getBoundingClientRect();
             if (cr && cr.width > 0 && ir && ir.width > 0) {
-              mi.display.fill = clampScale(cr.width / ir.width);
+              mi.display.fill = quantizeSizing(clampScale(cr.width / ir.width));
             }
           }
           this.persistCallback?.();
@@ -1913,8 +2185,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (n === 1) {
       this.layoutSingleImage(containerWidth);
     } else if (preservedMultiImageSizes.has(mkRowKey(this.options.sourcePath, this.group.lineStart, this.group.images.map(i => i.fileName)))) {
-      // Preserved per-image heights are active — don't overwrite with uniform h.
-      // Just update container height to match the tallest item.
+      // Preserved per-image sizes are active — don't overwrite with uniform h.
+      // Just update the container height to match the tallest cell; those
+      // preserved sizes are cell heights (the restore writes the same value to
+      // the item and to the <img> box), so the tallest one is the row height.
       let maxH = 0;
       for (let i = 0; i < this.itemEls.length; i++) {
         const ih = parseFloat(this.itemEls[i].style.height || "0");
@@ -1926,34 +2200,53 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // fill = imageContentWidth / itemWidth, a dimensionless ratio that
       // survives container-width changes across sessions.
       const scales = this.group.images.map((img) => this.fillOf(img));
-      const { heights, maxH } = computeScaleBasedHeights(
-        grows, metas, scales, containerWidth, this.getInterItemSpace(), this.options.defaultRowHeight
+      const { heights, boxes } = computeScaleBasedHeights(
+        grows, metas, scales, containerWidth, this.getInterItemSpace(),
+        this.options.defaultRowHeight, this.orientationsOf()
       );
       for (let i = 0; i < n; i++) {
-        const hPx = `${heights[i]}px`;
-        this.imageEls[i].style.height = hPx;
+        // The <img> carries the un-rotated box; the item takes what the member
+        // actually paints.  The two are the same rectangle upright — as this
+        // formula gives: a member's drawing *is* its box until a turn folds it —
+        // and a quarter turn is the one case they part, the drawing landing
+        // inside the box scaled by `quarterTurnFitScale`.  Sizing the cell on the
+        // drawing is what makes a balanced row line up: every column hugs its own
+        // picture, so equal drawn heights put every picture on one baseline and
+        // leave nothing below them.
+        this.setImgBoxHeight(i, boxes[i], "scale-branch");
+        this.recordGeometry(i, boxes[i], heights[i]);
         this.imageEls[i].setCssStyles({ width: "auto" });
-        this.itemEls[i].style.height = hPx;
+        this.itemEls[i].style.height = `${heights[i]}px`;
       }
-      this.container.style.height = `${maxH}px`;
+      // The row is its tallest cell, and every cell is its member's drawing.
+      const rowCellH = heights.length > 0 ? Math.max(...heights) : clamped;
+      this.container.style.height = `${rowCellH}px`;
       log.debug("ImageRowWidget scale-based heights restored", {
         scales: this.group.images.map((img) => Math.round((this.fillOf(img) ?? 0) * 100)),
-        heights: this.imageEls.map((el) => el.style.height),
-        containerH: `${maxH}px`,
+        boxes: this.imageEls.map((el) => el.style.height),
+        cells: heights,
+        containerH: `${rowCellH}px`,
       });
     } else {
-      this.container.style.height = h;
-      for (let i = 0; i < this.itemEls.length; i++) {
-        this.itemEls[i].style.height = h;
-      }
+      // No member carries a fill: every box is the uniform height, and a quarter
+      // turn stands its box on its side, scaled down to fit back inside it.  The
+      // cell follows that drawing, exactly as it does in the scale branch, so a
+      // turned member's column hugs its picture instead of holding a taller box
+      // around it.
+      let rowCellH = 0;
       for (let i = 0; i < this.imageEls.length; i++) {
-        this.imageEls[i].style.height = h;
+        const drawn = this.drawnFromBox(clamped, i);
+        this.setImgBoxHeight(i, h, "uniform-branch");
+        this.recordGeometry(i, clamped, drawn);
         // Let the image take its intrinsic width from the natural
         // aspect ratio so that flex justify-content alignment within
         // the item is visible (without "auto", width stays 100% and
         // the img fills the item, hiding any alignment offset).
         this.imageEls[i].setCssStyles({ width: "auto" });
+        if (this.itemEls[i]) this.itemEls[i].style.height = `${drawn}px`;
+        if (drawn > rowCellH) rowCellH = drawn;
       }
+      this.container.style.height = `${rowCellH > 0 ? rowCellH : clamped}px`;
     }
 
     // Diagnose jitter: log any dimension changes caused by this recalc.
@@ -1973,7 +2266,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       }
     }
     const layoutChanged = _diffs.length > 0 || _beforeContainerH !== _afterContainerH;
-    if (layoutChanged) {
+    if (layoutChanged && hasChanged(`dims:${this.group.lineStart}`, {
+      diffs: _diffs,
+      containerH: `${_beforeContainerH} → ${_afterContainerH}`,
+    })) {
       log.debug("BALANCE recalculateRowHeight DIMENSION CHANGES", {
         diffs: _diffs,
         containerH: `${_beforeContainerH} → ${_afterContainerH}`,
@@ -2003,6 +2299,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         atWidth: containerWidth,
       });
     }
+    this.scheduleRowSnapshot("recalculateRowHeight");
     window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } catch (e) {
       log.error("ImageRowWidget recalculateRowHeight error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
@@ -2038,6 +2335,169 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       alignment: this.options.alignment,
       images,
     });
+  }
+
+  /**
+   * Drawn heights the row's model gives a pair at the given split.  The grid
+   * snap below picks its candidate by this, so the choice is made on the same
+   * model the row paints from rather than on the grow values alone.
+   */
+  private pairDrawnHeights(
+    grows: number[],
+    metas: ImageMeta[],
+    scales: Array<number | null>,
+    containerWidth: number,
+    leftIndex: number,
+    left: number,
+    right: number
+  ): { left: number; right: number } {
+    const candidate = grows.slice();
+    candidate[leftIndex] = left;
+    candidate[leftIndex + 1] = right;
+    return computePairHeights(
+      candidate,
+      metas,
+      scales,
+      containerWidth,
+      this.getInterItemSpace(),
+      this.options.defaultRowHeight,
+      leftIndex,
+      this.orientationsOf()
+    );
+  }
+
+  /**
+   * Land a solved split on the grid the file persists on, choosing the grid
+   * neighbours that keep the pair closest to equal drawn heights.
+   *
+   * The solve is continuous; the row grammar is hundredths.  Rounding each side
+   * independently would leave the members up to a step apart — the difference
+   * only shows up as "equalised here, a pixel off there".  The scan runs along
+   * the pair's own total, which is what a divider holds constant: it
+   * redistributes width between its two neighbours and never takes any from the
+   * rest of the row.
+   */
+  private snapPairToGrid(
+    grows: number[],
+    metas: ImageMeta[],
+    scales: Array<number | null>,
+    containerWidth: number,
+    leftIndex: number,
+    left: number,
+    right: number
+  ): { left: number; right: number } {
+    const total = left + right;
+    const spread = (l: number, r: number): number => {
+      const h = this.pairDrawnHeights(grows, metas, scales, containerWidth, leftIndex, l, r);
+      return Math.abs(h.left - h.right);
+    };
+    const onGrid = (v: number): number | null => {
+      const q = quantizeSizing(v);
+      return q >= DIVIDER_MIN_GROW ? q : null;
+    };
+
+    let bestL: number | null = null;
+    let bestR: number | null = null;
+    let best = Infinity;
+    for (let dl = -2; dl <= 2; dl++) {
+      const l = onGrid(left + dl / SIZING_STEP);
+      if (l === null) continue;
+      const r = onGrid(total - l);
+      if (r === null) continue;
+      const s = spread(l, r);
+      if (s < best) {
+        best = s;
+        bestL = l;
+        bestR = r;
+      }
+    }
+    return bestL === null || bestR === null ? { left, right } : { left: bestL, right: bestR };
+  }
+
+  /**
+   * Land a row-wide solve on the persisted grid by sweeping the *scale* of the
+   * continuous solution, not a neighbourhood of grid points.
+   *
+   * A row's shares are only meaningful as a ratio: the model lays each member out
+   * at `(g_i / Σg) × availableWidth`, so multiplying every share by the same
+   * factor changes nothing on screen while shifting where the per-image rounding
+   * lands.  That degree of freedom is the whole point — the grid point that paints
+   * four equal heights can sit several grid steps away from the rounded
+   * equilibrium, and *every* single step towards it is worse than standing still,
+   * so a local descent stalls at the seed (the visible "middle two a pixel short"
+   * row).  Sweeping the scale finds it by construction: candidates keep the
+   * continuous solution's ratios, so the unrounded model is equal along the whole
+   * sweep and the search only has to move the per-image rounding off the seed.
+   *
+   * The ratios are recomputed here from `metas`/`scales`/the incoming total rather
+   * than read off the incoming `grows`: those are the pre-snap values and may
+   * still carry a stale user intent, while the equilibrium is the aspect/fill
+   * shape the gesture asked for.
+   *
+   * Two grid points can paint the same heights; the tie is broken on the
+   * unrounded model, which says which of them is actually the closer to equal —
+   * and the sweep adopts the first point that is not beatable, so the smallest
+   * scale painting an exact match wins.
+   */
+  private snapAllToGrid(
+    grows: number[],
+    metas: ImageMeta[],
+    scales: Array<number | null>,
+    containerWidth: number
+  ): number[] {
+    const gap = this.getInterItemSpace();
+    const orientations = this.orientationsOf();
+    const span = (hs: number[]): number =>
+      hs.length === 0 ? 0 : Math.max(...hs) - Math.min(...hs);
+    const spread = (gs: number[]): { painted: number; exact: number } => ({
+      painted: span(computeScaleBasedHeights(
+        gs, metas, scales, containerWidth, gap, this.options.defaultRowHeight, orientations
+      ).heights),
+      exact: span(computeScaleBasedHeightsContinuous(
+        gs, metas, scales, containerWidth, gap, this.options.defaultRowHeight, orientations
+      ).heights),
+    });
+    const better = (
+      a: { painted: number; exact: number },
+      b: { painted: number; exact: number }
+    ): boolean =>
+      a.painted < b.painted || (a.painted === b.painted && a.exact < b.exact - 1e-9);
+
+    const fallback = grows.map((g) => Math.max(DIVIDER_MIN_GROW, quantizeSizing(g)));
+    if (grows.length === 0) return fallback;
+
+    let total = 0;
+    for (const g of grows) total += g;
+    const cont = computeGlobalEquilibrium(metas, total, scales, orientations);
+    let contSum = 0;
+    for (const c of cont) contSum += c;
+    if (!(contSum > 0)) return fallback;
+    const ratios = cont.map((c) => c / contSum);
+    const rMax = Math.max(...ratios);
+    if (!(rMax > 0)) return fallback;
+
+    // The scale is the largest member's grid value; the sweep spans half to
+    // double it, which is far more than any rounding disagreement needs.
+    let maxShare = 0;
+    for (const g of grows) if (g > maxShare) maxShare = g;
+    const m0 = Math.max(DIVIDER_MIN_GROW, quantizeSizing(maxShare));
+    const lo = Math.round(0.5 * m0 * SIZING_STEP);
+    const hi = Math.round(2 * m0 * SIZING_STEP);
+
+    let best: { painted: number; exact: number } | null = null;
+    let bestGrows: number[] | null = null;
+    for (let code = lo; code <= hi; code++) {
+      const m = code / SIZING_STEP;
+      const candidate = ratios.map((r) =>
+        Math.max(DIVIDER_MIN_GROW, quantizeSizing((r / rMax) * m))
+      );
+      const s = spread(candidate);
+      if (best === null || better(s, best)) {
+        best = s;
+        bestGrows = candidate;
+      }
+    }
+    return bestGrows ?? fallback;
   }
 
   /**
@@ -2081,15 +2541,22 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       metas[i] = m;
       const parsed = parseFloat(this.itemEls[i]?.style.flexGrow || "1");
       grows[i] = isFinite(parsed) ? parsed : 1;
-      scales[i] = this.fillOf(this.group.images[i]);
+      // Only the pair this divider owns is re-proportioned, and it is solved at
+      // its natural proportion: the two pictures fill the slots they are handed,
+      // so the split follows their aspect ratios outright.  The rest of the row
+      // keeps whatever fill it carries — a divider re-splits its own junction,
+      // it does not reach across the row.
+      scales[i] = i === leftIndex || i === leftIndex + 1
+        ? 1
+        : this.fillOf(this.group.images[i]);
     }
 
     const total = grows[leftIndex] + grows[leftIndex + 1];
 
-    // Solve on the model the row paints from, so the split is the one the
-    // pictures actually reach equal heights at — the aspect-only split coincides
-    // with it only while the two fills agree.  This is the same solve the divider
-    // drag snaps to, so the two gestures land on identical geometry.
+    // Solve on the model the row paints from — the same solve the divider drag
+    // snaps to, so the two gestures land on identical geometry.  The pair's
+    // fills are 1 by the line above, which is what makes "equal drawn heights"
+    // and "the split follows the aspect ratios" the same equation.
     let left: number;
     let right: number;
     let model = "render";
@@ -2100,36 +2567,60 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       containerWidth,
       this.getInterItemSpace(),
       this.options.defaultRowHeight,
-      leftIndex
+      leftIndex,
+      this.orientationsOf()
     );
     if (pair) {
       left = pair.left;
       right = pair.right;
     } else {
-      // Nothing on the row's model equalises this pair: a member without a fill
-      // of its own renders the row fallback instead of a height its grow can
-      // steer, or the ratio it would need is past the divider's reach.  Land on
-      // the aspect-only split — where a pair of matching fills goes anyway.
-      const aspect = computeDividerEquilibrium(metas[leftIndex], metas[leftIndex + 1], total);
+      // Nothing on the row's model equalises this pair: a member that isn't
+      // laid out on the size model — the row fallback instead of a height its
+      // grow can steer — or a ratio past the divider's reach.  Land on the
+      // no-fill split, which is where the render model above puts a pair whose
+      // fills agree — and, like the model, read each side through its turn.
+      const orientations = this.orientationsOf();
+      const aspect = computeDividerEquilibrium(
+        metas[leftIndex],
+        metas[leftIndex + 1],
+        total,
+        [orientations[leftIndex], orientations[leftIndex + 1]]
+      );
       left = aspect.left;
       right = aspect.right;
       model = "aspect-fallback";
     }
 
+    // Land the split on the grid the file persists on before painting it.  The
+    // solve is continuous; the row grammar is hundredths.  Painting the
+    // continuous value and persisting the rounded one would make the two sides
+    // drift apart by up to a step on the next rebuild, which is exactly the
+    // "equalised here, not equal there" gap — so the committed split is the one
+    // both the screen and the file carry.
+    const snapped = this.snapPairToGrid(
+      grows, metas, scales, containerWidth, leftIndex, left, right
+    );
+    left = snapped.left;
+    right = snapped.right;
+    model += "+grid";
+
     this.itemEls[leftIndex].style.flexGrow = String(clampFlexGrow(left));
     this.itemEls[leftIndex + 1].style.flexGrow = String(clampFlexGrow(right));
 
-    // Sync in-memory state before persisting.  Each member keeps its own fill:
-    // a fill is a scale the user set, not a fitting knob, and equal heights come
-    // out of the split.
+    // Sync in-memory state before persisting.  Both members of the pair lose
+    // their fill: the split was solved with the pair at 1, and the row reads
+    // the fills back from the note on every rebuild — keeping one would paint
+    // the picture narrow inside the slot the split just gave it.
     const leftImg = this.group.images[leftIndex];
     const rightImg = this.group.images[leftIndex + 1];
     if (leftImg.display.kind === "multi") {
-      leftImg.display.share = clampFlexGrow(left);
+      leftImg.display.share = quantizeSizing(clampFlexGrow(left));
+      leftImg.display.fill = 1;
       leftImg.hasSizing = true;
     }
     if (rightImg.display.kind === "multi") {
-      rightImg.display.share = clampFlexGrow(right);
+      rightImg.display.share = quantizeSizing(clampFlexGrow(right));
+      rightImg.display.fill = 1;
       rightImg.hasSizing = true;
     }
 
@@ -2159,11 +2650,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   /**
    * Double-click top bar: snap ALL images in the row to equal heights.
    *
-   * Distributes flex-grow so every member's *drawn* height matches: weights go
-   * in `aspect / fill`, since a member's drawn height is `fill × grow / aspect`.
-   * Members without a fill of their own render the row fallback and keep their
-   * aspect weight.  Sizing is left to the row's own pass, exactly as the divider
-   * double-click does, so both gestures and the divider drag agree on geometry.
+   * The balance is struck on the pictures' own aspect ratios, so each member
+   * ends up filling the slot it is given: the solve runs with every fill taken
+   * as 1, and weights go in `aspect`.  Feeding a member's own fill in instead
+   * is what let equal heights coexist with a blank — the member was handed a
+   * *wider* slot to compensate for drawing at `fill × slot`, and the picture
+   * then sat in the middle of it with the rest empty.  The gesture therefore
+   * also retires the fills it balances: they are written back as 1, because the
+   * row re-reads them from the note on every rebuild and a fill left behind
+   * would put the blank straight back.  Sizing is left to the row's own pass,
+   * exactly as the divider double-click does, so both gestures and the divider
+   * drag agree on geometry.
    */
   private snapAllToEquilibrium(): void {
     const n = this.itemEls.length;
@@ -2194,24 +2691,39 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         return;
       }
       metas.push(meta);
-      scales.push(this.fillOf(this.group.images[i]));
+      // Every member the gesture balances is taken at its natural proportion —
+      // a retired fill is 1, and one that was never set is 1 too, so the row is
+      // solved on aspect ratios alone.
+      scales.push(1);
       totalGrow += parseFloat(this.itemEls[i].style.flexGrow || "1");
     }
 
-    const rawGrows = computeGlobalEquilibrium(metas, totalGrow, scales);
+    const rawGrows = computeGlobalEquilibrium(metas, totalGrow, scales, this.orientationsOf());
     const containerWidth = this.container.getBoundingClientRect().width;
-    const grows = validateRowFlexGrows(rawGrows, metas, containerWidth, this.getInterItemSpace());
+    // Same two steps as the divider double-click: solve continuously, then land
+    // the split on the grid the file persists on — otherwise the equality the
+    // user just asked for is a step off everywhere it is re-read.
+    const grows = this.snapAllToGrid(
+      validateRowFlexGrows(rawGrows, metas, containerWidth, this.getInterItemSpace()),
+      metas,
+      scales,
+      containerWidth
+    );
 
     for (let i = 0; i < n; i++) {
       this.itemEls[i].style.flexGrow = String(grows[i]);
       const mi = this.group.images[i];
       if (mi.display.kind === "multi") {
-        mi.display.share = grows[i];
+        mi.display.share = quantizeSizing(grows[i]);
+        // Retire the member's own fill: the row reads it back from the note on
+        // every rebuild, so leaving it behind would restore the blank.
+        mi.display.fill = 1;
         mi.hasSizing = true;
       }
     }
 
     this.recalculateRowHeight();
+    this.scheduleRowSnapshot("snapAllToEquilibrium");
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore the uniform heights correctly.
@@ -2267,6 +2779,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    * Clean up all event listeners.
    */
   destroy(): void {
+    if (this.snapshotTimer !== null) {
+      window.clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
     for (const divider of this.dividerEls) {
       if (divider._destroy) divider._destroy();
     }
@@ -2301,8 +2817,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       const data: MultiImageSizeData = {
         images: this.imageEls.map((img, i) => ({
           styleW: img.style.width,
-          // Use item height as authoritative — see applyLayout preserved-path comment.
-          styleH: this.itemEls[i]?.style.height ?? img.style.height,
+          // The img's own box, not the item's — a turned member's item hugs the
+          // drawing, so the item's height is not this rectangle.
+          styleH: img.style.height || this.itemEls[i]?.style.height || "",
         })),
         items: this.itemEls.map((item) => ({
           flexGrow: item.style.flexGrow,

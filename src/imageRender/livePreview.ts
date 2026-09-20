@@ -24,11 +24,11 @@ import { CLASSES } from "../constants";
 import { computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
 import { logger } from "../logger";
 const log = logger.channel("livePreview");
-import { clampFlexGrow, clampScale } from "../imageLayout/parameterValidator";
+import { clampFlexGrow, clampScale, quantizeSizing } from "../imageLayout/parameterValidator";
 import { stripEmbedParams, parseEmbedParams, embedParamString, stripSizingKeepOrientation } from "../imageParse/embedRaw";
 import { IDENTITY_STATE, isOrientationWord, parseOrientationWord } from "../imageTransform/orientation";
 import * as scrollDiag from "../scrollSync/scrollDiag";
-import { createDragGhost } from "./rowRenderer";
+import { createDragGhost, applyDropIndicator } from "./rowRenderer";
 
 /**
  * Parse the file path from an obsidian://open URI and search ALL document lines
@@ -240,8 +240,9 @@ export function normalizeRaw(raw: string): string {
 
 /** Write flex-grow values back to markdown as ![[file|width]].
  *  Extracted so it can be called both synchronously (legacy) and deferred
- *  via setTimeout (from destroy, where view.dispatch is illegal). */
-function applyFlexGrowChanges(
+ *  via setTimeout (from destroy, where view.dispatch is illegal).
+ *  Exported for the persist-decisions test (no-op detection is load-bearing). */
+export function applyFlexGrowChanges(
   view: EditorView,
   images: RowImage[],
   grows: number[],
@@ -258,12 +259,15 @@ function applyFlexGrowChanges(
       alignment: img.alignment ?? defaultAlignment,
       display: {
         kind: "multi",
-        share: clampFlexGrow(grows[i]),
-        fill: fill != null ? clampScale(fill) : null,
+        // Rounded onto the persisted grid here, at the single funnel every
+        // share write passes through: what the file records is then exactly
+        // what the next render pass parses back, so a drag's continuous value
+        // cannot leave the row a pixel off after the rebuild it triggers.
+        share: quantizeSizing(clampFlexGrow(grows[i])),
+        fill: fill != null ? quantizeSizing(clampScale(fill)) : null,
       },
     };
     const newLine = writeRowImage(edited);
-    if (newLine === img.raw) continue;
 
     const line = img.line + 1; // 1-indexed
     if (line < 1 || line > view.state.doc.lines) continue;
@@ -273,6 +277,13 @@ function applyFlexGrowChanges(
     // the same file, skip it — otherwise we'd rewrite a now-blank/different line
     // and resurrect the moved embed at its old position.
     if (!lineObj.text.includes(img.fileName)) continue;
+    // Compare against the document, never against `img.raw`: a param-only write
+    // does not rebuild the widget (`eqInner` strips the params before comparing),
+    // so `img.raw` keeps whatever it held when the DOM was last built. A later
+    // write whose text happens to equal that stale value would be discarded as a
+    // no-op, and the note would silently keep the previous fill — which is what
+    // Reading Mode, reading only the file, would keep showing.
+    if (newLine === lineObj.text) continue;
     changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
   }
 
@@ -1245,7 +1256,6 @@ export function createStandaloneDropPlugin(
       private onDrop: ((e: DragEvent) => void) | null = null;
       private dragoverLogged = false;
       private dropIndicatorEl: HTMLElement | null = null;
-      private dropSide: "left" | "right" | null = null;
 
       constructor(view: EditorView) {
         this.view = view;
@@ -1268,10 +1278,9 @@ export function createStandaloneDropPlugin(
       private clearDropIndicator() {
         if (this.dropIndicatorEl) {
           this.dropIndicatorEl.classList.remove("diaa-drop-target-line", "diaa-drop-left", "diaa-drop-right");
-          this.dropIndicatorEl.setCssStyles({ boxShadow: "" });
+          applyDropIndicator(this.dropIndicatorEl, null);
           this.dropIndicatorEl = null;
         }
-        this.dropSide = null;
       }
 
       private findDropTarget(clientX: number, clientY: number): DropTarget | null {
@@ -1325,17 +1334,19 @@ export function createStandaloneDropPlugin(
       private showDropIndicator(targetInfo: DropTarget, clientX?: number) {
         this.clearDropIndicator();
 
-        // Flex row target: highlight the entire row
+        // Flex row target: bar the row's leading or trailing edge.
+        // The shadow is drawn outward, never inset: an inset shadow paints under
+        // the element's content, and a row's items cover it completely, so the
+        // marker would never be visible.  A non-inset 3px bar sits just outside
+        // the row's box, where nothing paints over it.
         if (targetInfo.isFlexRow) {
           const rowEl = targetInfo.element;
           const rect = rowEl.getBoundingClientRect();
           const mid = rect.left + rect.width / 2;
           if (clientX !== undefined && clientX < mid) {
-            rowEl.setCssStyles({ boxShadow: "inset 3px 0 0 #4a9eff" });
-            this.dropSide = "left";
+            rowEl.setCssStyles({ boxShadow: "-3px 0 0 0 #4a9eff" });
           } else {
-            rowEl.setCssStyles({ boxShadow: "inset -3px 0 0 #4a9eff" });
-            this.dropSide = "right";
+            rowEl.setCssStyles({ boxShadow: "3px 0 0 0 #4a9eff" });
           }
           this.dropIndicatorEl = rowEl;
           return;
@@ -1350,13 +1361,14 @@ export function createStandaloneDropPlugin(
           const mid = rect.left + rect.width / 2;
           if (clientX < mid) {
             indicatorEl.classList.add("diaa-drop-left");
-            this.dropSide = "left";
+            applyDropIndicator(indicatorEl, "left");
           } else {
             indicatorEl.classList.add("diaa-drop-right");
-            this.dropSide = "right";
+            applyDropIndicator(indicatorEl, "right");
           }
         } else {
           indicatorEl.classList.add("diaa-drop-target-line");
+          applyDropIndicator(indicatorEl, "line");
         }
         this.dropIndicatorEl = indicatorEl;
       }

@@ -1,5 +1,6 @@
 import { ImageMeta } from "../imageParse/imageDetector";
 import { SingleImageSizeMode, SINGLE_IMAGE_MIN_WIDTH } from "../constants";
+import { quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
 
 export interface LayoutResult {
   /** Computed uniform row height in px */
@@ -173,8 +174,83 @@ export function computeRowHeight(
 
 /** Result of computeScaleBasedHeights: per-image pixel heights + the tallest. */
 export interface ScaleBasedHeightsResult {
+  /** Per-member height as the row paints it — what the row's container has to
+   *  hold, and the figure every equality is judged on.  A quarter-turned member
+   *  paints its box on its side, scaled down to fit back inside it, so its drawn
+   *  height is the box's own width times that fit scale and this is not `boxes`;
+   *  it never exceeds the upright member's drawn height, so the row cannot grow. */
   heights: number[];
+  /** Per-member layout-box height: the un-rotated bitmap's box, which is what
+   *  the <img> is sized to.  Equal to `heights` for every even orientation. */
+  boxes: number[];
   maxH: number;
+}
+
+/**
+ * The coefficient `c` with `drawnHeight = c × itemWidth` for a member.
+ *
+ * Normally `fill / aspect`: the picture spans `fill` of its slot in width and
+ * its height follows from the bitmap's own ratio.  A quarter turn keeps the
+ * bitmap's ratio — the turned rectangle is the upright one on its side — and
+ * scales it down (`quarterTurnFitScale`) so it fits inside the very rectangle it
+ * came from: `fill / aspect` for a landscape, which keeps its height and
+ * narrows, and `fill × aspect` for a portrait, which keeps its width and
+ * shortens.  The picture is never enlarged and never clipped, and the row can
+ * only ever get shorter.
+ *
+ * This is the one place the drawn frame is defined; every model entry point
+ * that has to agree on "equal heights" derives from it.
+ */
+export function drawnHeightCoefficient(
+  meta: ImageMeta,
+  fill: number,
+  orientation: OrientationState | null | undefined
+): number {
+  const ar = meta.naturalWidth / meta.naturalHeight;
+  const a = ar > 0 && Number.isFinite(ar) ? ar : 1;
+  const turned = orientation != null && orientation.turns % 2 === 1;
+  return turned ? fill * quarterTurnFitScale(a) : fill / a;
+}
+
+/**
+ * The fill to write back after turning a member from `from` to `to`, given the
+ * fill it was drawn with before the turn.
+ *
+ * A turn may not change the member's container, so the drawn height it had
+ * before is the drawn height it keeps.  Per unit slot width that is
+ * `drawnHeightCoefficient(meta, fill, from)`, so the fill that reproduces it in
+ * the new orientation is that number over the coefficient at fill 1:
+ *
+ *     fill' = k(fill, from) / k(1, to)
+ *
+ * Clamped to 1: the whole reason a turn needs a write at all is that a member
+ * can paint less than its slot (a turned portrait keeps its width and
+ * shortens), and that is exactly what fill records — but the reverse (a member
+ * needing to paint *more* than its slot, e.g. an upright portrait asked to lie
+ * down) is not representable and the turn is the only gesture allowed to make
+ * the member shorter.
+ */
+export function fillForTurn(
+  meta: ImageMeta,
+  fill: number,
+  from: OrientationState | null | undefined,
+  to: OrientationState | null | undefined
+): number {
+  const perFill = drawnHeightCoefficient(meta, 1, to);
+  if (!(perFill > 0) || !Number.isFinite(perFill)) return fill;
+  return Math.min(1, drawnHeightCoefficient(meta, fill, from) / perFill);
+}
+
+/** The coefficient for a member, or null when it has no fill of its own (it
+ *  then renders the row fallback rather than a height its grow can steer). */
+function memberCoefficient(
+  meta: ImageMeta | undefined,
+  fill: number | null,
+  orientation: OrientationState | null | undefined
+): number | null {
+  if (!meta || !(meta.naturalWidth > 0) || !(meta.naturalHeight > 0)) return null;
+  if (fill == null || !(fill > 0) || fill > 1 || !Number.isFinite(fill)) return null;
+  return drawnHeightCoefficient(meta, fill, orientation);
 }
 
 /**
@@ -183,8 +259,10 @@ export interface ScaleBasedHeightsResult {
  * container-width changes.  For each image with a valid scale (0 < scale ≤ 1)
  * the height is `round(scale * itemW / aspectRatio)` — a per-image height, so a
  * full-width image (scale = 1) keeps its own `itemW / aspectRatio` instead of
- * the row max.  Images without a valid scale fall back to the uniform
- * `computeRowHeight` value.  Pure — no DOM.
+ * the row max.  The *box* is always this — a quarter turn does not move it, it
+ * only paints the box on its side, scaled down to fit back inside itself, and
+ * `heights` (the figure the row is laid out on) reports that.  Images without a
+ * valid scale fall back to the uniform `computeRowHeight` value.  Pure — no DOM.
  */
 export function computeScaleBasedHeights(
   flexGrows: number[],
@@ -192,9 +270,37 @@ export function computeScaleBasedHeights(
   scales: Array<number | null>,
   containerWidth: number,
   gap: number,
-  defaultRowHeight: number
+  defaultRowHeight: number,
+  orientations: ReadonlyArray<OrientationState | null> = []
 ): ScaleBasedHeightsResult {
-  return scaleBasedHeights(flexGrows, metas, scales, containerWidth, gap, defaultRowHeight, true);
+  return scaleBasedHeights(
+    flexGrows, metas, scales, containerWidth, gap, defaultRowHeight, true, orientations
+  );
+}
+
+/**
+ * The scale-based model without the per-image rounding — the frame a *search*
+ * over shares reads, and the tie-break between two grid points that paint the
+ * same heights.
+ *
+ * Rounded per-image heights are a staircase: every point inside a band reports
+ * the same spread, so a search over them cannot tell a near-miss from an exact
+ * hit, and two members can end up a pixel apart while looking "equalised".  The
+ * continuous figure is monotone, so it orders the band from the inside.
+ * Painting always uses the rounded figures — see `computeScaleBasedHeights`.
+ */
+export function computeScaleBasedHeightsContinuous(
+  flexGrows: number[],
+  metas: ImageMeta[],
+  scales: Array<number | null>,
+  containerWidth: number,
+  gap: number,
+  defaultRowHeight: number,
+  orientations: ReadonlyArray<OrientationState | null> = []
+): ScaleBasedHeightsResult {
+  return scaleBasedHeights(
+    flexGrows, metas, scales, containerWidth, gap, defaultRowHeight, false, orientations
+  );
 }
 
 /**
@@ -214,7 +320,8 @@ function scaleBasedHeights(
   containerWidth: number,
   gap: number,
   defaultRowHeight: number,
-  round: boolean
+  round: boolean,
+  orientations: ReadonlyArray<OrientationState | null> = []
 ): ScaleBasedHeightsResult {
   const n = flexGrows.length;
   const fallback = computeRowHeight(flexGrows, metas, containerWidth, gap, defaultRowHeight);
@@ -223,23 +330,30 @@ function scaleBasedHeights(
   const availableWidth = containerWidth - (n - 1) * gap;
 
   const heights: number[] = [];
+  const boxes: number[] = [];
   let maxH = 0;
   for (let i = 0; i < n; i++) {
     const scale = scales[i];
     const meta = metas[i];
-    let imageH: number;
-    if (scale != null && scale > 0 && scale <= 1 && totalG > 0 && meta && meta.naturalHeight > 0) {
+    const coef = memberCoefficient(meta, scale, orientations[i]);
+    if (coef != null && totalG > 0 && meta) {
       const itemW = (flexGrows[i] / totalG) * availableWidth;
-      const ar = meta.naturalWidth / meta.naturalHeight;
-      imageH = (scale * itemW) / ar;
-      if (round) imageH = Math.round(imageH);
+      // The <img> keeps the un-rotated box (it holds the un-rotated bitmap);
+      // the row is laid out on what the box *paints*.
+      let boxH = (scale! * itemW) / (meta.naturalWidth / meta.naturalHeight);
+      if (round) boxH = Math.round(boxH);
+      let drawnH = coef * itemW;
+      if (round) drawnH = Math.round(drawnH);
+      boxes.push(boxH);
+      heights.push(drawnH);
+      if (drawnH > maxH) maxH = drawnH;
     } else {
-      imageH = fallback;
+      boxes.push(fallback);
+      heights.push(fallback);
+      if (fallback > maxH) maxH = fallback;
     }
-    heights.push(imageH);
-    if (imageH > maxH) maxH = imageH;
   }
-  return { heights, maxH };
+  return { heights, boxes, maxH };
 }
 
 /**
@@ -305,26 +419,46 @@ export function computeImageContentRect(
   return { left: 0, top: 0, width: displayW, height: displayH };
 }
 
+/** The weight a member takes in an equal-height split when its fill is unknown:
+ *  `1 / coefficient` at fill 1, exactly the weighting `computeGlobalEquilibrium`
+ *  applies — `aspect` while upright, and the same `aspect` for a turned
+ *  landscape, `1 / aspect` for a turned portrait.  Returns null when the meta
+ *  has no usable aspect. */
+function dividerWeight(
+  meta: ImageMeta,
+  orientation: OrientationState | null | undefined
+): number | null {
+  const coef = drawnHeightCoefficient(meta, 1, orientation);
+  if (!Number.isFinite(coef) || !(coef > 0)) return null;
+  return 1 / coef;
+}
+
 /**
  * Compute equilibrium flex-grow values for two adjacent images
  * so they render at the same height.
+ *
+ * This is the aspect-only fallback for a divider whose pair the scale-based
+ * solve (`computePairEquilibrium`) cannot take — it weighs each side by the
+ * model's no-fill coefficient so a quarter-turned member is placed by what it
+ * now paints, not by the bitmap's un-rotated ratio.  Pure — no DOM.
  */
 export function computeDividerEquilibrium(
   leftMeta: ImageMeta,
   rightMeta: ImageMeta,
-  totalFlex: number
+  totalFlex: number,
+  orientations: ReadonlyArray<OrientationState | null> = []
 ): { left: number; right: number } {
-  const la = leftMeta.naturalWidth / leftMeta.naturalHeight;
-  const ra = rightMeta.naturalWidth / rightMeta.naturalHeight;
-  if (isNaN(la) || isNaN(ra) || la + ra === 0) {
+  const lw = dividerWeight(leftMeta, orientations[0]);
+  const rw = dividerWeight(rightMeta, orientations[1]);
+  if (lw == null || rw == null || lw + rw === 0) {
     return { left: totalFlex / 2, right: totalFlex / 2 };
   }
-  const snapLeft = totalFlex * la / (la + ra);
+  const snapLeft = totalFlex * lw / (lw + rw);
   return { left: snapLeft, right: totalFlex - snapLeft };
 }
 
 /** The lowest flex-grow the divider drag lets either side take. */
-const DIVIDER_MIN_GROW = 0.1;
+export const DIVIDER_MIN_GROW = 0.1;
 /** Two members count as equal when the solved heights differ by no more than
  *  this.  The split is solved on unrounded heights, so it normally lands on an
  *  exact zero; the slack exists only for a member whose height comes from the
@@ -344,7 +478,8 @@ export function computePairHeights(
   containerWidth: number,
   gap: number,
   defaultRowHeight: number,
-  leftIndex: number
+  leftIndex: number,
+  orientations: ReadonlyArray<OrientationState | null> = []
 ): { left: number; right: number } {
   const { heights } = computeScaleBasedHeights(
     grows,
@@ -352,7 +487,8 @@ export function computePairHeights(
     scales,
     containerWidth,
     gap,
-    defaultRowHeight
+    defaultRowHeight,
+    orientations
   );
   return { left: heights[leftIndex] ?? 0, right: heights[leftIndex + 1] ?? 0 };
 }
@@ -368,9 +504,13 @@ export interface PairEquilibrium {
  * Solve the flex-grow split that renders two adjacent members at the same
  * height, on the same model `computePairHeights` reads.
  *
- * A member's drawn height is `fill × grow / aspect`, so equal heights ask for a
- * split in `aspect / fill` — not in `aspect`, which is the same thing only while
- * the two fills agree.  The pair's grow sum is held constant (a divider only
+ * A member's drawn height is `coefficient × grow` (see
+ * `drawnHeightCoefficient`), so equal heights ask for a split in the
+ * reciprocals of those coefficients — `aspect / fill` while upright (the same
+ * thing as `aspect` only while the two fills agree), and `1 / (fill × aspect)`
+ * for a turned portrait, whose drawing is the one a turn shrinks short.  The
+ * pair's grow sum is held
+ * constant (a divider only
  * redistributes between its neighbours), and the left height rises with the left
  * grow while the right falls, so the difference is monotone and bisection
  * converges.  The search runs on unrounded heights (see `scaleBasedHeights`), so
@@ -388,7 +528,8 @@ export function computePairEquilibrium(
   containerWidth: number,
   gap: number,
   defaultRowHeight: number,
-  leftIndex: number
+  leftIndex: number,
+  orientations: ReadonlyArray<OrientationState | null> = []
 ): PairEquilibrium | null {
   const pairTotal = grows[leftIndex] + grows[leftIndex + 1];
   const lo = DIVIDER_MIN_GROW;
@@ -406,7 +547,8 @@ export function computePairEquilibrium(
       containerWidth,
       gap,
       defaultRowHeight,
-      false
+      false,
+      orientations
     );
     const left = heights[leftIndex] ?? 0;
     const right = heights[leftIndex + 1] ?? 0;
@@ -435,24 +577,31 @@ export function computePairEquilibrium(
  * Compute equilibrium flex-grow values for all images in a row
  * so every image renders at the same height.
  *
- * A member's drawn height is `fill × grow / aspect`, so equal heights in a row
- * whose fills differ ask for weights in `aspect / fill`.  Passing `scales` (the
- * members' fill ratios, `null` where none is persisted) applies that; omitting
- * it keeps the aspect-only distribution, which is the same answer while every
- * fill agrees.  A member with no fill of its own renders the row fallback rather
- * than a height of its own choosing, so it cannot be made to match — it keeps
- * its aspect weight and the filled members share what is left.
+ * A member's drawn height is `coefficient × grow`, so equal heights ask for
+ * weights in `1 / coefficient` — `aspect / fill` while the member is upright
+ * (unchanged by a turn on a landscape, which keeps its height), and
+ * `1 / (fill × aspect)` for a turned portrait (see `drawnHeightCoefficient`).
+ * Passing
+ * `scales` (the members' fill ratios,
+ * `null` where none is persisted) applies that; omitting it keeps the
+ * aspect-only distribution, which is the same answer while every fill agrees.
+ * A member with no fill of its own renders the row fallback rather than a height
+ * of its own choosing, so it cannot be made to match — it keeps its aspect
+ * weight and the filled members share what is left.
  */
 export function computeGlobalEquilibrium(
   metas: ImageMeta[],
   totalGrow: number,
-  scales?: Array<number | null>
+  scales?: Array<number | null>,
+  orientations: ReadonlyArray<OrientationState | null> = []
 ): number[] {
   if (metas.length === 0) return [];
   const weights = metas.map((m, i) => {
     const ar = m.naturalWidth / m.naturalHeight;
-    const fill = scales?.[i] ?? null;
-    return fill != null && fill > 0 ? ar / fill : ar;
+    const coef = memberCoefficient(m, scales?.[i] ?? null, orientations[i]);
+    // Equal *drawn* heights ask for weights in 1/coefficient — the same answer
+    // as the aspect weights while every member is upright.
+    return coef != null && coef > 0 ? 1 / coef : ar;
   });
   const weightSum = weights.reduce((s, w) => s + w, 0);
   if (weightSum === 0 || isNaN(weightSum)) {

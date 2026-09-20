@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { DividerController, type DividerHost } from '../src/interaction/dividerController';
 import { CLASSES } from '../src/constants';
 import type { ImageMeta } from '../src/imageParse/imageDetector';
+import type { OrientationState } from '../src/imageTransform/orientation';
 
 /** Container width the real row reported, and what one seam costs there: the
  *  4 px divider with the row's 4 px flex gap on each side of it. */
@@ -36,7 +37,12 @@ interface Harness {
   drag(dx: number): { snapped: boolean; divider: HTMLElement };
 }
 
-function makeRow(grows: number[], fills: Array<number | null>, sensitivity = SNAP_SENSITIVITY): Harness {
+function makeRow(
+  grows: number[],
+  fills: Array<number | null>,
+  sensitivity = SNAP_SENSITIVITY,
+  orientations: Array<OrientationState | null> = []
+): Harness {
   const items = grows.map((g) => {
     const item = createDiv();
     item.style.flexGrow = String(g);
@@ -48,6 +54,7 @@ function makeRow(grows: number[], fills: Array<number | null>, sensitivity = SNA
     getSnapSensitivity: () => sensitivity,
     getImageCount: () => items.length,
     getFill: (i) => fills[i] ?? null,
+    getOrientation: (i) => orientations[i] ?? null,
     getRowWidth: () => WIDTH,
     getInterItemSpace: () => INTER_ITEM_SPACE,
     getDefaultRowHeight: () => ROW_HEIGHT,
@@ -121,6 +128,33 @@ describe('divider drag snap', () => {
     expect(growOf(h.items[1])).toBeCloseTo(1.175, 3);
   });
 
+  it('solves on the painted heights when a member is quarter-turned', () => {
+    // The turned left member paints at 0.7645 × its slot (it holds the slot
+    // width and its own 0.7645 ratio is what the height follows), against the
+    // neighbour's 1.5.  Equal painting then asks for a split in
+    // 1.5 / (0.7645 + 1.5) = 0.6625 of the pair's 2.06, i.e. 1.3645 — not the
+    // aspect-only 1.1005 that an unturned row would use.  The drag starts at
+    // 1.34 and has to come *up* to reach it.
+    const turned: OrientationState = { turns: 1, mirror: false };
+    const h = makeRow([1.34, 0.72], [1, 1], SNAP_SENSITIVITY, [turned, null]);
+    const { snapped } = h.drag(5);
+
+    expect(snapped).toBe(true);
+    expect(growOf(h.items[0])).toBeCloseTo(1.3646, 3);
+    expect(growOf(h.items[1])).toBeCloseTo(0.6954, 3);
+  });
+
+  it('does not snap a turned pair at the aspect-only split', () => {
+    // 1.1005 of the pair's 2.06 is where the *aspects* agree: the turned
+    // portrait paints 392 px there against the neighbour's 672 px.
+    const turned: OrientationState = { turns: 1, mirror: false };
+    const h = makeRow([1.34, 0.72], [1, 1], SNAP_SENSITIVITY, [turned, null]);
+    const { snapped } = h.drag(-48);
+
+    expect(snapped).toBe(false);
+    expect(growOf(h.items[0])).toBeCloseTo(1.1, 3);
+  });
+
   it('clears the colour when the snapping is switched off', () => {
     const off = makeRow([1.11, 0.94], [1, 1], 0);
     off.items[0].parentElement?.appendChild(off.items[1]);
@@ -130,6 +164,7 @@ describe('divider drag snap', () => {
       getSnapSensitivity: () => 0,
       getImageCount: () => 2,
       getFill: () => 1,
+      getOrientation: () => null,
       getRowWidth: () => WIDTH,
       getInterItemSpace: () => INTER_ITEM_SPACE,
       getDefaultRowHeight: () => ROW_HEIGHT,

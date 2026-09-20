@@ -1,4 +1,6 @@
-import { ImageMeta } from "../imageParse/imageDetector";
+// Type-only: the sizing grid below is read by the parse/serialise boundary, so
+// this module must not pull the parser in at runtime (it would close a cycle).
+import type { ImageMeta } from "../imageParse/imageDetector";
 import { computeFlexGrows } from "./layoutEngine";
 
 /**
@@ -19,6 +21,28 @@ export function clampScale(value: number): number {
   if (!isFinite(value) || value <= 0) return 1;
   if (value > 1) return 1;
   return value;
+}
+
+/** The grid the row grammar persists sizing on: both a member's share and its
+ *  fill are written as integer hundredths (`|share码|fill码|`). */
+export const SIZING_STEP = 100;
+
+/** A share or fill as the integer hundredths the grammar carries. */
+export function sizingCode(value: number): number {
+  return Math.round(value * SIZING_STEP);
+}
+
+/**
+ * A share or fill rounded onto the persisted grid.
+ *
+ * Every write into the model goes through this, so the geometry a row paints and
+ * the geometry its file records are the same numbers.  A solve that lands off the
+ * grid would otherwise paint the continuous value and persist the rounded one —
+ * the row would then re-render a pixel off after every rebuild, and Reading Mode,
+ * which only ever sees the file, off the same amount.
+ */
+export function quantizeSizing(value: number): number {
+  return sizingCode(value) / SIZING_STEP;
 }
 
 /**

@@ -82,6 +82,23 @@ export function orientedSize(
     return odd ? { width: bh, height: bw } : { width: bw, height: bh };
 }
 
+/**
+ * Uniform scale a quarter turn needs to fit the turned rectangle inside the
+ * rectangle it came from: `min(aspect, 1 / aspect)`, with `aspect` the source's
+ * natural width / height.
+ *
+ * The turned rectangle measures `h × w` against the original `w × h`, whose
+ * ratio is `aspect`; the turned content's own ratio is `1 / aspect`, so the fit
+ * is the ratio between the two.  It is never above 1 — a turn only ever shrinks
+ * a picture — and it lands on exactly 1 only for a square.  A landscape keeps
+ * its height and narrows; a portrait keeps its width and shortens; a square
+ * touches both edges at once.
+ */
+export function quarterTurnFitScale(aspect: number): number {
+    const a = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
+    return Math.min(a, 1 / a);
+}
+
 function det(m: Mat): number {
     return m[0] * m[3] - m[1] * m[2];
 }

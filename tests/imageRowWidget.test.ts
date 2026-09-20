@@ -516,7 +516,10 @@ describe('ImageRowWidget replays each member orientation as a CSS transform', ()
     );
     const imgs = el.querySelectorAll('img');
     expect(imgs.length).toBe(2);
-    expect(imgs[0].style.transform).toBe('rotate(270deg)');
+    // A row member carries its bitmap's aspect as the scale, so the turned
+    // drawing keeps spanning its fill share of the slot instead of being fitted
+    // back into the un-rotated box.
+    expect(imgs[0].style.transform).toBe(`scale(${500 / 654}) rotate(270deg)`);
     expect(imgs[1].style.transform).toBe('scaleX(-1)');
   });
 
@@ -707,25 +710,298 @@ describe('ImageRowWidget divider double-click', () => {
     return el;
   }
 
-  it('lands on the split the drag snaps to, leaving the pictures flush', () => {
+  it('lands on the persisted grid, holding the pair total, pictures flush', () => {
     const el = buildReproRow();
     const divider = el.querySelector(`.${CLASSES.divider}`) as HTMLElement;
     divider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
 
     const items = el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
-    // 2.06 grows in, split in aspect/fill: 2.06 × (0.764526/0.64) / 1.861239.
-    expect(Number.parseFloat(items[0].style.flexGrow)).toBeCloseTo(1.32214, 4);
-    expect(Number.parseFloat(items[1].style.flexGrow)).toBeCloseTo(0.73786, 4);
+    // The continuous solve wants 1.10043 / 0.95957 (2.06 grows in, split in
+    // aspect — the pair's own fills of 0.64 and 1 are retired by the gesture, so
+    // each picture fills the slot it ends up with).  The row grammar only
+    // carries hundredths, so the snap lands on the grid point near it that keeps
+    // the drawn heights closest — and the pair's total is held, since a divider
+    // never takes width off the rest of the row.  The grid step here is ~4 px of
+    // height, so the residual is a couple of pixels: what the file can express,
+    // the screen now shows.
+    expect(Number.parseFloat(items[0].style.flexGrow)).toBeCloseTo(1.1, 4);
+    expect(Number.parseFloat(items[1].style.flexGrow)).toBeCloseTo(0.96, 4);
 
-    // Both members draw 0.64 × 616.74 / 0.764526 = 516.29 px tall, which is
-    // what the row's own pass hands back — one number for the pair, and the one
-    // the picture's own box takes too, so nothing is left floating inside it.
+    // Each member draws its own height off that split, and the row is the
+    // taller of the two — the picture's box takes the same number, so nothing is
+    // left floating inside its item.
     const imgs = el.querySelectorAll<HTMLImageElement>('img');
-    expect(imgs[0].style.height).toBe('516px');
-    expect(imgs[1].style.height).toBe('516px');
-    expect(items[0].style.height).toBe('516px');
-    expect(items[1].style.height).toBe('516px');
-    expect(el.style.height).toBe('516px');
+    expect(imgs[0].style.height).toBe('671px');
+    expect(imgs[1].style.height).toBe('672px');
+    expect(items[0].style.height).toBe('671px');
+    expect(items[1].style.height).toBe('672px');
+    expect(el.style.height).toBe('672px');
+  });
+
+  it('retires the pair\'s own fills, so the pictures stay flush on the next rebuild', () => {
+    const a = makeImage('a.webp', 23, 1.34, true);
+    a.display = { kind: 'multi', share: 1.34, fill: 0.64 };
+    const b = makeImage('b.webp', 24, 0.72, true);
+    b.display = { kind: 'multi', share: 0.72, fill: 1 };
+    const widget = new ImageRowWidget(makeGroup([a, b]), makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 972.890625);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 800, h: 1200 },
+    ]);
+
+    const divider = el.querySelector(`.${CLASSES.divider}`) as HTMLElement;
+    divider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+
+    // The row reads the fills back from the note on every rebuild, so a fill
+    // left behind would paint the picture narrow inside its slot again.
+    expect(a.display).toMatchObject({ kind: 'multi', fill: 1 });
+    expect(b.display).toMatchObject({ kind: 'multi', fill: 1 });
+  });
+
+  it('balances the whole row on aspect ratios, leaving no blank in any slot', () => {
+    const a = makeImage('a.png', 10, 2.86, true);
+    a.display = { kind: 'multi', share: 2.86, fill: 1 };
+    const b = makeImage('b.png', 11, 1.64, true);
+    b.display = { kind: 'multi', share: 1.64, fill: 1 };
+    const c = makeImage('b.png', 12, 2.38, true);
+    c.display = { kind: 'multi', share: 2.38, fill: 0.52 };
+    const d = makeImage('a.png', 13, 2.86, true);
+    d.display = { kind: 'multi', share: 2.86, fill: 1 };
+    const widget = new ImageRowWidget(makeGroup([a, b, c, d], 14), makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 972.890625);
+    simulateImagesLoaded(widget, el, [
+      { w: 1920, h: 1440 },
+      { w: 500, h: 654 },
+      { w: 500, h: 654 },
+      { w: 1920, h: 1440 },
+    ]);
+
+    const topBar = el.querySelector(`.${CLASSES.topBar}`) as HTMLElement;
+    topBar.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+
+    // The shrunk member's 0.52 is what used to hand it a *wider* slot than the
+    // picture — equal heights came out, but 135 px of the slot stayed empty.  On
+    // aspect ratios the two 500×654 members get the same slot as each other, and
+    // every member draws the width of the slot it was given.
+    const items = Array.from(el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`));
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img'));
+
+    for (const m of [a, b, c, d]) {
+      const fill = m.display.kind === 'multi' ? m.display.fill : null;
+      expect(fill).toBe(1);
+    }
+
+    // Two members of the same aspect carry the same grow, and each drawn height
+    // is its own slot times its aspect — so the four are equal.
+    expect(Number.parseFloat(items[1].style.flexGrow)).toBeCloseTo(
+      Number.parseFloat(items[2].style.flexGrow), 6
+    );
+    const heights = imgs.map((im) => Number.parseFloat(im.style.height));
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('ImageRowWidget top-bar double-click lands the row on an exact grid point', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** The 图片并排测试 row: two wide outside, two narrow inside. */
+  function buildTwoPairRow(width = 972.890625) {
+    const a = makeImage('a.png', 10, 2.86, true);
+    a.display = { kind: 'multi', share: 2.86, fill: 1 };
+    const b = makeImage('b.png', 11, 1.64, true);
+    b.display = { kind: 'multi', share: 1.64, fill: 1 };
+    const c = makeImage('c.png', 12, 2.38, true);
+    c.display = { kind: 'multi', share: 2.38, fill: 0.52 };
+    const d = makeImage('d.png', 13, 2.86, true);
+    d.display = { kind: 'multi', share: 2.86, fill: 1 };
+    const widget = new ImageRowWidget(makeGroup([a, b, c, d], 14), makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, width);
+    simulateImagesLoaded(widget, el, [
+      { w: 1920, h: 1440 },
+      { w: 500, h: 654 },
+      { w: 500, h: 654 },
+      { w: 1920, h: 1440 },
+    ]);
+    const topBar = el.querySelector(`.${CLASSES.topBar}`) as HTMLElement;
+    topBar.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    return { el, members: [a, b, c, d] };
+  }
+
+  it('equals the four drawn heights, not just the ones a single member can reach', () => {
+    const { el } = buildTwoPairRow();
+
+    // The continuous solve wants 3.0952 / 1.7748 on the aspect split, which the
+    // grid rounds to 3.10 / 1.77.  That point paints the row the user sees as
+    // "the middle two a pixel short", and no single member's step improves on
+    // it: flex-grow is a ratio, so moving one member drags the whole row, and
+    // the one-member move towards the fix is strictly worse than standing
+    // still.  The solver instead keeps the continuous solution's *ratios* and
+    // sweeps their scale: 2.18 / 1.25 lands the per-image rounding on a point
+    // that paints four equal heights, and the unrounded model is equal there by
+    // construction, so nothing later in the sweep can beat it.
+    const items = Array.from(el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`));
+    const grows = items.map((it) => Number.parseFloat(it.style.flexGrow));
+    expect(grows).toEqual([2.18, 1.25, 1.25, 2.18]);
+
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img'));
+    const heights = imgs.map((im) => Number.parseFloat(im.style.height));
+    expect(heights).toEqual([223, 223, 223, 223]);
+    expect(Math.max(...heights) - Math.min(...heights)).toBe(0);
+  });
+
+  it('still paints four equal heights when the rounding band shifts with width', () => {
+    // At 973.5 the seed rounds to 3.10 / 1.78 and paints 224/223/223/224 — the
+    // "middle two a pixel short" row again, but this time the nearest grid points
+    // that paint four equal heights are three-plus steps away, so the old local
+    // descent could not reach them.  The scale sweep has no neighbourhood to be
+    // trapped in.
+    const { el } = buildTwoPairRow(973.5);
+
+    const items = Array.from(el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`));
+    const grows = items.map((it) => Number.parseFloat(it.style.flexGrow));
+    expect(grows[0]).toBe(grows[3]);
+    expect(grows[1]).toBe(grows[2]);
+
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img'));
+    const heights = imgs.map((im) => Number.parseFloat(im.style.height));
+    expect(Math.max(...heights) - Math.min(...heights)).toBe(0);
+  });
+
+  it('retires every member fill, so no slot keeps a blank', () => {
+    const { members } = buildTwoPairRow();
+    for (const m of members) {
+      expect(m.display).toMatchObject({ kind: 'multi', fill: 1 });
+    }
+  });
+});
+
+describe('ImageRowWidget quarters a turned member in an unfilled row', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function buildUnfilledRow() {
+    const turned: OrientationState = { turns: 1, mirror: false };
+    const group = makeGroup([
+      makeImage('q1.webp', 31, 1, false, turned),
+      makeImage('q2.webp', 32, 1),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 500, h: 654 },
+    ]);
+    widget.recalculateRowHeight();
+    return el;
+  }
+
+  it('gives the turned cell the drawing, not the box it is folded inside', () => {
+    const el = buildUnfilledRow();
+    const items = el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
+    const imgs = el.querySelectorAll<HTMLImageElement>('img');
+    const box = Number.parseFloat(imgs[0].style.height);
+
+    // The img keeps the box — the rectangle the member occupied upright, which
+    // the turn repaints inside — and the cell takes what is painted.  Portrait,
+    // aspect 0.7645: the fit is the aspect itself, so the drawing is box ×
+    // aspect², and *that* is the rectangle the column hugs.
+    expect(box).toBe(600);
+    expect(imgs[0].style.transform).toBe(`scale(${500 / 654}) rotate(90deg)`);
+    expect(items[0].style.height).toBe('351px');
+    expect(items[0].style.height).not.toBe(imgs[0].style.height);
+    // The drawing is centred inside the box it no longer fills, which is what
+    // puts it on the cell's own centre line.
+    expect(items[0].style.alignItems).toBe('center');
+  });
+
+  it('takes its height from the tallest cell, whatever orientation the members take', () => {
+    // A turn can only fold a drawing smaller than its box, so a cell is never
+    // taller than the box it came from and a rotation can never grow the row.
+    // Here an upright neighbour holds the row at the box height the whole time.
+    const STATES: Array<[string, OrientationState]> = [
+      ['orig', { turns: 0, mirror: false }],
+      ['r90', { turns: 1, mirror: false }],
+      ['r180', { turns: 2, mirror: false }],
+      ['r270', { turns: 3, mirror: false }],
+      ['fh', { turns: 0, mirror: true }],
+      ['fv', { turns: 2, mirror: true }],
+      ['r90fh', { turns: 1, mirror: true }],
+      ['r270fh', { turns: 3, mirror: true }],
+    ];
+    for (const [word, state] of STATES) {
+      const group = makeGroup([
+        makeImage('q1.webp', 31, 1, false, state),
+        makeImage('q2.webp', 32, 1),
+      ]);
+      const widget = new ImageRowWidget(group, makeOptions('left'));
+      const el = widget.build();
+      document.body.appendChild(el);
+      patchBoundingRect(el, 944);
+      simulateImagesLoaded(widget, el, [
+        { w: 500, h: 654 },
+        { w: 500, h: 654 },
+      ]);
+      widget.recalculateRowHeight();
+
+      const items = el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
+      const imgs = el.querySelectorAll<HTMLImageElement>('img');
+      const turned = state.turns % 2 === 1;
+      const drawn = turned ? Math.round((500 / 654) * 600 * (500 / 654)) : 600;
+      expect(imgs[0].style.height, word).toBe('600px');
+      expect(items[0].style.height, word).toBe(`${drawn}px`);
+      expect(el.style.height, word).toBe('600px');
+    }
+  });
+
+  it('leaves its upright neighbour on its box', () => {
+    const el = buildUnfilledRow();
+    const items = el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
+    const imgs = el.querySelectorAll<HTMLImageElement>('img');
+
+    // Upright, the drawing *is* the box, so the cell is unchanged there.
+    expect(items[1].style.height).toBe(imgs[1].style.height);
+    expect(items[1].style.height).toBe('600px');
+    expect(items[1].style.alignItems).toBe('flex-start');
+  });
+
+  it('lines a balanced row up on one height, boxes notwithstanding', () => {
+    // The shape a balance gesture leaves: shares from the rendered aspect ratios
+    // (a landscape's 1.778, a turned portrait's 1 / 0.7645) so every drawing
+    // comes out the same height.  Rounding apart, the cells agree — and the row
+    // is that height, not the 517px box the turned member is folded inside.
+    const turned: OrientationState = { turns: 1, mirror: false };
+    const group = makeGroup([
+      { ...makeImage('l.webp', 31, 1.778, true), display: { kind: 'multi', share: 1.778, fill: 1 } },
+      { ...makeImage('p.webp', 32, 1.308, true, turned), display: { kind: 'multi', share: 1.308, fill: 1 } },
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 1600, h: 900 },
+      { w: 500, h: 654 },
+    ]);
+    widget.recalculateRowHeight();
+
+    const items = el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`);
+    const imgs = el.querySelectorAll<HTMLImageElement>('img');
+    expect(items[0].style.height).toBe('302px');
+    expect(items[1].style.height).toBe('302px');
+    expect(imgs[1].style.height).toBe('517px');
+    expect(el.style.height).toBe('302px');
   });
 });
 

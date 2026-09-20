@@ -97,4 +97,52 @@ describe('matchEmbedsToParsed', () => {
     expect(r.mismatches).toBe(0);
     expect(r.usedFallback).toBe(false);
   });
+
+  // The parser keeps the link verbatim (`图片集/a.png`), the DOM reader can only
+  // see `img.src` and takes its last segment (`a.png`).  Comparing raw strings
+  // makes every subfolder link disagree with its own line: the primary match
+  // fails, the integrity check reports failure, and the row renders with
+  // somebody else's params.  Both sides are compared by basename now.
+  it('matches a subfolder link against the DOM basename', () => {
+    const candidates = [emb('图片集/a.png', 43), emb('图片集/b.png', 44)];
+    const r = matchEmbedsToParsed(['a.png', 'b.png'], candidates, candidates);
+    expect(r.usedFallback).toBe(false);
+    expect(r.mismatches).toBe(0);
+    expect(r.matches.map((m) => m?.line)).toEqual([43, 44]);
+  });
+
+  it('matches a subfolder link without degrading to a same-named earlier line', () => {
+    // A duplicate attachment earlier in the document must not capture the
+    // section's params: with basename-normalized primary matching, the
+    // section's own lines win outright and the fallback is never consulted.
+    const allParsed = [
+      emb('图片集/x.webp', 10, { scale: 0.3 }),
+      emb('图片集/y.webp', 11, { scale: 0.3 }),
+      emb('图片集/x.webp', 43, { scale: 0.5 }),
+      emb('图片集/y.webp', 44, { scale: 1 }),
+    ];
+    const candidates = [allParsed[2], allParsed[3]];
+    const r = matchEmbedsToParsed(['x.webp', 'y.webp'], candidates, allParsed);
+    expect(r.usedFallback).toBe(false);
+    expect(r.mismatches).toBe(0);
+    expect(r.matches.map((m) => m?.line)).toEqual([43, 44]);
+    expect(r.matches.map((m) => m?.scale)).toEqual([0.5, 1]);
+  });
+
+  it('prefers the section pool over a document-wide first hit on a mismatch tie', () => {
+    // The degrade path is a bare-name hunt, so the *first* line in the document
+    // carrying a name wins — for a duplicated attachment that is a different row
+    // entirely.  When both pools resolve the same number of names, the section's
+    // own records are the trustworthy ones.
+    const sectionCandidates = [emb('a.png', 10, { scale: 0.5 })];
+    const allParsed = [emb('b.png', 2, { scale: 0.9 })];
+    const r = matchEmbedsToParsed(['b.png', 'a.png'], sectionCandidates, allParsed);
+    expect(r.usedFallback).toBe(true);
+    // Both pools leave exactly one name unresolved; the section pool keeps the
+    // second embed pointed at (null, a@10) instead of (b@2, null).
+    expect(r.mismatches).toBe(1);
+    expect(r.matches[0]).toBeNull();
+    expect(r.matches[1]?.line).toBe(10);
+    expect(r.matches[1]?.scale).toBe(0.5);
+  });
 });

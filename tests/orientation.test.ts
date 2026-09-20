@@ -7,6 +7,7 @@ import {
     orientationWord,
     orientedSize,
     parseOrientationWord,
+    quarterTurnFitScale,
     stateToMatrix,
     type OrientationState,
 } from '../src/imageTransform/orientation';
@@ -92,6 +93,19 @@ describe('orientation algebra', () => {
         expect(orientedSize({ turns: 1, mirror: false }, 10, 3)).toEqual({ width: 3, height: 10 });
         expect(orientedSize({ turns: 3, mirror: false }, 10, 3)).toEqual({ width: 3, height: 10 });
         expect(orientedSize({ turns: 2, mirror: true }, 10, 3)).toEqual({ width: 10, height: 3 });
+    });
+
+    it('quarterTurnFitScale folds the turned rectangle back into its own box', () => {
+        // The turned rectangle is the upright one on its side; fitting it back
+        // inside means scaling by the ratio between the two aspects, and it is
+        // never above 1 — a turn only ever shrinks a picture.
+        expect(quarterTurnFitScale(16 / 9)).toBeCloseTo(9 / 16, 12);
+        expect(quarterTurnFitScale(1 / 2)).toBeCloseTo(1 / 2, 12);
+        expect(quarterTurnFitScale(1)).toBe(1);
+        // Degenerate aspects fall back to no scaling rather than dividing by 0.
+        expect(quarterTurnFitScale(0)).toBe(1);
+        expect(quarterTurnFitScale(Number.NaN)).toBe(1);
+        expect(quarterTurnFitScale(Number.POSITIVE_INFINITY)).toBe(1);
     });
 
     it('stateToMatrix of a mirror state has negative determinant', () => {

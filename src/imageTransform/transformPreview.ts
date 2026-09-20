@@ -9,13 +9,19 @@
  * A CSS transform is a paint-time effect: it never changes the element's layout
  * box, so the box keeps holding the *un-rotated* bitmap.  A quarter turn swaps
  * the width and height of what is *drawn*: a `boxWidth × boxHeight` box paints
- * as `boxHeight × boxWidth`.  Two callers use that fact differently —
+ * as `k·boxHeight × k·boxWidth`, with `k` any scale prefixed onto the transform.
+ * Two callers use that fact differently —
  *
  *   - a container meant to hug the picture is sized from `displayedImageSize`
  *     and the transform carries the matching fit scale;
- *   - a container with a fixed box (Reading Mode, multi-image members) keeps the
- *     box and needs the legacy fit scale that shrinks the drawing back inside
- *     it, which `applyOrientationPreview` measures when no scale is supplied.
+ *   - a container with a fixed box (Reading Mode) keeps the box and needs the
+ *     legacy fit scale that shrinks the drawing back inside it, which
+ *     `applyOrientationPreview` measures when no scale is supplied.
+ *
+ * A row member is a third case: the turned rectangle must fold back inside the
+ * rectangle it came from, so the callers pass `quarterTurnFitScale` — the same
+ * number the model's drawn height is built on, and exactly what the measured
+ * fallback below would derive from a box the turn makes hard to read.
  *
  * A lone image's width is written down in the second of these two frames: the
  * *box* holds the un-rotated bitmap, the *screen* is what the reader sees, and
@@ -26,11 +32,12 @@
 
 import type { OrientationState } from './orientation';
 import { orientationToCss, orientedSize } from './orientation';
+import { probeDebug } from '../diagnostics/probe';
 
 /** Size the `object-fit: contain` drawing occupies in a box, i.e. the content
  *  before any transform.  `aspect` is the image's natural width/height; a
  *  non-positive aspect is taken as the box's own, so the content fills it. */
-function containedContent(
+export function containedContent(
     boxWidth: number,
     boxHeight: number,
     aspect: number
@@ -43,7 +50,7 @@ function containedContent(
 
 /** The image's natural aspect, falling back to the box's own when the bitmap
  *  has not reported a size. */
-function naturalAspect(img: HTMLImageElement): number {
+export function naturalAspect(img: HTMLImageElement): number {
     const nw = img.naturalWidth;
     const nh = img.naturalHeight;
     if (nw > 0 && nh > 0) return nw / nh;
@@ -65,18 +72,30 @@ function measuredQuarterTurnScale(img: HTMLImageElement): number {
     const bw = img.clientWidth;
     const bh = img.clientHeight;
     if (bw <= 0 || bh <= 0) return 1;
-    const content = containedContent(bw, bh, naturalAspect(img));
+    const aspect = naturalAspect(img);
+    const content = containedContent(bw, bh, aspect);
     if (content.width <= 0 || content.height <= 0) return 1;
     // After a quarter turn the drawn content measures (content.h × content.w).
     const k = Math.min(bw / content.height, bh / content.width);
-    return Number.isFinite(k) && k < 1 ? Number(k.toFixed(4)) : 1;
+    const measured = Number.isFinite(k) && k < 1 ? Number(k.toFixed(4)) : 1;
+    probeDebug('transformPreview measure', {
+        boxW: bw,
+        boxH: bh,
+        aspect: Number(aspect.toFixed(4)),
+        contentW: Number(content.width.toFixed(2)),
+        contentH: Number(content.height.toFixed(2)),
+        k: Number(k.toFixed(4)),
+        measured,
+    });
+    return measured;
 }
 
 export interface PreviewOptions {
-    /** Uniform fit scale prefixed onto the transform.  When supplied it is used
-     *  verbatim (so a container sized by `displayedImageSize` paints exactly what
-     *  that function predicted); when omitted the scale is measured off the
-     *  element's own box for the fixed-box callers. */
+    /** Uniform scale prefixed onto the transform.  When supplied it is used
+     *  verbatim — a container sized by `displayedImageSize` passes the fit factor
+     *  that made the two agree, and a row member passes its bitmap's aspect so
+     *  the turned picture keeps spanning the same share of its slot; when omitted
+     *  the scale is measured off the element's own box for the fixed-box callers. */
     scale?: number;
 }
 
@@ -88,8 +107,16 @@ export function applyOrientationPreview(
     let css = orientationToCss(state);
     if (css && state.turns % 2 === 1) {
         const k = opts?.scale ?? measuredQuarterTurnScale(img);
-        if (k < 1) css = `scale(${k}) ${css}`;
+        if (k !== 1) css = `scale(${k}) ${css}`;
     }
+    probeDebug('transformPreview apply', {
+        turns: state.turns,
+        mirror: state.mirror,
+        suppliedScale: opts?.scale ?? null,
+        css,
+        boxW: img.clientWidth,
+        boxH: img.clientHeight,
+    });
     img.style.transform = css;
 }
 

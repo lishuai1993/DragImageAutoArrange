@@ -16,11 +16,16 @@ import {
   computeSingleImageWidth,
   computePairHeights,
   computePairEquilibrium,
+  drawnHeightCoefficient,
+  fillForTurn,
 } from '../src/imageLayout/layoutEngine';
 import { ImageMeta } from '../src/imageParse/imageDetector';
+import { quantizeSizing } from '../src/imageLayout/parameterValidator';
+import { IDENTITY_STATE, type OrientationState } from '../src/imageTransform/orientation';
 
 // ── Helpers ──
 const m = (w: number, h: number): ImageMeta => ({ naturalWidth: w, naturalHeight: h });
+const TURNED: OrientationState = { turns: 1, mirror: false };
 
 // ── computeUniformHeight ──
 describe('computeUniformHeight', () => {
@@ -833,5 +838,258 @@ describe('computePairEquilibrium', () => {
       0
     );
     expect(eq).toBeNull();
+  });
+});
+
+// ── quarter-turn drawn geometry ──
+describe('drawnHeightCoefficient', () => {
+  it('is fill / aspect while the member is upright', () => {
+    // 16:9, half-width: drawn height is half the slot over its own ratio.
+    expect(drawnHeightCoefficient(m(1600, 900), 0.5, IDENTITY_STATE)).toBeCloseTo(
+      0.5 / (1600 / 900),
+      6
+    );
+    expect(drawnHeightCoefficient(m(500, 1000), 0.5, null)).toBeCloseTo(1, 6);
+  });
+
+  it('is fill × the pre-turn container\'s fit on a quarter turn', () => {
+    // The turned picture is folded back inside the rectangle it came from, so the
+    // drawing is scaled by min(aspect, 1/aspect) — never up.  A portrait (aspect
+    // 0.5) keeps its width and shortens: 0.5 × 0.5 = 0.25.  A landscape keeps its
+    // *height*, so its coefficient is the upright one over again.
+    expect(drawnHeightCoefficient(m(500, 1000), 0.5, TURNED)).toBeCloseTo(0.25, 6);
+    expect(drawnHeightCoefficient(m(1600, 900), 0.5, TURNED)).toBeCloseTo(
+      0.5 / (1600 / 900),
+      6
+    );
+    expect(drawnHeightCoefficient(m(1600, 900), 1, TURNED)).toBeCloseTo(900 / 1600, 6);
+  });
+
+  it('is unaffected by a half turn', () => {
+    const half: OrientationState = { turns: 2, mirror: true };
+    expect(drawnHeightCoefficient(m(500, 1000), 0.5, half)).toBeCloseTo(1, 6);
+  });
+});
+
+// ── the fill a turn writes back ──
+describe('fillForTurn', () => {
+  // The worked case from the design note: the test row's 500 × 654 portrait sits
+  // in a 259px slot, uniformly filled (fill 1) while lying on its side.  Aspect
+  // 0.7645 → k = min(a, 1/a) = 0.7645 turned, 1/a = 1.308 upright, so standing it
+  // up needs 0.7645 / 1.308 = a² = 0.585 to draw the same 198px it drew.
+  const portrait = m(500, 654);
+
+  it('is the ratio of the two coefficients, so the drawn height survives', () => {
+    expect(fillForTurn(portrait, 1, TURNED, IDENTITY_STATE)).toBeCloseTo(0.5845, 3);
+    const written = fillForTurn(portrait, 1, TURNED, IDENTITY_STATE);
+    expect(drawnHeightCoefficient(portrait, written, IDENTITY_STATE)).toBeCloseTo(
+      drawnHeightCoefficient(portrait, 1, TURNED),
+      6
+    );
+  });
+
+  it('round-trips onto the same grid step, so nothing drifts', () => {
+    // The fill is persisted as integer hundredths, so a round trip cannot land
+    // exactly back on 1 — but it has to land within one step of it, and the
+    // second trip has to be a fixed point, or every turn would shave the member
+    // down by one code (about a pixel on the test row's 259px slot).
+    const down = quantizeSizing(fillForTurn(portrait, 1, TURNED, IDENTITY_STATE));
+    const back = quantizeSizing(fillForTurn(portrait, down, IDENTITY_STATE, TURNED));
+    expect(down).toBeCloseTo(0.58, 6);
+    expect(Math.abs(back - 1)).toBeLessThanOrEqual(1e-9 + 0.01);
+    expect(quantizeSizing(fillForTurn(portrait, back, TURNED, IDENTITY_STATE))).toBeCloseTo(down, 6);
+  });
+
+  it('leaves a landscape alone — its two fits are equal', () => {
+    // Landscape 16:9: upright k = 1/a = 0.5625 and turned k = min(a, 1/a) =
+    // 0.5625 — the same number, so there is nothing for a turn to rewrite.
+    expect(fillForTurn(m(1600, 900), 0.5, IDENTITY_STATE, TURNED)).toBeCloseTo(0.5, 6);
+    expect(fillForTurn(m(1600, 900), 0.5, TURNED, IDENTITY_STATE)).toBeCloseTo(0.5, 6);
+  });
+
+  it('leaves the fill alone when the turn does not change the fit', () => {
+    // Only the parity of the quarter turns moves the coefficient, so a half turn,
+    // a flip, and a flip on top of a turn all come back with the same number.
+    const half: OrientationState = { turns: 2, mirror: false };
+    const flipped: OrientationState = { turns: 0, mirror: true };
+    const turnedFlipped: OrientationState = { turns: 1, mirror: true };
+    expect(fillForTurn(portrait, 0.4, IDENTITY_STATE, half)).toBeCloseTo(0.4, 6);
+    expect(fillForTurn(portrait, 0.4, IDENTITY_STATE, flipped)).toBeCloseTo(0.4, 6);
+    expect(fillForTurn(portrait, 0.4, TURNED, turnedFlipped)).toBeCloseTo(0.4, 6);
+  });
+
+  it('clamps to 1 when the turn would have to enlarge the picture', () => {
+    // The one gesture allowed to shorten a member: an upright portrait filled to
+    // its whole slot cannot lie down and keep its height, because that drawing is
+    // wider than the slot.  1.308 / 0.7645 = 1.71 → 1, so the member comes out
+    // shorter instead of overflowing.
+    expect(fillForTurn(portrait, 1, IDENTITY_STATE, TURNED)).toBe(1);
+  });
+
+  it('treats a bitmap with no usable aspect as square, making the turn a no-op', () => {
+    expect(fillForTurn(m(0, 0), 0.3, TURNED, IDENTITY_STATE)).toBeCloseTo(0.3, 6);
+  });
+});
+
+describe('computeScaleBasedHeights with orientations', () => {
+  // Two members, container 804 gap 4 → availableWidth 800, itemW 400 each.
+  it('reports the painted height as the member height and the box separately', () => {
+    const r = computeScaleBasedHeights(
+      [1, 1],
+      [m(500, 1000), m(1600, 900)],
+      [0.5, 0.5],
+      804,
+      4,
+      200,
+      [TURNED, IDENTITY_STATE]
+    );
+    // portrait, turned: coef = 0.5 × 0.5 = 0.25 → drawn = 0.25 × 400 = 100;
+    //   box = 0.5 × 400 / 0.5 = 400
+    // landscape, upright: coef = 0.5 / 1.7778 = 0.28125 → drawn = 112.5 → 113;
+    //   box = same
+    expect(r.heights).toEqual([100, 113]);
+    expect(r.boxes).toEqual([400, 113]);
+    expect(r.maxH).toBe(113);
+  });
+
+  it('never lets a turned member paint taller than it did upright', () => {
+    // Both fills are 0.5, so both are folded back into a rectangle of the same
+    // size: the portrait keeps its 200-wide share and shortens to 200 × 0.5 =
+    // 100, the landscape keeps its height and narrows, so it still draws its
+    // upright 113.  Their boxes are each bitmap's own — the box is the un-rotated
+    // picture, and only the *drawn* frame turns.
+    const turned = computeScaleBasedHeights(
+      [1, 1], [m(500, 1000), m(1600, 900)], [0.5, 0.5], 804, 4, 200, [TURNED, TURNED]
+    );
+    expect(turned.heights).toEqual([100, 113]);
+    expect(turned.boxes).toEqual([400, 113]);
+
+    const upright = computeScaleBasedHeights(
+      [1, 1], [m(500, 1000), m(1600, 900)], [0.5, 0.5], 804, 4, 200, [
+        IDENTITY_STATE,
+        IDENTITY_STATE,
+      ]
+    );
+    // Member by member, and so for the row: a turn can only ever shrink what is
+    // painted, which is what keeps the row from growing taller.
+    for (let i = 0; i < turned.heights.length; i++) {
+      expect(turned.heights[i]).toBeLessThanOrEqual(upright.heights[i]);
+    }
+    expect(turned.maxH).toBeLessThanOrEqual(upright.maxH);
+  });
+
+  it('never changes a member\'s box — the turn only moves the drawn frame', () => {
+    // One member: availableWidth = 804, itemW = 804, fill 0.5 → the box is
+    // 402 × 804 whatever the orientation.  Upright it is also what is drawn;
+    // turned the drawing is scaled by the 0.5:1 ratio to hold that 402 width, so
+    // it comes out 402 wide × 201 tall — smaller, and never wider than the slot.
+    const upright = computeScaleBasedHeights(
+      [1], [m(500, 1000)], [0.5], 804, 4, 200, [IDENTITY_STATE]
+    );
+    const turned = computeScaleBasedHeights([1], [m(500, 1000)], [0.5], 804, 4, 200, [TURNED]);
+    expect(upright.heights).toEqual([804]);
+    expect(turned.heights).toEqual([201]);
+    // The box is the un-rotated bitmap's and does not move with the turn.
+    expect(turned.boxes).toEqual(upright.boxes);
+  });
+});
+
+describe('computeGlobalEquilibrium with orientations', () => {
+  it('weights a quarter-turned member by 1 / (fill × aspect), not by its bitmap ratio', () => {
+    // Both fills 1: a turned portrait (aspect 0.5) draws 1 × itemW × 0.5 tall, so
+    // its weight is 2; the upright square weighs 1.  The pair therefore splits
+    // 2:1 the same way round as upright — but by the *turned* ratio.
+    expect(
+      computeGlobalEquilibrium([m(500, 1000), m(1000, 1000)], 3, [1, 1], [TURNED, IDENTITY_STATE])
+    ).toEqual([2, 1]);
+  });
+
+  it('the same pair upright splits the other way', () => {
+    // Upright the portrait's coefficient is 1 / 0.5 = 2 → weight 0.5, so it
+    // takes a third.
+    expect(
+      computeGlobalEquilibrium([m(500, 1000), m(1000, 1000)], 3, [1, 1], [
+        IDENTITY_STATE,
+        IDENTITY_STATE,
+      ])
+    ).toEqual([1, 2]);
+  });
+
+  it('reweighs only what the turn shrinks short', () => {
+    // A turned landscape keeps its height, so it weighs what it weighed upright:
+    // the split is unchanged.  A turned portrait shortens to 1 / 0.5 of its
+    // upright weight, so it takes more grow to come out level with the square.
+    const landscape: ImageMeta[] = [m(1600, 900), m(1000, 1000)];
+    expect(computeGlobalEquilibrium(landscape, 3, [1, 1], [TURNED, IDENTITY_STATE])).toEqual(
+      computeGlobalEquilibrium(landscape, 3, [1, 1], [IDENTITY_STATE, IDENTITY_STATE])
+    );
+    expect(
+      computeGlobalEquilibrium([m(500, 1000), m(1000, 1000)], 3, [1, 1], [TURNED, IDENTITY_STATE])
+    ).toEqual([2, 1]);
+  });
+});
+
+// ── computeDividerEquilibrium, read through the turn ──
+describe('computeDividerEquilibrium with orientations', () => {
+  it('splits a turned pair by the frame it paints', () => {
+    // Without a fill the weight is 1 / coefficient at fill 1: `1 / aspect` for a
+    // quarter turn, `aspect` upright.  Turned portrait (aspect 0.5) therefore
+    // outweighs the upright square 2:1, where upright the portrait takes a third.
+    const turned = computeDividerEquilibrium(m(500, 1000), m(1000, 1000), 3, [
+      TURNED,
+      IDENTITY_STATE,
+    ]);
+    expect(turned.left).toBeCloseTo(2, 6);
+    expect(turned.right).toBeCloseTo(1, 6);
+
+    const upright = computeDividerEquilibrium(m(500, 1000), m(1000, 1000), 3, [
+      IDENTITY_STATE,
+      IDENTITY_STATE,
+    ]);
+    expect(upright.left).toBeCloseTo(1, 6);
+    expect(upright.right).toBeCloseTo(2, 6);
+  });
+
+  it('is the aspect-only split when no orientations are passed', () => {
+    const { left, right } = computeDividerEquilibrium(m(500, 1000), m(1000, 1000), 3);
+    expect(left).toBeCloseTo(1, 6);
+    expect(right).toBeCloseTo(2, 6);
+  });
+});
+
+describe('computePairEquilibrium with orientations', () => {
+  const LEFT = m(500, 1000);
+  const RIGHT = m(1600, 900);
+  const WIDTH = 804;
+  const GAP = 4;
+  const ROW = 200;
+
+  it('solves on the painted heights, not the boxes', () => {
+    // Turned left coefficient 0.5 (fill 1 × aspect 0.5), upright right
+    // 1 / 1.7778 = 0.5625: on a total grow of 2 the drawn heights are
+    // 0.5·400x and 0.5625·400(2 − x), equal at x = 450 / 425 ≈ 1.0588.
+    const eq = computePairEquilibrium(
+      [1, 1], [LEFT, RIGHT], [1, 1], WIDTH, GAP, ROW, 0, [TURNED, IDENTITY_STATE]
+    );
+    expect(eq).not.toBeNull();
+    expect(eq!.left).toBeCloseTo(1.0588, 3);
+    expect(eq!.right).toBeCloseTo(0.9412, 3);
+  });
+
+  it('the split it returns really is the equal-height one', () => {
+    const eq = computePairEquilibrium(
+      [1, 1], [LEFT, RIGHT], [1, 1], WIDTH, GAP, ROW, 0, [TURNED, IDENTITY_STATE]
+    )!;
+    const at = computePairHeights(
+      [eq.left, eq.right],
+      [LEFT, RIGHT],
+      [1, 1],
+      WIDTH,
+      GAP,
+      ROW,
+      0,
+      [TURNED, IDENTITY_STATE]
+    );
+    expect(at.left).toBe(at.right);
   });
 });

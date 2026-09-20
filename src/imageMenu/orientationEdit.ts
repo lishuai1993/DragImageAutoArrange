@@ -29,6 +29,7 @@ import {
 } from '../imageTransform/orientation';
 import { embedParamString } from '../imageParse/embedRaw';
 import { isAlignmentWord } from '../imageParse/rowParams';
+import { clampScale, sizingCode } from '../imageLayout/parameterValidator';
 import { minimalTextChange } from './noteEdit';
 import { writeQuietly } from './quietWrite';
 
@@ -61,21 +62,46 @@ export interface OrientationSizing {
     widthPx: number;
 }
 
+/**
+ * Write `fill` into a member's numeric slots, past the alignment word.
+ *
+ * A member's numbers are its share (first) and its fill (last) — the grammar
+ * reads the leading number as the share and the trailing one as the fill — so a
+ * trailing fill code is replaced and a share-only rest gains one.  A rest with
+ * no number at all is left alone: appending a fill there would put a lone number
+ * in the share's own occurrence, which the parser reads as the share and no fill.
+ */
+function withMemberFill(rest: string[], fill: number): string[] {
+    const isNumber = (t: string): boolean => /^\d+$/.test(t);
+    const last = rest.map(isNumber).lastIndexOf(true);
+    if (last < 0) return rest;
+    const code = String(sizingCode(clampScale(fill)));
+    const out = [...rest];
+    if (rest.filter(isNumber).length === 1) out.splice(last + 1, 0, code);
+    else out[last] = code;
+    return out;
+}
+
 /** Replace (or introduce) the orientation word, leaving every other param in
  *  place and in order.  The word always leads: Obsidian reads the LAST number
  *  as the width, so it can never sit between numbers.
  *
  *  A sizing override owns everything past the alignment word.  That is what a
  *  single row's remaining slots are — its `S|W` — so an older spelling sitting
- *  there (a bare legacy width, say) is exactly what it is replacing. */
+ *  there (a bare legacy width, say) is exactly what it is replacing.  A fill
+ *  override is the multi-row counterpart: it moves only the trailing fill code,
+ *  leaving the share beside it untouched.  The two never meet — a line is either
+ *  a single row or a multi-row member. */
 function withOrientation(
     params: string,
     state: OrientationState,
-    sizing?: OrientationSizing
+    sizing?: OrientationSizing,
+    memberFill?: number
 ): string {
     const tokens = params === '' ? [] : params.split('|');
     let rest = isOrientationWord(tokens[0]) ? tokens.slice(1) : tokens;
     if (sizing) rest = isAlignmentWord(rest[0]) ? rest.slice(0, 1) : [];
+    else if (memberFill != null) rest = withMemberFill(rest, memberFill);
     const out = [orientationWord(state), ...rest];
     if (sizing) out.push(sizing.sFlag, String(Math.max(1, Math.round(sizing.widthPx))));
     return out.filter((p) => p !== '').join('|');
@@ -102,16 +128,17 @@ function upgradeLine(line: string, state: OrientationState): string | null {
 export function setLineOrientation(
     line: string,
     state: OrientationState,
-    sizing?: OrientationSizing
+    sizing?: OrientationSizing,
+    memberFill?: number
 ): string | null {
     const row = ROW_LINE.exec(line);
     if (row) {
         const [, lead, , target, params = '', trail] = row;
-        return `${lead}![[${target}|${withOrientation(params, state, sizing)}]]${trail}`;
+        return `${lead}![[${target}|${withOrientation(params, state, sizing, memberFill)}]]${trail}`;
     }
     // An upgraded line is a new row with no sizing slots of its own, and a
-    // sizing override only ever comes from a renderer that already owns one —
-    // so it is dropped, never invented.
+    // sizing or fill override only ever comes from a renderer that already owns
+    // one — so it is dropped, never invented.
     return upgradeLine(line, state);
 }
 
@@ -126,11 +153,12 @@ export function rewriteLineTo(
     text: string,
     line0: number,
     state: OrientationState,
-    sizing?: OrientationSizing
+    sizing?: OrientationSizing,
+    memberFill?: number
 ): string | null {
     const lines = text.split('\n');
     if (line0 < 0 || line0 >= lines.length) return null;
-    const next = setLineOrientation(lines[line0], state, sizing);
+    const next = setLineOrientation(lines[line0], state, sizing, memberFill);
     if (next === null || next === lines[line0]) return null;
     lines[line0] = next;
     return lines.join('\n');
@@ -155,18 +183,20 @@ export function findEmbedLine(text: string, targets: readonly string[]): number 
 
 /**
  * Write `state` onto line `line0` as one undoable editor transaction.  A
- * `sizing` override rides along in the same transaction, so a rotation that has
- * to move the row's width as well still undoes in a single step.
+ * `sizing` or `memberFill` override rides along in the same transaction, so a
+ * rotation that has to move the row's width — or a member's fill — still undoes
+ * in a single step.
  */
 export function applyOrientationState(
     editor: Editor,
     line0: number,
     state: OrientationState,
     view: EditorView | null = null,
-    sizing?: OrientationSizing
+    sizing?: OrientationSizing,
+    memberFill?: number
 ): boolean {
     const before = editor.getValue();
-    const after = rewriteLineTo(before, line0, state, sizing);
+    const after = rewriteLineTo(before, line0, state, sizing, memberFill);
     if (after === null) return false;
     const change = minimalTextChange(before, after);
     if (!change) return false;
@@ -181,7 +211,8 @@ export function resetOrientationOnLine(
     editor: Editor,
     line0: number,
     view: EditorView | null = null,
-    sizing?: OrientationSizing
+    sizing?: OrientationSizing,
+    memberFill?: number
 ): boolean {
-    return applyOrientationState(editor, line0, IDENTITY_STATE, view, sizing);
+    return applyOrientationState(editor, line0, IDENTITY_STATE, view, sizing, memberFill);
 }

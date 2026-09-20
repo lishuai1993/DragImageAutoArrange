@@ -24,6 +24,9 @@ declare global {
     /** The width this image currently takes on the page, or null when the
      *  renderer cannot say. Mirrors `screenWidth` in imageMarkers.ts. */
     __diaa_screenWidth?: (() => number | null) | null;
+    /** The fill this multi-row member is drawn with, or null when the image is
+     *  not a row member. Mirrors `memberFill` in imageMarkers.ts. */
+    __diaa_memberFill?: (() => number | null) | null;
   }
 }
 

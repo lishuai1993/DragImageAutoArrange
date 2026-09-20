@@ -5,6 +5,7 @@
  */
 
 import { CLASSES } from "../constants";
+import { setStyleImportant } from "../utils";
 
 /** Obsidian alignment classes that override our flex layout and must be stripped. */
 export const OBSIDIAN_ALIGN_CLASSES = [
@@ -31,11 +32,18 @@ export function stripObsidianClasses(img: HTMLElement): boolean {
 }
 
 /**
- * Neutralize Obsidian's intermediate wrapper elements (e.g. .image-resize-container)
- * between an img and a boundary element by tagging them with the
- * `diaa-contents` class, so the img behaves as a direct flex child.  Walks
- * from `img.parentElement` up to (but not including) `boundary`, skipping any
- * element listed in `skipEls`.
+ * Neutralize Obsidian's intermediate wrapper elements (e.g. .image-wrapper)
+ * between an img and a boundary element, so the img behaves as a direct flex
+ * child.  Walks from `img.parentElement` up to (but not including) `boundary`,
+ * skipping any element listed in `skipEls`.
+ *
+ * Each wrapper is both tagged with the `diaa-contents` class and given an
+ * inline `display: contents`.  The class is the durable marker — Obsidian can
+ * replace the wrapper's inline style, and the walk is re-run on every pass
+ * precisely because it does — while the inline declaration is what actually
+ * flattens it: the wrapper's own styling comes from Obsidian, which a plugin
+ * class cannot outrank by specificity unless the stylesheet carries
+ * `!important` for it.
  */
 export function neutralizeWrappers(
   img: HTMLElement,
@@ -46,9 +54,48 @@ export function neutralizeWrappers(
   while (el && el !== boundary) {
     if (!skipEls.includes(el)) {
       el.addClass(CLASSES.contents);
+      setStyleImportant(el, "display", "contents");
     }
     el = el.parentElement;
   }
+}
+
+/** Which state the drop indicator is in. */
+export type DropIndicatorState = "line" | "left" | "right";
+
+/** Every declaration a state paints, so clearing is exhaustive by construction
+ *  rather than by remembering which state left what behind. */
+const DROP_INDICATOR_PROPS = [
+  "background-color",
+  "box-shadow",
+  "border-radius",
+  "border-left",
+  "border-right",
+] as const;
+
+/**
+ * Paint a drop-indicator state onto an element, or clear it with `null`.
+ *
+ * Written inline rather than as a stylesheet class because the element is a
+ * CodeMirror line: the platform repaints those, and an inline declaration is
+ * what outranks its styling without this plugin's stylesheet carrying an
+ * `!important` for each declaration.  The caller still adds the matching class,
+ * which marks which state is up without drawing it.
+ */
+export function applyDropIndicator(el: HTMLElement, state: DropIndicatorState | null): void {
+  for (const prop of DROP_INDICATOR_PROPS) el.style.removeProperty(prop);
+  if (state === null) return;
+
+  if (state === "line") {
+    setStyleImportant(el, "background-color", "rgba(74, 158, 255, 0.15)");
+    setStyleImportant(el, "box-shadow", "inset 0 0 0 2px rgba(74, 158, 255, 0.5)");
+    setStyleImportant(el, "border-radius", "3px");
+    return;
+  }
+
+  const left = state === "left";
+  setStyleImportant(el, left ? "border-left" : "border-right", "3px solid #4a9eff");
+  setStyleImportant(el, "border-radius", left ? "3px 0 0 3px" : "0 3px 3px 0");
 }
 
 /**

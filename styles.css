@@ -2,31 +2,30 @@
 
 /* On the `!important`s in this file
    ---------------------------------------------------------------------------
-   Every declaration carrying `!important` below overrides a rule this plugin
-   does not own, and none of them is removable by raising specificity a notch.
-   There are five kinds, each with a note at its site:
+   One kind is left, with a note at its site:
 
-   1. Reading-mode row internals (`.internal-embed`): Obsidian's embed rules
-      set the same properties, so the row layout only holds if these win.  The
-      per-row computed values (flex, justify-content, object-position) and the
-      images' geometry are written inline instead and never appear here.
-   2. Neutralized wrappers (`display: contents`): the img becomes a flex child
-      only once Obsidian's intermediate wrapper is flattened.  See the two sites.
-   3. CodeMirror line highlight (`background-color`, `border-*`): the drop target
-      and the left/right insert indicators paint over CM's own line styles.
-   4. Settings buttons: the theme's `--input-shadow` ring, which a theme paints
-      with its own selectors and this plugin cannot outrank by specificity.
-   5. A row extracted from a text block (`display: inline-block`): it has to
-      shrink-wrap so the surrounding block's text-align can place it.
+   Settings buttons: the theme's `--input-shadow` ring, which a theme paints
+   with its own selectors and this plugin cannot outrank by specificity.  Its
+   hover variant cannot move inline at all — `:hover` is not something an inline
+   declaration can express — which is what keeps this the last holdout.
+
+   Everything else that used to live here is written inline by the code that
+   owns it: the flex item styling and the images' geometry (rmFlexRow.ts), the
+   shrink-wrapped embed, the flattened platform wrapper
+   (rowRenderer.neutralizeWrappers) and the drop indicator (livePreview.ts).
+   The competitor in each case is the platform's or the theme's stylesheet,
+   and an inline declaration outranks it without `!important` here.  Where a
+   class is still added alongside, it marks which state is up; it does not
+   style anything.
 
    The mobile media query is deliberately absent from this list: the layout
    writes heights and flex inline, which no plain stylesheet declaration can
    outrank, so below the breakpoint it stands down and clears them instead.
 
-   The competitor in every case is the platform's or the theme's stylesheet,
-   which this plugin neither inspects nor can outrank by construction.  Dropping
-   one of these is a change that needs a visual check in Obsidian, not a static
-   one — so treat them as deliberate, not as un-cleaned leftovers. */
+   The remaining ring's competitor is the platform's or the theme's stylesheet,
+   which this plugin does not inspect.  Dropping it is a change that needs a
+   visual check in Obsidian, not a static one — so treat it as deliberate, not
+   as an un-cleaned leftover. */
 
 .diaa-row {
   display: flex;
@@ -176,21 +175,6 @@
   padding: 0;
 }
 
-/* Flex items in the row. Obsidian's own embed rules also set several of these
-   properties, so they carry !important and are declared here instead of being
-   written inline by rmFlexRow. justify-content / flex / object-position stay
-   inline because their values are computed per row. */
-.markdown-preview-view .diaa-row .internal-embed,
-.markdown-reading-view .diaa-row .internal-embed {
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  min-width: 50px !important;
-  position: relative !important;
-  display: flex !important;
-  align-items: flex-start !important;
-}
-
 /* Ensure images in the row fill their containers. Reading-Mode scoped: the
    Live Preview widget sets its own image sizes inline, and rmFlexRow writes the
    same five declarations inline as soon as it wraps a row — Obsidian's embed
@@ -212,23 +196,6 @@
 .markdown-preview-view .diaa-row img.diaa-img-auto,
 .markdown-reading-view .diaa-row img.diaa-img-auto {
   width: auto;
-}
-
-/* Image extracted out of a mixed text+image block: shrink-wrap it so the
-   text-align set on its block can position it. */
-.diaa-row-inline {
-  display: inline-block !important;
-}
-
-/* Obsidian's intermediate wrappers (e.g. .image-resize-container) between an
-   img and its boundary are neutralized so the img is a direct flex child.
-   `!important` stays: the neutralization is what makes the img a flex child in
-   the first place, and the competitor is Obsidian's own wrapper styling, which
-   this plugin does not get to inspect or outrank by specificity.  The lint note
-   ("css-display-contents is only partially supported by Obsidian 1.4.5") is a
-   judgement about a version below this plugin's minimum (1.5.0). */
-.diaa-row .diaa-contents {
-  display: contents !important;
 }
 
 /* Draggable standalone images in Reading Mode */
@@ -267,24 +234,6 @@
   to   { opacity: 1; }
 }
 
-/* Drop target line highlight during standalone drag */
-.cm-line.diaa-drop-target-line {
-  background-color: rgba(74, 158, 255, 0.15) !important;
-  box-shadow: inset 0 0 0 2px rgba(74, 158, 255, 0.5);
-  border-radius: 3px;
-}
-
-/* Left/right drop indicators on standalone image lines */
-.cm-line.diaa-drop-left {
-  border-left: 3px solid #4a9eff !important;
-  border-radius: 3px 0 0 3px;
-}
-
-.cm-line.diaa-drop-right {
-  border-right: 3px solid #4a9eff !important;
-  border-radius: 0 3px 3px 0;
-}
-
 /* === Live Preview specific === */
 
 /* Make our custom widgets sit well within CodeMirror lines */
@@ -295,21 +244,6 @@
 /* Ensure the CodeMirror embed block styles don't interfere */
 .cm-embed-block .diaa-row {
   pointer-events: auto;
-}
-
-/* Hide Obsidian's native image resize handles inside our widget.
-   Obsidian auto-wraps <img> elements in .image-resize-container
-   and adds .image-resize-handle children. Neutralize the container
-   so it doesn't interfere with our flex layout, and hide the handles
-   since our plugin provides its own.  Same rationale for `!important`
-   as the `.diaa-contents` rule above — this is the wrapper the plugin
-   does not tag itself, so it is the same neutralization by another path. */
-.diaa-row .image-resize-container {
-  display: contents !important;
-}
-
-.diaa-row .image-resize-handle {
-  display: none !important;
 }
 
 /* === Mobile responsiveness ===

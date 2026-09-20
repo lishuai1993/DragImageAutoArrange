@@ -323,10 +323,15 @@ export class DragReorderController {
         dividerEls[divIndex].setCssStyles({ backgroundColor: "#4a9eff" });
         dividerEls[divIndex].classList.add(CLASSES.dividerActive);
       }
-    } else if (!this.draggingSelf && closestIdx === 0 && edgeLeft) {
+    } else if (closestIdx === 0 && edgeLeft) {
+      // The row's own members are excluded from nothing here: reordering into
+      // its own end is a legal gesture (it swaps the two pictures), and only
+      // the drop side decides between the two.  The "a row can't merge into
+      // itself" guard lives at the drop handlers, which route a same-row source
+      // to a reorder.
       edgeLeft.style.height = `${containerRect.height}px`;
       edgeLeft.setCssStyles({ display: "" });
-    } else if (!this.draggingSelf && edgeRight) {
+    } else if (closestIdx === n - 1 && edgeRight) {
       edgeRight.style.height = `${containerRect.height}px`;
       edgeRight.setCssStyles({ display: "" });
     }

@@ -56,6 +56,8 @@ import {
     type TransformOp,
 } from '../imageTransform/orientation';
 import { pinScreenWidthForTurn } from '../imageTransform/transformPreview';
+import { fillForTurn } from '../imageLayout/layoutEngine';
+import { clampScale, sizingCode } from '../imageLayout/parameterValidator';
 import type { EditorView } from '@codemirror/view';
 import * as scrollDiag from '../scrollSync/scrollDiag';
 
@@ -405,12 +407,41 @@ function pinnedSizing(
     return moved === null ? undefined : { sFlag: '1', widthPx: Math.max(1, Math.round(moved)) };
 }
 
+/**
+ * The fill a multi-row member has to be written with for a turn to leave its
+ * container alone.
+ *
+ * A member's box is its slot and its fill says how much of that slot the
+ * picture spans, so holding the drawn height across a turn is exactly a rewrite
+ * of the fill — the container, the row height and the neighbours then never
+ * move.  Null when the marked element is not a member, when the bitmap has not
+ * loaded, or when the turn leaves the drawn height alone (a landscape's
+ * upright and turned fits are equal, as are 180°'s and both flips'): there
+ * nothing changes and the line keeps the fill it already has.
+ */
+function memberFillOverride(
+    target: TransformTarget,
+    next: OrientationState
+): number | undefined {
+    const fill = target.img.__diaa_memberFill?.() ?? null;
+    if (fill === null) return undefined;
+    const { naturalWidth, naturalHeight } = target.img;
+    if (!(naturalWidth > 0 && naturalHeight > 0)) return undefined;
+    const moved = fillForTurn({ naturalWidth, naturalHeight }, fill, target.state, next);
+    // Rewriting the same code would only churn the line.
+    if (sizingCode(clampScale(moved)) === sizingCode(clampScale(fill))) return undefined;
+    return moved;
+}
+
 function applyTransformOp(target: TransformTarget, op: TransformOp): void {
     const next = composeOrientation(target.state, op);
     scrollDiag.openRotationWindow(target.view, target.line, target.lineText);
     const sizing = pinnedSizing(target, next);
-    const ok = applyOrientationState(target.editor, target.line, next, target.view, sizing);
-    scrollDiag.note('op applied', { op, ok, sizing });
+    const memberFill = memberFillOverride(target, next);
+    const ok = applyOrientationState(
+        target.editor, target.line, next, target.view, sizing, memberFill
+    );
+    scrollDiag.note('op applied', { op, ok, sizing, memberFill });
     if (!ok) {
         new Notice(NOTICE_FAILED.transformFailed);
     }
@@ -421,10 +452,14 @@ function applyTransformOp(target: TransformTarget, op: TransformOp): void {
 function resetTransform(target: TransformTarget): void {
     scrollDiag.openRotationWindow(target.view, target.line, target.lineText);
     // Returning to the original orientation unwinds a quarter turn too, so it
-    // moves the page width by the same aspect the turn did.
+    // moves the page width by the same aspect the turn did — and a member's
+    // fill the same way.
     const sizing = pinnedSizing(target, IDENTITY_STATE);
-    const ok = resetOrientationOnLine(target.editor, target.line, target.view, sizing);
-    scrollDiag.note('reset applied', { ok, sizing });
+    const memberFill = memberFillOverride(target, IDENTITY_STATE);
+    const ok = resetOrientationOnLine(
+        target.editor, target.line, target.view, sizing, memberFill
+    );
+    scrollDiag.note('reset applied', { ok, sizing, memberFill });
     if (!ok) {
         new Notice(NOTICE_FAILED.transformFailed);
     }

@@ -30,6 +30,11 @@ export interface DiaImageMarkerOptions {
      *  A rotation that turns the layout box on its side has to move this number
      *  to leave the picture the size it was. */
     screenWidth: (() => number | null) | null;
+    /** The fill this row member is drawn with, or null when this image is not a
+     *  multi-row member. A turn may not resize the member's container, so the
+     *  fill is what has to be rewritten to hold the drawn height — the multi-row
+     *  counterpart of `screenWidth`. */
+    memberFill: (() => number | null) | null;
 }
 
 export function attachDiaImageMarkers(
@@ -44,4 +49,6 @@ export function attachDiaImageMarkers(
     };
     const screenWidth = opts.screenWidth;
     img.__diaa_screenWidth = screenWidth ? () => screenWidth() : null;
+    const memberFill = opts.memberFill;
+    img.__diaa_memberFill = memberFill ? () => memberFill() : null;
 }

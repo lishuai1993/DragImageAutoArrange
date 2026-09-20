@@ -2,6 +2,7 @@ import { CLASSES } from "../constants";
 import { ImageMeta } from "../imageParse/imageDetector";
 import { logger } from "../logger";
 const log = logger.channel("divider");
+import type { OrientationState } from "../imageTransform/orientation";
 import { clampFlexGrow } from "../imageLayout/parameterValidator";
 import {
   computePairEquilibrium,
@@ -22,6 +23,10 @@ export interface DividerHost {
   /** A member's persisted fill ratio (null = none): the scale the row's
    *  rendered-height model reads. */
   getFill(index: number): number | null;
+  /** A member's rotate/flip — the model needs it because a quarter turn
+   *  repaints the member's box on its side, so what it *draws* is no longer its
+   *  box height. */
+  getOrientation(index: number): OrientationState | null;
   /** Live width of the row, as `recalculateRowHeight` measures it. */
   getRowWidth(): number;
   /** Space one junction between adjacent items occupies, dividers included —
@@ -61,6 +66,7 @@ export class DividerController {
     const grows: number[] = [];
     const metas: ImageMeta[] = [];
     const scales: Array<number | null> = [];
+    const orientations: Array<OrientationState | null> = [];
     for (let i = 0; i < itemEls.length; i++) {
       const parsed = parseFloat(itemEls[i]?.style.flexGrow || "1");
       grows[i] = isFinite(parsed) ? parsed : 1;
@@ -68,6 +74,7 @@ export class DividerController {
       if (!meta || meta.naturalWidth === 0 || meta.naturalHeight === 0) return null;
       metas[i] = meta;
       scales[i] = this.host.getFill(i);
+      orientations[i] = this.host.getOrientation(i);
     }
     grows[leftIndex] = candidateLeft;
     grows[leftIndex + 1] = candidateRight;
@@ -82,7 +89,8 @@ export class DividerController {
         containerWidth,
         gap,
         defaultRowHeight,
-        leftIndex
+        leftIndex,
+        orientations
       ),
       equilibrium: computePairEquilibrium(
         grows,
@@ -91,7 +99,8 @@ export class DividerController {
         containerWidth,
         gap,
         defaultRowHeight,
-        leftIndex
+        leftIndex,
+        orientations
       ),
     };
   }

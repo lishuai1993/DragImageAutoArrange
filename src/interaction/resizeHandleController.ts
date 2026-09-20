@@ -35,6 +35,9 @@ export interface ResizeHost {
   /** True when an odd quarter turn is drawn for this member, i.e. what is on
    *  screen is smaller than (and not the same shape as) the image's layout box. */
   isTurnedImage(index: number): boolean;
+  /** The layout-box height that paints as `drawnHeight` for this member — the
+   *  identity unless it is turned, where the drawing is the box scaled down. */
+  boxHeightForDrawn(drawnHeight: number, index: number): number;
   /** Replay that member's orientation against the box as it now stands and
    *  re-fit a lone image's item to the drawing. */
   syncItemToDrawing(index: number): void;
@@ -171,12 +174,13 @@ export class ResizeHandleController {
           : startHeight;
 
         // The height the pointer drives. A quarter turn swaps the drawing, so a
-        // turned single row hugs the drawn picture and *that* is what the handle
-        // should track — not the un-rotated layout box getImageContentRect
-        // reports. Everywhere else the two coincide.
-        const turnedSingle = nItems === 1 && this.host.isTurnedImage(0);
-        const displayRect = turnedSingle
-          ? (this.host.getItemEls()[0]?.getBoundingClientRect() ?? null)
+        // turned item hugs the drawn picture and *that* is what the handle should
+        // track — not the un-rotated layout box getImageContentRect reports.
+        // Everywhere else the two coincide, and the item's own rect is the drawn
+        // one — in a lone row because layout fits the item to the picture, and in
+        // a row member because its cell is the rectangle it paints.
+        const displayRect = this.host.isTurnedImage(index)
+          ? (this.host.getItemEls()[index]?.getBoundingClientRect() ?? null)
           : this.host.getImageContentRect(index);
         startDisplayH = displayRect ? displayRect.height : startHeight;
         if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
@@ -272,21 +276,27 @@ export class ResizeHandleController {
           // Use image content height as delta baseline — not container height.
           // This eliminates the dead zone that occurs when container is taller
           // than the image (e.g. from a prior resize).
-          const targetImageH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
-          const imageH = `${targetImageH}px`;
+          const targetDrawnH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
+          // The pointer drives the *drawing*: that is what the handles hug, and
+          // that is what the cell is.  Only the img's layout box has to be
+          // derived back out of it, and only a turn makes them differ — writing
+          // the drawn height straight onto the box (as this did) moved a turned
+          // member's cell without moving the picture at all.
+          const imageH = `${this.host.boxHeightForDrawn(targetDrawnH, index)}px`;
           this.host.getImageEls()[index].style.height = imageH;
-          this.host.getItemEls()[index].style.height = imageH;
+          this.host.getItemEls()[index].style.height = `${targetDrawnH}px`;
           // Preserve each non-dragged image's original height (may differ
-          // from container height due to prior manual resizes).
+          // from container height due to prior manual resizes).  Those are cell
+          // heights, which is the unit the row is measured in.
           let otherMax = 0;
           for (let j = 0; j < this.host.getItemEls().length; j++) {
             if (j === index) continue;
             const h = `${startItemHeights[j]}px`;
             this.host.getItemEls()[j].style.height = h;
-            this.host.getImageEls()[j].style.height = h;
+            this.host.getImageEls()[j].style.height = `${this.host.boxHeightForDrawn(startItemHeights[j], j)}px`;
             otherMax = Math.max(otherMax, startItemHeights[j]);
           }
-          const containerH = Math.max(targetImageH, otherMax);
+          const containerH = Math.max(targetDrawnH, otherMax);
           this.host.getContainer()!.style.height = `${containerH}px`;
           this.host.updateHandlePositions(index);
           // Diagnostic: detect image/item height mismatch that would cause clipping.
@@ -302,7 +312,7 @@ export class ResizeHandleController {
           if (mismatches.length > 0) {
             log.warn("resize-mousemove image/item mismatch (clipping risk)", {
               activeIndex: index,
-              targetImageH,
+              targetDrawnH,
               containerH,
               startItemHeights: [...startItemHeights],
               mismatches,

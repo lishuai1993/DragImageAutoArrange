@@ -117,6 +117,43 @@ describe('setLineOrientation (sizing override)', () => {
   });
 });
 
+describe('setLineOrientation (member fill override)', () => {
+  const TURNED = { turns: 1, mirror: false };
+
+  it('replaces the trailing fill code, leaving the share beside it', () => {
+    expect(setLineOrientation('![[a.png|r90|center|1497|100]]', IDENTITY_STATE, undefined, 0.585))
+      .toBe('![[a.png|orig|center|1497|59]]');
+  });
+
+  it('appends a fill where the member had only a share', () => {
+    expect(setLineOrientation('![[a.png|r90|center|1497]]', IDENTITY_STATE, undefined, 0.585))
+      .toBe('![[a.png|orig|center|1497|59]]');
+  });
+
+  it('leaves a member with no share slot alone — a lone number is the share', () => {
+    expect(setLineOrientation('![[a.png|r90|center]]', IDENTITY_STATE, undefined, 0.585))
+      .toBe('![[a.png|orig|center]]');
+  });
+
+  it('clamps to 1 and never writes a code outside (0, 100]', () => {
+    expect(setLineOrientation('![[a.png|r90|100]]', IDENTITY_STATE, undefined, 1.71))
+      .toBe('![[a.png|orig|100|100]]');
+  });
+
+  it('is dropped on the upgrade path, which has no slots to move', () => {
+    expect(setLineOrientation('see ![[a.png]] here', TURNED, undefined, 0.5))
+      .toBe('see\n![[a.png|r90]]\nhere');
+  });
+
+  it('is ignored when a sizing override owns the slots instead', () => {
+    // The two never meet — a line is either a lone row or a member — and the
+    // sizing path already replaces everything past the alignment word.
+    expect(
+      setLineOrientation('![[a.png|orig|center|0|800]]', TURNED, { sFlag: '1', widthPx: 250 }, 0.5)
+    ).toBe('![[a.png|r90|center|1|250]]');
+  });
+});
+
 describe('setLineOrientation (text-bearing upgrade)', () => {
   it('splits a paragraph so the embed stands alone, then orients it', () => {
     expect(setLineOrientation('see ![[a.png]] here', { turns: 1, mirror: false }))
@@ -204,6 +241,14 @@ describe('editor transaction', () => {
       })
     ).toBe(true);
     expect(editor.getValue()).toBe('![[a.png|r90|center|1|400]]');
+  });
+
+  it('carries a member fill override in the same transaction', () => {
+    const editor = new FakeEditor('![[a.png|r90|center|1497|100]]');
+    expect(
+      applyOrientationState(asEditor(editor), 0, IDENTITY_STATE, null, undefined, 0.585)
+    ).toBe(true);
+    expect(editor.getValue()).toBe('![[a.png|orig|center|1497|59]]');
   });
 
   it('reports false when the state is already what it would write', () => {

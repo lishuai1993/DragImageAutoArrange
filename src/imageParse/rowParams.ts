@@ -15,6 +15,7 @@
 // LAST numeric as the width, so the word can never sit between numbers.
 
 import { buildImageLineRe } from "../constants";
+import { sizingCode } from "../imageLayout/parameterValidator";
 import { stripEmbedParams } from "./embedRaw";
 import {
   IDENTITY_STATE,
@@ -215,9 +216,9 @@ function serializeMulti(img: RowImage): string {
   // three leading slots and has its fill appended once it can be measured.
   const params: string[] = orientationParams(img);
   if (img.alignment) params.push(img.alignment);
-  params.push(String(Math.round(share * 100)));
+  params.push(String(sizingCode(share)));
   if (fill != null && fill > 0) {
-    const scaleValue = Math.round(Math.min(1, fill) * 100);
+    const scaleValue = sizingCode(Math.min(1, fill));
     if (scaleValue > 0 && scaleValue <= 100) params.push(String(scaleValue));
   }
   return base.replace(/\]\]/, `|${params.join("|")}]]`);

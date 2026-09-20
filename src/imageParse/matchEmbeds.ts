@@ -14,6 +14,18 @@ export interface MatchResult<T extends { fileName: string }> {
   usedFallback: boolean;
 }
 
+/** The last path segment of an embed's target.
+ *
+ *  The two sides of a comparison name the same file differently: the parser
+ *  keeps the link verbatim, folder included (`![[图片集/a.png]]` →
+ *  `图片集/a.png`), while the DOM reader can only see `img.src` and takes its
+ *  last segment (`a.png`).  Comparing the raw strings makes every subfolder link
+ *  disagree with its own line. */
+export function basename(name: string): string {
+  const cut = name.lastIndexOf("/");
+  return cut === -1 ? name : name.slice(cut + 1);
+}
+
 /** Count embeds whose (non-empty) filename disagrees with their assigned
  *  parse. Null filenames are unverifiable (img src not yet readable) and are
  *  never counted as a mismatch. */
@@ -26,7 +38,7 @@ function countMismatches<T extends { fileName: string }>(
     const fn = embedFileNames[i];
     if (!fn) continue;
     const m = matches[i];
-    if (!m || m.fileName !== fn) n++;
+    if (!m || basename(m.fileName) !== basename(fn)) n++;
   }
   return n;
 }
@@ -43,8 +55,9 @@ function matchWithin<T extends { fileName: string }>(
   let cursor = 0;
   for (const fn of embedFileNames) {
     if (fn) {
+      const want = basename(fn);
       let k = cursor;
-      while (k < candidates.length && candidates[k].fileName !== fn) k++;
+      while (k < candidates.length && basename(candidates[k].fileName) !== want) k++;
       if (k < candidates.length) {
         out.push(candidates[k]);
         cursor = k + 1;
@@ -59,11 +72,11 @@ function matchWithin<T extends { fileName: string }>(
   return out;
 }
 
-/** Filename-only global match, ignoring source line/position — the degrade
- *  path when section-scoped matching fails its integrity check. */
+/** Filename-only match, ignoring source line/position — the degrade path when
+ *  section-scoped matching fails its integrity check. */
 function matchByFilenameOnly<T extends { fileName: string }>(
   embedFileNames: (string | null)[],
-  allParsed: T[]
+  pool: T[]
 ): (T | null)[] {
   const out: (T | null)[] = [];
   let cursor = 0;
@@ -72,10 +85,11 @@ function matchByFilenameOnly<T extends { fileName: string }>(
       out.push(null);
       continue;
     }
+    const want = basename(fn);
     let k = cursor;
-    while (k < allParsed.length && allParsed[k].fileName !== fn) k++;
-    if (k < allParsed.length) {
-      out.push(allParsed[k]);
+    while (k < pool.length && basename(pool[k].fileName) !== want) k++;
+    if (k < pool.length) {
+      out.push(pool[k]);
       cursor = k + 1;
     } else {
       out.push(null);
@@ -88,8 +102,15 @@ function matchByFilenameOnly<T extends { fileName: string }>(
  *
  *  Primary: filename-primary matching within `candidates` (the parsed records
  *  scoped to this section's source line range). If an integrity check detects
- *  any filename mismatch, it degrades to a filename-only global match against
- *  `allParsed` and flags `usedFallback` so the caller can surface a warning. */
+ *  any filename mismatch, it degrades to a filename-only match and flags
+ *  `usedFallback` so the caller can surface a warning.
+ *
+ *  The degrade path prefers the section's own candidates and only widens to the
+ *  whole document when that pool does no better: a bare-name hunt over the
+ *  document takes the *first* same-named line, which for a duplicated attachment
+ *  is a different row entirely — the section's params then get attributed to the
+ *  wrong embed (its grow, fill and rotate all land on somebody else's picture).
+ */
 export function matchEmbedsToParsed<T extends { fileName: string }>(
   embedFileNames: (string | null)[],
   candidates: T[],
@@ -100,7 +121,12 @@ export function matchEmbedsToParsed<T extends { fileName: string }>(
   if (mismatches === 0) {
     return { matches: primary, mismatches: 0, usedFallback: false };
   }
-  const fallback = matchByFilenameOnly(embedFileNames, allParsed);
+  const withinSection = matchByFilenameOnly(embedFileNames, candidates);
+  const global = matchByFilenameOnly(embedFileNames, allParsed);
+  const fallback =
+    countMismatches(embedFileNames, withinSection) <= countMismatches(embedFileNames, global)
+      ? withinSection
+      : global;
   return {
     matches: fallback,
     mismatches: countMismatches(embedFileNames, fallback),

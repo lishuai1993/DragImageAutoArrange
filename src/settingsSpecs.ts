@@ -26,7 +26,8 @@ export type ToggleKey =
   | "enableDividers"
   | "enableReadingModeContextMenu"
   | "enableReadingModeDoubleClickZoom"
-  | "logToFile";
+  | "logToFile"
+  | "geometryProbe";
 
 export type DropdownKey = "alignment";
 
@@ -262,6 +263,12 @@ export const SETTINGS_SECTIONS: SectionSpec[] = [
         key: "logToFile",
         name: "写入 log.txt",
         desc: "开启后，符合级别的日志写入插件目录下的 log.txt（开启时清空一次，便于读取本次会话）。",
+      },
+      {
+        kind: "toggle",
+        key: "geometryProbe",
+        name: "诊断快照（临时）",
+        desc: "开启后，布局过程中会把每张图的「模型 / 写入 / 实测」三组几何写入 log.txt（DIAAGEO 行），用于定位尺寸异常；快照忽略日志级别，但需 logToFile 通道可用。排查结束后请关闭。",
       },
     ],
   },

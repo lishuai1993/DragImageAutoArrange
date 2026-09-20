@@ -1,8 +1,8 @@
 import { App, TFile } from "obsidian";
-import { CLASSES } from "../constants";
+import { CLASSES, SINGLE_IMAGE_MIN_WIDTH, computeInterItemSpace } from "../constants";
 import { ImageRowOptions } from "../types";
 import { ImageMeta } from "../imageParse/imageDetector";
-import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights } from "../imageLayout/layoutEngine";
+import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights, computeSingleImageWidth, drawnHeightCoefficient } from "../imageLayout/layoutEngine";
 import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, setStyleImportant } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("rmFlexRow");
@@ -10,19 +10,333 @@ import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 import { storePendingAlignment } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
-import { isIdentityOrientation, parseOrientationWord } from "../imageTransform/orientation";
-import { applyOrientationPreview } from "../imageTransform/transformPreview";
+import { IDENTITY_STATE, isIdentityOrientation, orientationWord, orientedSize, parseOrientationWord, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
+import { applyOrientationPreview, boxForScreenWidth, displayedImageSize, naturalAspect } from "../imageTransform/transformPreview";
+import { emitSnapshot, isGeometryProbeEnabled } from "../diagnostics/probe";
+import { round2, snapshotPayload, type MemberFrames } from "../diagnostics/rowSnapshot";
+
+/** Diagnostics (temporary): coalesce a row's settle burst into one snapshot. */
+const rmSnapshotTimers = new Map<string, number>();
+
+/**
+ * The layout-box height our own sizing wrote onto an img, keyed by the element.
+ * The style guard restores *this* value rather than the embed's height: a
+ * quarter-turned member keeps an un-rotated box that is deliberately taller than
+ * the embed it sits in, and putting the embed's height back would erase the box
+ * the turn is measured against.
+ */
+const sizedImgBoxH = new WeakMap<HTMLImageElement, number>();
+
+/** Write an img's layout-box height and remember it for the guard. */
+function setImgBoxHeight(img: HTMLImageElement, boxH: number): void {
+  sizedImgBoxH.set(img, boxH);
+  setStyleImportant(img, "height", `${boxH}px`);
+}
+
+/**
+ * Keep a sized img's box ours.  Obsidian writes its own inline styles and
+ * alignment classes onto embed images, and both outrank what we set; the guard
+ * puts back the height the sizing wrote.  It also runs on our *own* writes — a
+ * matching value is what makes that a no-op instead of a fight.
+ */
+function guardImgBox(img: HTMLImageElement): void {
+  const guard = new MutationObserver((mutations, obs) => {
+    for (const m of mutations) {
+      if (m.type !== "attributes") continue;
+      const attr = m.attributeName;
+      if (attr !== "class" && attr !== "style") continue;
+      const target = m.target as HTMLImageElement;
+      const itemEl = target.closest<HTMLElement>(".internal-embed");
+      if (!itemEl) continue;
+      const knownBoxH = sizedImgBoxH.get(target);
+      const expectedH = knownBoxH !== undefined ? `${knownBoxH}px` : itemEl.style.height;
+      const hasClasses = hasObsidianAlignClass(target);
+      const heightMismatch = attr === "style" && !!expectedH && target.style.height !== expectedH;
+      if (!hasClasses && !heightMismatch) continue;
+      obs.disconnect();
+      if (hasClasses) {
+        stripObsidianClasses(target);
+      }
+      if (heightMismatch) {
+        log.debug("RM styleGuard restored img height", {
+          fileName: getFileNameFromEmbed(itemEl),
+          obsidianSet: target.style.height,
+          restored: expectedH,
+          source: knownBoxH !== undefined ? "writtenBoxH" : "embedHeight",
+          attr,
+          hadObsidianClasses: hasClasses,
+        });
+        setStyleImportant(target, "height", expectedH);
+      }
+      obs.observe(target, { attributes: true, attributeFilter: ["class", "style"] });
+    }
+  });
+  guard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
+}
+
+function scheduleRmSnapshot(key: string, build: () => Record<string, unknown>): void {
+  if (!isGeometryProbeEnabled()) return;
+  const pending = rmSnapshotTimers.get(key);
+  if (pending !== undefined) window.clearTimeout(pending);
+  const id = window.setTimeout(() => {
+    rmSnapshotTimers.delete(key);
+    emitSnapshot(key, "DIAAGEO row", build());
+  }, 200);
+  rmSnapshotTimers.set(key, id);
+}
+
+/** One member's three frames, in the same shape the Live Preview widget
+ *  reports, so a Reading Mode row and a Live Preview row can be compared. */
+function rmMemberFrames(
+  embed: HTMLElement,
+  img: HTMLImageElement,
+  model: {
+    word: string;
+    fill: number | null;
+    share: number | null;
+    boxH: number;
+    drawn: number;
+    expectedScale: number | null;
+  }
+): MemberFrames {
+  const aspect = img.naturalWidth > 0 && img.naturalHeight > 0
+    ? img.naturalWidth / img.naturalHeight
+    : 1;
+  const itemRect = embed.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+  const cs = getComputedStyle(img);
+  return {
+    label: getFileNameFromEmbed(embed) || "(unknown)",
+    model: {
+      ...model,
+      aspect: Number(aspect.toFixed(4)),
+      boxW: Number((model.boxH * aspect).toFixed(2)),
+    },
+    wrote: {
+      imgW: parseFloat(img.style.width) || null,
+      imgH: parseFloat(img.style.height) || null,
+      itemW: parseFloat(embed.style.width) || null,
+      itemH: parseFloat(embed.style.height) || null,
+      imgTransform: img.style.transform,
+    },
+    measured: {
+      itemW: round2(itemRect.width),
+      itemH: round2(itemRect.height),
+      imgClientW: img.clientWidth,
+      imgClientH: img.clientHeight,
+      paintW: round2(imgRect.width),
+      paintH: round2(imgRect.height),
+      paintOffsetX: round2(imgRect.left - itemRect.left),
+      paintOffsetY: round2(imgRect.top - itemRect.top),
+      transform: cs.transform,
+      display: cs.display,
+    },
+  };
+}
+
+/** Every embed's persisted rotate/flip, in item order — the frame the height
+ *  model reads, since a quarter turn repaints a member's box on its side. */
+function readOrientations(embeds: HTMLElement[]): Array<OrientationState | null> {
+  return embeds.map((embed) => parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? ""));
+}
 
 /** Replay each embed's persisted rotate/flip word as a CSS transform on its
- *  <img>.  Identity / attribute-less embeds are skipped.  Call after sizing so
- *  a quarter-turn's fit-scale sees the final item dimensions. */
+ *  <img>.  Identity / attribute-less embeds are skipped.
+ *
+ *  The scale is the fit that folds the turned rectangle back inside the
+ *  rectangle it came from (`quarterTurnFitScale` — the same number the model's
+ *  coefficient is built on, so the two cannot drift): a landscape keeps its
+ *  height and narrows, a portrait keeps its width and shortens, and nothing is
+ *  ever enlarged, cropped or left to overflow its slot.  Measuring a fit scale
+ *  off the DOM would re-derive the same number from a box the turn obscures. */
 function applyEmbedOrientations(embeds: HTMLElement[]): void {
   for (const embed of embeds) {
     const state = parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "");
     if (!state || isIdentityOrientation(state)) continue;
     for (const img of Array.from(embed.querySelectorAll<HTMLImageElement>("img"))) {
-      applyOrientationPreview(img, state);
+      applyOrientationPreview(img, state, { scale: quarterTurnFitScale(naturalAspect(img)) });
     }
+  }
+}
+
+/**
+ * Size a standalone image embed the way the LP widget sizes a single-image row
+ * (`layoutSingleImage`): derive the width the picture should take on the page,
+ * turn that into the layout box the transform has to keep (`boxForScreenWidth`),
+ * and write the *drawn* size onto the embed so its container hugs the picture.
+ *
+ * The two frames matters here: a quarter turn repaints the box on its side, so
+ * the box is one aspect wider than what the reader sees, and the embed takes the
+ * swapped (drawn) rectangle — handing the resulting fit scale to the transform
+ * keeps the painted bitmap and the container in agreement.  Read-only: RM
+ * renders, it never writes the note.
+ *
+ * `manualWidthPx` is a `single-manual` row's `|1|W`; null means the row follows
+ * the size setting, exactly as the LP path reads the `S` flag.
+ */
+export function applyStandaloneSize(
+  embed: HTMLElement,
+  img: HTMLImageElement,
+  manualWidthPx: number | null,
+  options: ImageRowOptions
+): void {
+  let pendingFrames = 0;
+
+  const layout = (): void => {
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    if (nw <= 0 || nh <= 0) return;
+
+    const host = embed.parentElement;
+    const containerWidth = Math.round(host?.getBoundingClientRect().width ?? 0);
+    if (containerWidth <= 0) {
+      // Detached or not laid out yet — the post-processor runs on sections
+      // Obsidian may not have attached.  Retry briefly, then give up rather
+      // than spin on a section that never lands.
+      if (pendingFrames++ < 30 && embed.isConnected) window.requestAnimationFrame(layout);
+      return;
+    }
+
+    const state = parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "")
+      ?? IDENTITY_STATE;
+    const turned = state.turns % 2 === 1;
+    const aspect = nw / nh;
+    // Natural in the *screen* frame: a quarter turn swaps the bitmap's own
+    // width and height, so a 2:1 landscape reads as half as wide turned as it
+    // does upright.
+    const naturalScreenW = orientedSize(state, nw, nh).width;
+
+    const intendedScreenW = manualWidthPx != null
+      ? manualWidthPx
+      : options.singleImageSizeMode === "fixed"
+        ? Math.max(SINGLE_IMAGE_MIN_WIDTH, Math.round(options.singleImageWidth))
+        : Math.round(naturalScreenW);
+
+    const renderScreenW = Math.max(1, manualWidthPx != null
+      ? Math.min(intendedScreenW, containerWidth)
+      : computeSingleImageWidth(
+          options.singleImageSizeMode,
+          options.singleImageWidth,
+          naturalScreenW,
+          containerWidth
+        ));
+
+    const box = boxForScreenWidth(renderScreenW, aspect, state);
+    const imageW = Math.max(1, Math.round(box.width));
+    const imageH = Math.max(1, Math.round(box.height));
+    const shown = displayedImageSize(imageW, imageH, state, containerWidth);
+
+    setStyleImportant(img, "object-fit", "contain");
+    setStyleImportant(img, "display", "block");
+    setImgBoxHeight(img, imageH);
+    setStyleImportant(img, "width", "auto");
+    // The box is allowed to be wider than the container once a turn has the
+    // embed sized to the swapped rectangle; a max-width would clamp the box and
+    // re-letterbox the bitmap, changing what is drawn.
+    setStyleImportant(img, "max-width", turned ? "none" : "100%");
+
+    if (turned) {
+      setStyleImportant(embed, "width", `${Math.max(1, Math.round(shown.width))}px`);
+      setStyleImportant(embed, "height", `${Math.max(1, Math.round(shown.height))}px`);
+      // Centre the box in the embed.  A turn paints about the box's own centre,
+      // and the box is one aspect taller than the swapped rectangle the embed
+      // takes — pinned to the embed's top-left it would carry the picture half
+      // the difference left and down, leaving the drawn rectangle the right size
+      // but in the wrong place.  Centring both axes lands the box centre on the
+      // embed centre, where the drawn rectangle coincides with the container.
+      // inline-flex (not flex) keeps the embed inline-level, so the host block's
+      // text-align still places it.
+      setStyleImportant(embed, "display", "inline-flex");
+      setStyleImportant(embed, "justify-content", "center");
+      setStyleImportant(embed, "align-items", "center");
+      setStyleImportant(img, "flex-shrink", "0");
+    } else {
+      embed.style.removeProperty("width");
+      embed.style.removeProperty("height");
+      // Undo a turn's centring: an even orientation is a shrink-wrapped
+      // inline-block again, positioned by the host block's text-align.
+      setStyleImportant(embed, "display", "inline-block");
+      embed.style.removeProperty("justify-content");
+      embed.style.removeProperty("align-items");
+      img.style.removeProperty("flex-shrink");
+    }
+
+    // Replay the orientation: the note carries the turn as a word, and nothing
+    // else in Reading Mode paints it.  The fit scale comes from the size the
+    // embed was just given, so the picture and its container agree — a quarter
+    // turn hands over `shown.scale`, an even orientation just rotates/flips.
+    applyOrientationPreview(img, state, turned ? { scale: shown.scale } : undefined);
+
+    log.debug("RM standalone size", {
+      fileName: getFileNameFromEmbed(embed),
+      containerWidth,
+      manualWidthPx,
+      mode: options.singleImageSizeMode,
+      turned,
+      naturalScreenW,
+      intendedScreenW,
+      renderScreenW,
+      imageW,
+      imageH,
+      shown,
+      orientation: orientationWord(state),
+      // Whether the transform was actually replayed here — a quarter turn has
+      // to paint through it, and this path has no other writer.
+      transformNow: img.style.transform,
+    });
+
+    const fileName = getFileNameFromEmbed(embed);
+    scheduleRmSnapshot(`rm-standalone:${fileName}`, () => ({
+      side: "RM",
+      scope: "standalone",
+      fileName,
+      containerWidth,
+      manualWidthPx,
+      mode: options.singleImageSizeMode,
+      turned,
+      members: [
+        snapshotPayload(
+          rmMemberFrames(embed, img, {
+            word: orientationWord(state),
+            fill: null,
+            share: null,
+            boxH: imageH,
+            drawn: Math.max(1, Math.round(shown.height)),
+            expectedScale: turned ? shown.scale : null,
+          })
+        ),
+      ],
+    }));
+  };
+
+  layout();
+  if (!img.complete) img.addEventListener("load", layout, { once: true });
+
+  // A lone image gets the same policing a row's members get: Obsidian writes
+  // its own inline styles and alignment classes onto embed images, and either
+  // one would undo the box and the transform the sizing just set.
+  guardImgBox(img);
+
+  // A pane resize changes the container width the picture is fitted to, and
+  // the image itself does not fire anything — mirror the row path's observer.
+  const host = embed.parentElement;
+  if (host) {
+    let lastWidth = 0;
+    const sizeObserver = new ResizeObserver(() => {
+      const w = embed.isConnected ? Math.round(host.getBoundingClientRect().width) : 0;
+      if (w > 0 && w !== lastWidth) {
+        lastWidth = w;
+        layout();
+      }
+    });
+    sizeObserver.observe(host);
+    const detachObserver = new MutationObserver((_mutations, obs) => {
+      if (!embed.isConnected) {
+        obs.disconnect();
+        sizeObserver.disconnect();
+      }
+    });
+    detachObserver.observe(host, { childList: true });
   }
 }
 
@@ -65,6 +379,36 @@ export function isImageOnlyBlock(block: HTMLElement | null): boolean {
   );
 }
 
+/**
+ * Mark an embed as shrink-wrapped, so the text-align its block carries can
+ * place it.
+ *
+ * The class survives as the marker for "this image was pulled out of a mixed
+ * text+image block" — nothing in the plugin reads it.  The shrink-wrap itself
+ * is written inline, because Obsidian's own `.internal-embed` rule sets
+ * `display` too and outranks a plugin class by specificity; inline is the only
+ * placement that wins without the stylesheet carrying an `!important`.
+ */
+function markInlineEmbed(embed: HTMLElement): void {
+  embed.addClass(CLASSES.rowInline);
+  setStyleImportant(embed, "display", "inline-block");
+  // An inline-block sits on the block's baseline, which reserves the font's
+  // descender below it — the gap the reader sees under a lone picture (and, on
+  // hover, between the picture and the ring drawn on the hosting block).  Top
+  // alignment takes the box off the baseline, so the line holds just the box.
+  setStyleImportant(embed, "vertical-align", "top");
+  const cs = getComputedStyle(embed);
+  log.debug("RM markInlineEmbed", {
+    fileName: getFileNameFromEmbed(embed),
+    display: cs.display,
+    verticalAlign: cs.verticalAlign,
+    lineHeight: cs.lineHeight,
+    fontSize: cs.fontSize,
+    hostTag: embed.parentElement?.tagName ?? null,
+    hostClass: embed.parentElement?.className ?? null,
+  });
+}
+
 export function applyStandaloneAlignment(
   embed: HTMLElement,
   defaultAlignment: "left" | "center" | "right"
@@ -87,7 +431,7 @@ export function applyStandaloneAlignment(
   if (!blockHasText) {
     // Pure image block: align the block itself (original behavior).
     block.style.setProperty("text-align", textAlign, "important");
-    embed.addClass(CLASSES.rowInline);
+    markInlineEmbed(embed);
     return;
   }
 
@@ -115,7 +459,7 @@ export function applyStandaloneAlignment(
   const wrapper = createDiv();
   wrapper.setAttribute("data-diaa-standalone", "true");
   wrapper.style.setProperty("text-align", textAlign, "important");
-  embed.addClass(CLASSES.rowInline);
+  markInlineEmbed(embed);
   wrapper.appendChild(embed);
 
   if (textBefore) {
@@ -236,11 +580,16 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   const { justifyContent } = alignmentToCSS(
     embeds.length === 1 ? (alignments[0] ?? options.alignment) : options.alignment
   );
+  // The space one junction between adjacent pictures occupies.  Reading Mode
+  // renders no dividers, but the figure has to match the widget's all the same:
+  // it is what each row's height model divides off, and a narrower figure here
+  // would make the same note draw its pictures at a different size per mode.
+  const interItemSpace = computeInterItemSpace(options.gap, options.enableDividers);
   row.style.cssText = [
     `display:flex`,
     `align-items:flex-start`,
     `justify-content:${justifyContent}`,
-    `gap:${options.gap}px`,
+    `gap:${interItemSpace}px`,
     `width:100%`,
     `overflow:hidden`,
   ].join(";");
@@ -268,6 +617,22 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     const { justifyContent: ji, objectPosition: oi } = alignmentToCSS(perImageAlign);
     embed.style.setProperty("flex", `${flexGrow} 1 0%`, "important");
     embed.style.setProperty("justify-content", ji, "important");
+    // The item's fixed styling.  Obsidian's own embed rules set these same
+    // properties — sometimes inline — so an inline declaration is the only
+    // placement that outranks them without the stylesheet carrying
+    // `!important` for each one.  Only flex / justify-content are per-row.
+    setStyleImportant(embed, "margin", "0");
+    setStyleImportant(embed, "padding", "0");
+    setStyleImportant(embed, "overflow", "hidden");
+    setStyleImportant(embed, "min-width", "50px");
+    setStyleImportant(embed, "position", "relative");
+    setStyleImportant(embed, "display", "flex");
+    // A quarter-turned member paints the box on its side, scaled down to fit
+    // back inside it, so the embed takes the painted height and the box — a
+    // different rectangle now — has to sit centred in it.
+    const turned = (parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "")
+      ?.turns ?? 0) % 2 === 1;
+    setStyleImportant(embed, "align-items", turned ? "center" : "flex-start");
 
     log.debug("RM wrapAsFlexRow item-style", {
       i,
@@ -294,29 +659,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       setStyleImportant(img, "display", "block");
       setStyleImportant(img, "margin", "0");
 
-      const styleGuard = new MutationObserver((mutations, obs) => {
-        for (const m of mutations) {
-          if (m.type !== "attributes") continue;
-          const attr = m.attributeName;
-          if (attr !== "class" && attr !== "style") continue;
-          const target = m.target as HTMLImageElement;
-          const itemEl = target.closest<HTMLElement>(".internal-embed");
-          if (!itemEl) continue;
-          const itemH = itemEl.style.height;
-          const hasClasses = hasObsidianAlignClass(target);
-          const heightMismatch = attr === "style" && itemH && target.style.height !== itemH;
-          if (!hasClasses && !heightMismatch) continue;
-          obs.disconnect();
-          if (hasClasses) {
-            stripObsidianClasses(target);
-          }
-          if (heightMismatch) {
-            target.style.setProperty("height", itemH, "important");
-          }
-          obs.observe(target, { attributes: true, attributeFilter: ["class", "style"] });
-        }
-      });
-      styleGuard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
+      guardImgBox(img);
 
       img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
       img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
@@ -345,6 +688,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         }),
         resetSingleManual: null,
         screenWidth: null,
+        memberFill: null,
       });
     }
     row.appendChild(embed);
@@ -417,7 +761,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       for (let i = 0; i < currentMetas.length; i++) finalGrows[i] = cg[i];
     }
 
-    const validatedGrows = validateRowFlexGrows(finalGrows, currentMetas, containerWidth, options.gap);
+    const validatedGrows = validateRowFlexGrows(finalGrows, currentMetas, containerWidth, interItemSpace);
     for (let _i = 0; _i < finalGrows.length; _i++) finalGrows[_i] = validatedGrows[_i];
 
     log.debug("RM applySizes flexGrows", {
@@ -431,6 +775,11 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     });
 
     const n = embeds.length;
+
+    /** Diagnostics (temporary): the box height and drawn height the sizing
+     *  model asked of each member, kept for the settle-time snapshot. */
+    const modelBoxH: number[] = new Array<number>(n).fill(0);
+    const modelDrawnH: number[] = new Array<number>(n).fill(0);
 
     // Below the narrow-screen breakpoint the media query wraps the row and the
     // stylesheet sizes it; any inline pixel height left here outranks that, so
@@ -450,49 +799,108 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     }
 
     if (n > 1 && hasScale) {
-      const { heights, maxH } = computeScaleBasedHeights(
-        finalGrows, currentMetas, scales, containerWidth, options.gap, options.defaultRowHeight
+      const orientations = readOrientations(embeds);
+      const { heights, boxes } = computeScaleBasedHeights(
+        finalGrows, currentMetas, scales, containerWidth, interItemSpace, options.defaultRowHeight, orientations
       );
       for (let i = 0; i < n; i++) {
-        const hPx = `${heights[i]}px`;
+        // The <img> holds the un-rotated bitmap and the embed takes what the
+        // member actually paints.  The two are one rectangle upright and part
+        // only on a quarter turn, where the drawing is folded back inside the
+        // box: the cell then has to follow the drawing, or a balanced row leaves
+        // the turned picture centred in a taller cell with a gap under the row.
+        modelBoxH[i] = boxes[i];
+        modelDrawnH[i] = heights[i];
         embeds[i].style.setProperty("flex", `${finalGrows[i]} 1 0%`, "important");
-        embeds[i].style.setProperty("height", hPx, "important");
+        embeds[i].style.setProperty("height", `${heights[i]}px`, "important");
         const embedImg = embeds[i].querySelector<HTMLImageElement>("img");
         if (embedImg) {
           stripObsidianClasses(embedImg);
-          embedImg.style.setProperty("height", hPx, "important");
+          setImgBoxHeight(embedImg, boxes[i]);
           setStyleImportant(embedImg, "width", "auto");
           embedImg.addClass(CLASSES.imgAuto);
         }
       }
-      row.style.height = `${maxH}px`;
+      const rowCellH = heights.length > 0 ? Math.max(...heights) : 0;
+      row.style.height = `${rowCellH}px`;
       log.debug("RM applySizes scale-based heights", {
-        maxH,
+        rowCellH,
         heights,
+        boxes,
       });
     } else {
       const rowHeightPx = computeRowHeight(
         finalGrows,
         currentMetas,
         containerWidth,
-        options.gap,
+        interItemSpace,
         options.defaultRowHeight
       );
-      row.style.height = `${rowHeightPx}px`;
+      // No member carries a fill: every box is the uniform height, and a quarter
+      // turn repaints its box on its side, scaled down to fit back inside it.  The
+      // cell follows that drawing, the rule the scale branch keeps, so a turned
+      // member's column hugs its picture instead of holding a taller box around it.
+      const uniforms = readOrientations(embeds);
+      const drawnOf = (j: number): number => {
+        const meta = currentMetas[j];
+        const ar = meta.naturalWidth / meta.naturalHeight;
+        return Math.round(rowHeightPx * drawnHeightCoefficient(meta, 1, uniforms[j]) * ar);
+      };
+      let rowCellH = 0;
       for (let j = 0; j < n; j++) {
+        const drawn = drawnOf(j);
+        modelBoxH[j] = rowHeightPx;
+        modelDrawnH[j] = drawn;
         embeds[j].style.setProperty("flex", `${finalGrows[j]} 1 0%`, "important");
-        embeds[j].style.setProperty("height", `${rowHeightPx}px`, "important");
+        embeds[j].style.setProperty("height", `${drawn}px`, "important");
         const embedImg = embeds[j].querySelector<HTMLImageElement>("img");
         if (embedImg) {
           stripObsidianClasses(embedImg);
-          embedImg.style.setProperty("height", `${rowHeightPx}px`, "important");
+          setImgBoxHeight(embedImg, rowHeightPx);
           setStyleImportant(embedImg, "width", "auto");
           embedImg.addClass(CLASSES.imgAuto);
         }
+        if (drawn > rowCellH) rowCellH = drawn;
       }
+      row.style.height = `${rowCellH > 0 ? rowCellH : rowHeightPx}px`;
     }
 
     applyEmbedOrientations(embeds);
+
+    // ── Diagnostics: one snapshot per row, taken after everything settles ──
+    {
+      const key = `rm-row:${embeds.map((e) => getFileNameFromEmbed(e)).join("|")}`;
+      const orientations = readOrientations(embeds);
+      const modelBox = modelBoxH.slice();
+      const modelDrawn = modelDrawnH.slice();
+      const usedFill = n > 1 && hasScale;
+      scheduleRmSnapshot(key, () => {
+        const members: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < embeds.length; i++) {
+          const img = embeds[i].querySelector<HTMLImageElement>("img");
+          if (!img) continue;
+          members.push(snapshotPayload(
+            rmMemberFrames(embeds[i], img, {
+              word: orientationWord(orientations[i] ?? IDENTITY_STATE),
+              fill: usedFill ? (scales[i] ?? null) : null,
+              share: finalGrows[i] ?? null,
+              boxH: modelBox[i] ?? 0,
+              drawn: modelDrawn[i] ?? 0,
+              expectedScale: null,
+            })
+          ));
+        }
+        return {
+          side: "RM",
+          scope: "row",
+          containerWidth,
+          rowSetH: row.style.height,
+          n,
+          hasScale,
+          members,
+        };
+      });
+    }
 
     const rowDiagnostic = () => {
       try {
@@ -708,6 +1116,25 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
       img.setAttribute("draggable", "false");
     }
     draggableCount++;
+    // The hover ring is drawn on this block, so its rect is what the user sees
+    // as the drop surface; compare it against the embed it wraps.
+    {
+      const blockRect = block.getBoundingClientRect();
+      const embedRect = embed.getBoundingClientRect();
+      log.debug("RM makeDraggable host", {
+        fileName: getFileNameFromEmbed(embed),
+        blockTag: block.tagName,
+        blockClass: block.className,
+        blockW: round2(blockRect.width),
+        blockH: round2(blockRect.height),
+        embedW: round2(embedRect.width),
+        embedH: round2(embedRect.height),
+        offsetTop: round2(embedRect.top - blockRect.top),
+        offsetLeft: round2(embedRect.left - blockRect.left),
+        blockInlineH: block.style.height,
+        embedInlineH: embed.style.height,
+      });
+    }
 
     block.addEventListener("dragstart", (e) => {
       log.debug("ReadingMode dragstart", { sourcePath });

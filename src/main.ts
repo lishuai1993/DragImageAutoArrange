@@ -26,6 +26,7 @@ import { createImageMenuFacade, type ImageMenuFacade } from "./imageMenu/imageMe
 import { findMarkdownViewForElement } from "./imageMenu/imageSource";
 import { installReferencePaste } from "./imageMenu/referencePaste";
 import { logger } from "./logger";
+import { setGeometryProbeEnabled } from "./diagnostics/probe";
 const log = logger.channel("main");
 
 /** The plugin's own slice of `data.json`. Other modules (the image-menu host)
@@ -60,6 +61,7 @@ export default class DragImageAutoArrangePlugin
     menuScalePercent: 100,
     logLevel: "ERROR",
     logToFile: false,
+    geometryProbe: false,
   };
 
   /** Image right-click menu runtime (settings store + facade). */
@@ -79,6 +81,7 @@ export default class DragImageAutoArrangePlugin
     this.settings = await loadSettings(this);
     logger.setMinLevel(this.settings.logLevel);
     logger.setFileEnabled(this.settings.logToFile);
+    setGeometryProbeEnabled(this.settings.geometryProbe);
 
     log.info("Plugin loading", { version: this.manifest.version });
 

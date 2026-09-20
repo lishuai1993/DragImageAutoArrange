@@ -11,10 +11,7 @@ import { attachDiaImageMarkers } from "./imageMarkers";
 import {
   isIdentityOrientation,
   orientationWord,
-  parseOrientationWord,
-  type OrientationState,
 } from "../imageTransform/orientation";
-import { applyOrientationPreview } from "../imageTransform/transformPreview";
 import {
   setImageRowIndex, setImageLineRe,
   getScrollAnchor, getFallbackPct,
@@ -29,10 +26,148 @@ import {
 import { buildImageRowIndex, toLine1 } from "../anchor/viewportAnchor";
 import {
   getFileNameFromEmbed, isImageEmbed,
-  applyStandaloneAlignment,
+  applyStandaloneAlignment, applyStandaloneSize,
   areEmbedsConsecutive,
   waitForImagesThenWrap, makeImagesDraggable,
 } from "./rmFlexRow";
+
+/**
+ * The persistent per-section guard — and, one line down, the flash strip's
+ * predicate: a block holding one of our wrappers has been rendered.
+ * `wrapAsFlexRow` writes `[data-diaa-group]` onto a >=2-image row's wrapper and
+ * `applyStandaloneAlignment` writes `[data-diaa-standalone]` onto a single
+ * image's, so either means a finished pass.
+ */
+function isRenderedBlock(el: HTMLElement): boolean {
+  return el.querySelector("[data-diaa-group], [data-diaa-standalone]") !== null;
+}
+
+// In-flight guard, not a completion mark.  This handler awaits vault I/O and
+// image loads, so Obsidian can re-invoke the post-processor for the same section
+// while the first run is still going; the mark lives for that run and no longer
+// (see `SectionPass` for the part of the run that outlasts the handler).  A
+// *persistent* mark is what `isRenderedBlock` already gives us, and keeping one
+// here is what loses a section: Obsidian rebuilds a section's children in place,
+// so a section rendered before but not wrapped now comes back wrapper-less (the
+// persistent check passes) while a leftover mark would still bail on it —
+// silently, before the "invoked" log — leaving the real reading view to render
+// that section natively (the images stack vertically, and the mode-switch flash
+// then has no row marker to be stripped by, so it shows in the blank space).
+const _inFlight = new WeakSet<HTMLElement>();
+
+/** Whether a render of `el` is in flight right now. Exported for its test. */
+export function isRenderInFlight(el: HTMLElement): boolean {
+  return _inFlight.has(el);
+}
+
+/** A section pass's handle.  The handler returns as soon as the DOM is ours, but
+ *  its images may still be loading and its row still to be wrapped; `tail` is
+ *  where it names that leftover work, so the guard can hold the mark for it. */
+export interface SectionPass {
+  tail: Promise<void> | null;
+}
+
+/** Run a section handler under the guard pair above.  Exported for its own
+ *  regression test — the defect it fixes is invisible from the outside. */
+export function guardSection(
+  handler: (
+    el: HTMLElement,
+    ctx: MarkdownPostProcessorContext,
+    pass: SectionPass
+  ) => Promise<void>
+): (el: HTMLElement, ctx: MarkdownPostProcessorContext) => Promise<void> {
+  return async (el, ctx) => {
+    if (isRenderedBlock(el)) {
+      log.debug("ReadingMode processor skipped", {
+        reason: "already-wrapped", sourcePath: ctx.sourcePath,
+      });
+      return;
+    }
+    if (_inFlight.has(el)) {
+      log.debug("ReadingMode processor skipped", {
+        reason: "in-flight", sourcePath: ctx.sourcePath,
+      });
+      return;
+    }
+    _inFlight.add(el);
+    const pass: SectionPass = { tail: null };
+    try {
+      await handler(el, ctx, pass);
+    } catch (e) {
+      _inFlight.delete(el);
+      throw e;
+    }
+    // Hold the mark until the pass's tail settles: a re-invoke in that window
+    // would see the embeds still unwrapped and wrap them a second time.
+    const tail = pass.tail ?? Promise.resolve();
+    void tail.then(
+      () => _inFlight.delete(el),
+      () => _inFlight.delete(el)
+    );
+  };
+}
+
+// ── Obsidian's mode-switch flash, kept off the rows ────────────────────
+// Restoring the reading view's scroll position highlights the block at the
+// target line by adding `.is-flashing`, which paints
+// `background-color: var(--text-highlight-bg) !important` — amber under most
+// themes — and drops the class three seconds later (obsidian.asar).  The band
+// is painted by the flashing element itself, so its pictures cover it and only
+// the image-free parts of the block show through: for a flex row that is the
+// letterbox inside each slot plus the gaps beside them, which is exactly where
+// the user sees a yellow blink on a mode switch.  An `!important` background on
+// an ancestor cannot be outranked from a descendant, so the class is what has to
+// go — and since it is applied *after* the section is rendered, clearing it in
+// this pass is not enough: watch for it for as long as the flash can live.
+
+const FLASH_CLASS = "is-flashing";
+/** The flash's own lifetime in Obsidian is 3s; watch slightly past it. */
+const FLASH_WATCH_MS = 3500;
+/** Catch-up sweep period.  The observer below removes a flash in the same task
+ *  that adds it, but a row can still be mid-wrap when the flash lands (the row
+ *  marker is a precondition of the strip), so the window is also swept. */
+const FLASH_SWEEP_MS = 150;
+
+let _flashObserver: MutationObserver | null = null;
+let _flashSweep: number | null = null;
+
+function stripFlashFromRows(root: ParentNode): void {
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>(`.${FLASH_CLASS}`))) {
+    if (isRenderedBlock(el)) el.classList.remove(FLASH_CLASS);
+  }
+}
+
+function stopFlashWatch(): void {
+  _flashObserver?.disconnect();
+  _flashObserver = null;
+  if (_flashSweep !== null) {
+    window.clearInterval(_flashSweep);
+    _flashSweep = null;
+  }
+}
+
+/** Clear the mode-switch flash from any block holding a flex row, and keep
+ *  clearing it while the flash can still arrive.  Idempotent: the watch is
+ *  shared, so repeated calls from a multi-section document only sweep. */
+export function suppressRowFlash(): void {
+  if (typeof window === "undefined") return;
+  stripFlashFromRows(document.body);
+  if (_flashObserver) return;
+  _flashObserver = new MutationObserver((records) => {
+    for (const r of records) {
+      const target = r.target as HTMLElement | null;
+      if (!target?.classList?.contains(FLASH_CLASS)) continue;
+      if (isRenderedBlock(target)) target.classList.remove(FLASH_CLASS);
+    }
+  });
+  _flashObserver.observe(document.body, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  _flashSweep = window.setInterval(() => stripFlashFromRows(document.body), FLASH_SWEEP_MS);
+  window.setTimeout(stopFlashWatch, FLASH_WATCH_MS);
+}
 
 /**
  * Create a MarkdownPostProcessor that:
@@ -40,49 +175,15 @@ import {
  * 2. Makes standalone images draggable — drop near another image to merge.
  * 3. Within a flex row, images are draggable for reorder.
  */
-// Per-section re-entrancy guard: the post-processor fires per section, and
-// image wrapping can trigger DOM mutations that cause Obsidian to re-invoke it
-// within the same tick. Prevent duplicate runs for the same section element.
-// L2: declared `let` so a warmup (background) render pass can release its marks
-// via releasePostProcessingMarks() — otherwise a warmup that touched-but-did-not-
-// finish-wrapping a section permanently blocks the subsequent real RM render
-// (cross-pass mark leak). See warmupProbe.finish() / L3.
-let _postProcessing = new WeakSet<HTMLElement>();
-
-/**
- * L2/L3: release re-entry marks accumulated during a warmup render pass.
- * Called from warmupProbe.finish() so sections a warmup touched but did not fully
- * wrap are no longer skipped by the real RM render. Sections already fully wrapped
- * stay skipped via the L1 completion-marker short-circuit in the processor entry.
- */
-export function releasePostProcessingMarks(): void {
-  _postProcessing = new WeakSet<HTMLElement>();
-}
-
 export function createReadingModeProcessor(
   app: App,
   getOptions: () => ImageRowOptions
 ) {
-  return async (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-    // L1: short-circuit sections already fully rendered. wrapAsFlexRow produces a
-    // [data-diaa-group] wrapper (rmFlexRow.ts) for >=2-image rows;
-    // applyStandaloneAlignment produces a [data-diaa-standalone] wrapper for single
-    // images. Presence of either means a prior pass already wrapped this section,
-    // so skip to avoid double-wrap. This also makes the guard state-aware: a warmup
-    // pass that completed wrapping is correctly skipped even after L2 resets the
-    // WeakSet (only incomplete sections get reprocessed).
-    if (el.querySelector("[data-diaa-group], [data-diaa-standalone]")) {
-      log.debug("ReadingMode processor skipped", {
-        reason: "already-wrapped", sourcePath: ctx.sourcePath,
-      });
-      return;
-    }
-    // Intra-pass dedup: Obsidian may re-invoke the post-processor for the same
-    // section element within the same tick (129b2aa fix preserved). The WeakSet is
-    // reset between render passes by releasePostProcessingMarks() (L2/L3).
-    if (_postProcessing.has(el)) return;
-    _postProcessing.add(el);
-
+  return guardSection(async (
+    el: HTMLElement,
+    ctx: MarkdownPostProcessorContext,
+    pass: SectionPass
+  ) => {
     const allInternalEmbeds = Array.from(
       el.querySelectorAll<HTMLElement>(".internal-embed")
     );
@@ -103,6 +204,8 @@ export function createReadingModeProcessor(
     });
 
     if (imageEmbeds.length === 0) { return; }
+
+    suppressRowFlash();
 
     const options = getOptions();
 
@@ -212,6 +315,11 @@ export function createReadingModeProcessor(
           scale: parsed.display.kind === "multi" && parsed.display.fill != null
             ? String(parsed.display.fill)
             : "(none)",
+          // The turn the renderers replay, and whether the attribute can carry
+          // it — an identity orientation is deliberately never written.
+          orientation: isIdentityOrientation(parsed.orientation)
+            ? "(identity)"
+            : orientationWord(parsed.orientation),
         },
       });
       if (parsed.display.kind === "multi") {
@@ -295,8 +403,20 @@ export function createReadingModeProcessor(
             // Reading Mode persists nothing, so a rotation here cannot pin the
             // row's width — it stays a read-only surface.
             screenWidth: null,
+            memberFill: null,
           });
-          applyEmbedOrientation(embed, img);
+          // A standalone row carries its size in `|S|W`, and the S flag decides
+          // which frame the width is read from — the manual pixel width, or the
+          // size setting.  The sizing path also replays the orientation (it has
+          // to: the fit scale follows from the drawn size).
+          applyStandaloneSize(
+            embed,
+            img,
+            parsed != null && parsed.display.kind === "single-manual"
+              ? parsed.display.widthPx
+              : null,
+            options
+          );
         }
       }
     }
@@ -353,31 +473,13 @@ export function createReadingModeProcessor(
       driveViewportTransition(app, "rm-after-restore");
     };
     if (wrapPromises.length > 0) {
-      void Promise.all(wrapPromises).then(afterRender);
+      // Hand the guard the wrap as this pass's tail: the mark has to outlive the
+      // handler, since the embeds are only wrapped once their images load.
+      pass.tail = Promise.all(wrapPromises).then(afterRender);
     } else {
       afterRender();
     }
-  };
-}
-
-// ── Orientation render ───────────────────────────────────────
-
-/**
- * Replay an embed's persisted rotate/flip as a CSS transform on its <img>, the
- * Reading Mode mirror of the LP widget's `applyOrientationTransforms`.  The
- * quarter-turn fit-scale needs the image laid out, so a not-yet-complete image
- * is re-applied once on load; identity embeds carry no attribute and are left
- * untouched.
- */
-function applyEmbedOrientation(embed: HTMLElement, img: HTMLImageElement): void {
-  const state: OrientationState | null = parseOrientationWord(
-    embed.getAttribute("data-diaa-orientation") ?? ""
-  );
-  if (!state || isIdentityOrientation(state)) return;
-  applyOrientationPreview(img, state);
-  if (!img.complete) {
-    img.addEventListener("load", () => applyOrientationPreview(img, state), { once: true });
-  }
+  });
 }
 
 // ── Group detection ──────────────────────────────────────────
