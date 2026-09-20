@@ -2,12 +2,13 @@
 
 /* On the `!important`s in this file
    ---------------------------------------------------------------------------
-   One kind is left, with a note at its site:
-
-   Settings buttons: the theme's `--input-shadow` ring, which a theme paints
-   with its own selectors and this plugin cannot outrank by specificity.  Its
-   hover variant cannot move inline at all — `:hover` is not something an inline
-   declaration can express — which is what keeps this the last holdout.
+   There are none left.  The last holdout was the settings-button ring below:
+   its competitor is the platform's or the theme's stylesheet, so it was kept
+   deliberately rather than left un-cleaned, and dropping it needed a reading
+   from a live window rather than a static one.  That reading showed the only
+   two rules touching a button's `box-shadow` / `border`
+   (`button:not(.clickable-icon)` and `button`) to be at (0,1,1) and (0,0,1),
+   neither `!important` — so the scoped selectors win on specificity alone.
 
    Everything else that used to live here is written inline by the code that
    owns it: the flex item styling and the images' geometry (rmFlexRow.ts), the
@@ -20,12 +21,7 @@
 
    The mobile media query is deliberately absent from this list: the layout
    writes heights and flex inline, which no plain stylesheet declaration can
-   outrank, so below the breakpoint it stands down and clears them instead.
-
-   The remaining ring's competitor is the platform's or the theme's stylesheet,
-   which this plugin does not inspect.  Dropping it is a change that needs a
-   visual check in Obsidian, not a static one — so treat it as deliberate, not
-   as an un-cleaned leftover. */
+   outrank, so below the breakpoint it stands down and clears them instead. */
 
 .diaa-row {
   display: flex;
@@ -282,36 +278,65 @@
   transition: transform 0.1s ease, background-color 0.1s ease, color 0.1s ease;
 }
 
-/* A button's frame is not a `border` — it is a 1px inset ring inside the
-   `--input-shadow` list (see `button:not(.clickable-icon)`), which over the
-   fill reads as a dark edge. Repainting that ring in the button's own colour
-   hides it: shadow layers paint first-on-top, so an opaque ring of the same
-   geometry covers the theme's, while the rest of the list stays underneath and
-   any drop shadow survives. The colour has to be the *fill's* variable, not
-   `--interactive-accent`: a theme owns the CTA fill (`GitHub Theme` paints it
-   from `--color-btn-primary-bg`) and its accent can be a different hue, which
-   is how a green button ended up ringed in blue. Theme-less Obsidian fills the
-   CTA from the accent, hence the fallbacks. The hover colour is mirrored for
-   the same reason; the keyboard focus ring (`button:focus-visible`) is left
-   alone by the `:not()`. */
+/* A button's frame is not a `border` — it is a 1px inset ring inside the theme's
+   `--input-shadow` list (see `button:not(.clickable-icon)`), which over the fill
+   reads as a dark edge. This rule replaces that `box-shadow` outright — it is one
+   property, so nothing of the theme's list is left behind — and draws its own 1px
+   ring in the button's own colour, which reads as no edge at all. The colour has
+   to be the *fill's* variable, not `--interactive-accent`: a theme owns the CTA
+   fill (`GitHub Theme` paints it from `--color-btn-primary-bg`) and its accent
+   can be a different hue, which is how a green button ended up ringed in blue.
+   Theme-less Obsidian fills the CTA from the accent, hence the fallbacks.
+
+   The theme's shadow variables are deliberately not referenced, here or on hover.
+   They can resolve to the literal `none` — measured in a popout window, where the
+   settings tab renders in a second document — and `none` as one layer of a
+   `box-shadow` list invalidates the *whole* declaration, which silently took the
+   ring and the hover veil with it. Nothing in this file depends on them now, and
+   the price is the theme's soft drop shadow, which shipped in the same list.
+
+   The keyboard focus ring (`button:focus-visible`) is left alone by the `:not()`.
+   The declaration needs no `!important`: the only competitor on a button is
+   `button:not(.clickable-icon)` for the shadow and `button` for the border, at
+   (0,1,1) and (0,0,1), and neither is `!important`, so our (0,3,0) already wins —
+   measured in a live window, not assumed. */
 .diaa-settings .diaa-setting-btn:not(:focus-visible) {
-  border: none !important;
-  box-shadow: inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent)),
-    var(--input-shadow) !important;
+  border: none;
+  box-shadow: inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent));
 }
 
-.diaa-settings .diaa-setting-btn:not(:focus-visible):hover,
-.diaa-settings .diaa-setting-btn:not(:focus-visible).mobile-tap {
-  box-shadow: inset 0 0 0 1px var(--color-btn-primary-hover-bg, var(--interactive-accent-hover)),
-    var(--input-shadow-hover) !important;
+/* Hover has to read *heavier* than rest, which a theme's hover fill cannot be
+   trusted to do — several lighten it. So the fill is pinned back to the rest
+   colour and the whole box is darkened by one veil, drawn as the *first* shadow
+   layer: layers paint first-on-top, so the veil sits over the ring below it,
+   and an inset shadow is painted under the content, so the white label is left
+   alone. The opacity reproduces GitHub Theme's own light-mode step, which puts
+   the result within 3/255 of that theme's hover fill; every other theme turns
+   into the same fixed 9% darkening. The ring keeps the rest colour for the same
+   reason the fill does, and drops its old `--interactive-accent-hover`
+   fallback, which could disagree with the fill. Both layers are literals and the
+   fill variable, so this declaration never depended on a theme shadow variable —
+   which is why it kept working in the popout window while the rest rule's ring
+   silently vanished. The `:not(.diaa-btn-pressed)` keeps the pressed flash —
+   whose green fill is written inline — out of it. */
+.diaa-settings .diaa-setting-btn:not(:focus-visible):not(.diaa-btn-pressed):hover,
+.diaa-settings .diaa-setting-btn:not(:focus-visible):not(.diaa-btn-pressed).mobile-tap {
+  background-color: var(--color-btn-primary-bg, var(--interactive-accent));
+  box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.09),
+    inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent));
 }
 
 /* The pressed flash's fill and text colour are written inline by
    flashResetFeedback (settings.ts) — the theme's CTA rule owns those properties
-   and no stylesheet declaration outranks it. Only the momentary shrink lives
-   here, because nothing else competes for `transform`. */
-.diaa-setting-btn.diaa-btn-pressed {
+   and no stylesheet declaration outranks it. The ring has to follow that fill:
+   left alone it keeps the rest colour, and the button reads as a green face
+   inside a rim of the wrong colour. So it is repainted here from the same
+   variable the inline fill uses — a theme that retints `--color-green` moves both
+   — and the selector is lifted to (0,4,0) to clear the rest rule's (0,3,0). The
+   shrink rides along unchanged, because nobody else competes for `transform`. */
+.diaa-settings .diaa-setting-btn:not(:focus-visible).diaa-btn-pressed {
   transform: scale(0.96);
+  box-shadow: inset 0 0 0 1px var(--color-green);
 }
 
 /* Settings tab: long descriptions span the full card width below the label
