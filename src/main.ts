@@ -23,6 +23,11 @@ import { ImageRowOptions } from "./types";
 import { openUnifiedImageMenu } from "./imageMenu/unifiedContextMenu";
 import { closeAllMenus, setMenuScale } from "./imageMenu/menuUi";
 import { createImageMenuFacade, type ImageMenuFacade } from "./imageMenu/imageMenuHost";
+import {
+  toggleContextMenu,
+  TOGGLE_CONTEXT_MENU_COMMAND_ID,
+  TOGGLE_CONTEXT_MENU_COMMAND_NAME,
+} from "./imageMenu/contextMenuToggle";
 import { findMarkdownViewForElement } from "./imageMenu/imageSource";
 import { installReferencePaste } from "./imageMenu/referencePaste";
 import { logger } from "./logger";
@@ -86,14 +91,23 @@ export default class DragImageAutoArrangePlugin
     log.info("Plugin loading", { version: this.manifest.version });
 
     // ── Unified image context menu ────────────────────────────────────
-    // Registered at document level in capture phase so it runs BEFORE any
-    // other plugin's contextmenu handler. Routes every image inside a markdown
-    // note to the unified menu; everything else keeps Obsidian's native menu.
+    // Registered on WINDOW in capture phase so it runs BEFORE any other
+    // plugin's contextmenu handler. Routes every image inside a markdown note
+    // to the unified menu; everything else keeps Obsidian's native menu.
+    //
+    // Window, not document: capture order is window → document → target, and
+    // listeners sharing a node and phase run in registration order. A rival
+    // plugin that also listens in capture — or one loaded after us, as an
+    // off→on toggle reload makes us — would otherwise get its listener in
+    // first, and our stopImmediatePropagation could no longer stop a handler
+    // that had already run, so both menus opened. Window capture is upstream
+    // of every document listener, so nothing can precede us.
+    //
     // Registered via registerDomEvent so Obsidian detaches the handler on
     // disable — otherwise a disable→enable toggle reload (the supported way to
     // pick up a rebuilt main.js without restarting Obsidian) would stack a
     // second capture handler and open the image menu twice per right-click.
-    this.registerDomEvent(document, "contextmenu", (e) => {
+    this.registerDomEvent(window, "contextmenu", (e) => {
       const target = e.target as HTMLElement;
       if (!target?.tagName) return;
 
@@ -101,6 +115,13 @@ export default class DragImageAutoArrangePlugin
         | HTMLImageElement
         | null;
       if (!img || !this.imageMenu) return;
+
+      // Master switch: with the menu off, DIAA claims nothing at all — the
+      // event is left alone so Obsidian's own menu, or another plugin's,
+      // shows as it normally would. Checked before every other gate, because
+      // it is a bypass and not another condition on showing our menu.
+      if (!this.imageMenu.settings.enableContextMenu) return;
+
       // Only notes we can write into — canvas/other surfaces keep the native menu.
       if (!findMarkdownViewForElement(this.app, img)) return;
 
@@ -108,6 +129,16 @@ export default class DragImageAutoArrangePlugin
       if (!this.settings.enableReadingModeContextMenu && img.closest(".markdown-preview-view")) {
         return;
       }
+
+      // Geometry of a menu fight: `defaultPrevented` says a handler upstream of
+      // us already claimed the event, and an open `.menu` says one is on screen
+      // — either means a second menu is competing. The target's own document,
+      // not the global one, so a popped-out window is counted correctly.
+      const doc = img.ownerDocument;
+      log.debug("LOG_IMAGE_CONTEXTMENU_CLAIM", {
+        defaultPrevented: e.defaultPrevented,
+        openMenus: doc.querySelectorAll(".menu").length,
+      });
 
       e.preventDefault();
       e.stopPropagation();
@@ -262,6 +293,15 @@ export default class DragImageAutoArrangePlugin
     const imageMenu = await createImageMenuFacade(this);
     this.imageMenu = imageMenu;
     log.info("Image context menu feature set ready");
+
+    // The way back for anyone who switches the menu off from the menu itself —
+    // its palette label is what the switch-off notice puts on the clipboard, so
+    // the user can find this command in 设置 → 快捷键 without recalling it.
+    this.addCommand({
+      id: TOGGLE_CONTEXT_MENU_COMMAND_ID,
+      name: TOGGLE_CONTEXT_MENU_COMMAND_NAME,
+      callback: () => void toggleContextMenu(imageMenu),
+    });
 
     // 设置页要编辑图片菜单的设置项（文件信息 / 删除前确认 / 文件操作），因此
     // 等门面就绪后再注册，把设置读写面交给它。

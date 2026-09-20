@@ -298,9 +298,17 @@
    The keyboard focus ring (`button:focus-visible`) is left alone by the `:not()`.
    The declaration needs no `!important`: the only competitor on a button is
    `button:not(.clickable-icon)` for the shadow and `button` for the border, at
-   (0,1,1) and (0,0,1), and neither is `!important`, so our (0,3,0) already wins —
-   measured in a live window, not assumed. */
-.diaa-settings .diaa-setting-btn:not(:focus-visible) {
+   (0,1,1) and (0,0,1), and neither is `!important`, so this rule already wins on
+   specificity — measured in a live window, not assumed.
+
+   The class name is written twice in the selector on purpose: that is the
+   hardening step, not a typo. The second `.diaa-setting-btn` buys a class slot,
+   which puts the rule beyond any theme rule below (0,4,·) — none exists today
+   (the strongest competitor sits at (0,2,0)), so this changes nothing observable;
+   the point is that a future theme cannot quietly take the ring back. The hover
+   and pressed rules below carry the same doubling, so their order against this
+   one is unchanged. */
+.diaa-settings .diaa-setting-btn.diaa-setting-btn:not(:focus-visible) {
   border: none;
   box-shadow: inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent));
 }
@@ -318,9 +326,10 @@
    fill variable, so this declaration never depended on a theme shadow variable —
    which is why it kept working in the popout window while the rest rule's ring
    silently vanished. The `:not(.diaa-btn-pressed)` keeps the pressed flash —
-   whose green fill is written inline — out of it. */
-.diaa-settings .diaa-setting-btn:not(:focus-visible):not(.diaa-btn-pressed):hover,
-.diaa-settings .diaa-setting-btn:not(:focus-visible):not(.diaa-btn-pressed).mobile-tap {
+   whose green fill is written inline — out of it. The class is doubled as on the
+   rest rule. */
+.diaa-settings .diaa-setting-btn.diaa-setting-btn:not(:focus-visible):not(.diaa-btn-pressed):hover,
+.diaa-settings .diaa-setting-btn.diaa-setting-btn:not(:focus-visible):not(.diaa-btn-pressed).mobile-tap {
   background-color: var(--color-btn-primary-bg, var(--interactive-accent));
   box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.09),
     inset 0 0 0 1px var(--color-btn-primary-bg, var(--interactive-accent));
@@ -332,9 +341,10 @@
    left alone it keeps the rest colour, and the button reads as a green face
    inside a rim of the wrong colour. So it is repainted here from the same
    variable the inline fill uses — a theme that retints `--color-green` moves both
-   — and the selector is lifted to (0,4,0) to clear the rest rule's (0,3,0). The
-   shrink rides along unchanged, because nobody else competes for `transform`. */
-.diaa-settings .diaa-setting-btn:not(:focus-visible).diaa-btn-pressed {
+   — and the selector carries the same doubled class as the rules above, which
+   clears the rest rule's step. The shrink rides along unchanged, because nobody
+   else competes for `transform`. */
+.diaa-settings .diaa-setting-btn.diaa-setting-btn:not(:focus-visible).diaa-btn-pressed {
   transform: scale(0.96);
   box-shadow: inset 0 0 0 1px var(--color-green);
 }
@@ -593,6 +603,27 @@
   height: 1px;
   margin: 2px 4px;
   background: var(--background-modifier-border);
+}
+
+/* The switch-off notice's bullet list. Themes style `ul` freely (indent,
+   markers, vertical margins), any of which would push the notice off its
+   three-line shape, so the list is pinned to a plain disc at a fixed indent
+   and stripped of the margins that would double-space it. */
+.diaa-notice-list {
+  margin: 0;
+  padding-left: 1.15em;
+  list-style: disc;
+}
+
+.diaa-notice-list li {
+  margin: 0;
+}
+
+/* The bullet, not just the text: themes commonly dim `::marker` (a faint
+   grey), which vanishes against a dark notice background. Pinned to the
+   item's own colour so bullet and text always read the same contrast. */
+.diaa-notice-list li::marker {
+  color: inherit;
 }
 
 /* ── Settings: vault-wide maintenance passes ──────────────────────────────

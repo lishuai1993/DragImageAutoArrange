@@ -299,6 +299,7 @@ describe('image menu section definitions', () => {
 
     expect(group.heading).toBe('图片右键菜单设置');
     expect((group.items ?? []).map((item) => item.name)).toEqual([
+      '启用图片右键菜单',
       '显示文件信息',
       '删除前确认',
       '文件操作',
@@ -306,7 +307,7 @@ describe('image menu section definitions', () => {
     ]);
     // Every row needs imperative code (a button, a pair of arrows), so none may
     // be handed over as a pure `control` definition the framework renders alone.
-    expect(rowsOf(group)).toHaveLength(3 + operationNames.length);
+    expect(rowsOf(group)).toHaveLength(4 + operationNames.length);
   });
 
   it('keeps the stored operation order', () => {
@@ -318,6 +319,7 @@ describe('image menu section definitions', () => {
     const group = groupOf(imageMenuSectionDefinitions(menuBridge(settings, vi.fn()), vi.fn()));
 
     expect((group.items ?? []).map((item) => item.name)).toEqual([
+      '启用图片右键菜单',
       '显示文件信息',
       '删除前确认',
       '文件操作',
@@ -406,7 +408,7 @@ describe('image menu section, imperative path', () => {
       '图片右键菜单设置'
     );
     const group = must(containerEl, '.diaa-settings-group');
-    expect(group.querySelectorAll('.setting-item')).toHaveLength(3 + operationNames.length);
+    expect(group.querySelectorAll('.setting-item')).toHaveLength(4 + operationNames.length);
   });
 
   it('rebuilds its group in the new order after a reorder', async () => {
@@ -419,7 +421,7 @@ describe('image menu section, imperative path', () => {
     const second = FILE_OPERATION_LABELS[order[1]];
     const rows = () =>
       Array.from(group.querySelectorAll('.setting-item-name')).map((el) => el.textContent);
-    expect(rows().indexOf(second)).toBe(4);
+    expect(rows().indexOf(second)).toBe(5);
 
     const target = Array.from(group.querySelectorAll<HTMLElement>('.setting-item')).find(
       (row) => row.querySelector('.setting-item-name')?.textContent === second
@@ -427,7 +429,7 @@ describe('image menu section, imperative path', () => {
     if (!target) throw new Error(`no row named ${second}`);
     must<HTMLButtonElement>(target, 'button').click();
 
-    await vi.waitFor(() => expect(rows().indexOf(second)).toBe(3));
+    await vi.waitFor(() => expect(rows().indexOf(second)).toBe(4));
   });
 });
 

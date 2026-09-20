@@ -38,6 +38,7 @@ import {
     type FileOperationContext,
 } from './menuBuilder';
 import { DomMenu, closeAllMenus, createMenuRowEl, attachHoverSubmenu } from './menuUi';
+import { toggleContextMenu } from './contextMenuToggle';
 import type { SingleResetTarget } from '../imageRender/imageMarkers';
 import type { ImageMenuFacade } from './imageMenuHost';
 import {
@@ -605,6 +606,15 @@ export async function openUnifiedImageMenu(
         addSeparatorIfNeeded(menu);
         addFileOperationMenuItems(menu, ctx, settings, remote);
     }
+
+    // ── Group 4: the master switch ─────────────────────────────────────────
+    // One-way by nature: with the menu off this row can no longer be reached,
+    // so it never has to offer the way back — that is what the clipboard
+    // hand-off on switch-off is for.
+    addSeparatorIfNeeded(menu);
+    addMenuItem(menu, MENU_TEXT.disableContextMenu, () => toggleContextMenu(facade), {
+        icon: 'eye-off',
+    });
 
     if (seq !== buildSeq) return;
     if (!menu.rootEl.hasChildNodes()) return;

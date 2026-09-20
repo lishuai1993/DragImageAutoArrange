@@ -22,6 +22,8 @@ export const CLASSES = {
   rowInline: `${CSS_PREFIX}-row-inline`,
   /** Obsidian wrapper element neutralized to `display: contents`. */
   contents: `${CSS_PREFIX}-contents`,
+  /** The bullet list the switch-off notice renders inside its notice element. */
+  noticeList: `${CSS_PREFIX}-notice-list`,
 } as const;
 
 export type Alignment = "left" | "center" | "right";

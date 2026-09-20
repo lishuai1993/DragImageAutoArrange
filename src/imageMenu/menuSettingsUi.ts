@@ -72,6 +72,18 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
 
     const rows: SectionRow[] = [
         {
+            name: '启用图片右键菜单',
+            desc: '关闭后，右键图片不再弹出 DIAA 菜单，交还 Obsidian 与其他插件处理；可用命令或菜单项快速切换。',
+            body: (setting) => {
+                setting.addToggle((toggle) =>
+                    toggle.setValue(settings.enableContextMenu).onChange((value) => {
+                        settings.enableContextMenu = value;
+                        void bridge.saveSettings();
+                    })
+                );
+            },
+        },
+        {
             name: '显示文件信息',
             desc: '在菜单顶部显示图片的文件名、当前缩放比例与原始像素尺寸。',
             body: (setting) => {

@@ -1,0 +1,225 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Tests for the image right-click menu's master switch: the state write plus
+ * the two shut-off concerns — the clipboard hand-off of the command that turns
+ * the menu back on, and the notice that explains it. The settings row's silence
+ * is part of the contract too, since it shares this write path.
+ *
+ * The switch-off notice is a real bullet list, so the assertions read the
+ * fragment's `ul > li` texts rather than splitting a string: the shape is the
+ * requirement, not just the words.
+ *
+ * The clipboard stub lives on `navigator`, is swappable per test, and can be
+ * made to refuse: a refused clipboard must not undo the switch, nor let the
+ * notice claim a copy that never happened.
+ *
+ * This file also re-installs the platform's create-AND-append `document.createDiv`.
+ * The shared setup's double only creates and returns, which is exactly why the
+ * original `document.createDiv({text})` bug shipped green — see the lock at the
+ * bottom, which fails the moment anyone reaches for that helper again.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const h = vi.hoisted(() => ({
+    notices: [] as (string | DocumentFragment)[],
+    copied: [] as string[],
+    refuse: false,
+}));
+
+vi.mock('obsidian', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('obsidian')>();
+    return {
+        ...actual,
+        Notice: class {
+            // Kept as handed over: the switch-off notice is a fragment, and its
+            // shape is under test — flattening here would hide what is asserted.
+            constructor(message: string | DocumentFragment) {
+                h.notices.push(message);
+            }
+        },
+    };
+});
+
+/** The notice's lines. A fragment carries them as the bullets of its list. */
+function linesOf(message: string | DocumentFragment): string[] {
+    if (typeof message === 'string') return [message];
+    return Array.from(message.querySelectorAll('li')).map((item) => item.textContent ?? '');
+}
+
+/**
+ * `Node.prototype.createEl` forces `parent = this` before handing over to the
+ * global createEl, so on `document` the helper's "create" is really an
+ * appendChild — and a second element on a document throws HierarchyRequestError.
+ * The shared double omits the append, hiding that. Reinstalled here so a
+ * regression to `document.createDiv({text})` reddens this file.
+ */
+function installPlatformCreateDiv(): void {
+    Object.defineProperty(document, 'createDiv', {
+        configurable: true,
+        writable: true,
+        value: function (
+            this: Document,
+            o?: { cls?: string | string[]; text?: string } | string
+        ): HTMLElement {
+            const el = document.createElement('div');
+            if (typeof o === 'string') el.className = o;
+            else if (o) {
+                if (o.cls) el.className = Array.isArray(o.cls) ? o.cls.join(' ') : o.cls;
+                if (o.text !== undefined) el.textContent = o.text;
+            }
+            this.appendChild(el);
+            return el;
+        },
+    });
+}
+
+import {
+    TOGGLE_CONTEXT_MENU_COMMAND_ID,
+    TOGGLE_CONTEXT_MENU_COMMAND_NAME,
+    TOGGLE_CONTEXT_MENU_PALETTE_LABEL,
+    setContextMenuEnabled,
+    toggleContextMenu,
+} from '../src/imageMenu/contextMenuToggle';
+import { DEFAULT_IMAGE_MENU_SETTINGS } from '../src/imageMenu/settingsModel';
+import type { ImageMenuFacade } from '../src/imageMenu/imageMenuHost';
+
+function facadeWith(enableContextMenu: boolean) {
+    const settings = { ...DEFAULT_IMAGE_MENU_SETTINGS, enableContextMenu };
+    const saveSettings = vi.fn(async () => {});
+    const facade = { settings, saveSettings } as unknown as ImageMenuFacade;
+    return { facade, settings, saveSettings };
+}
+
+const createDivInSetup = (document as unknown as { createDiv: unknown }).createDiv;
+
+beforeEach(() => {
+    h.notices.length = 0;
+    h.copied.length = 0;
+    h.refuse = false;
+    installPlatformCreateDiv();
+    Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+            writeText: async (text: string) => {
+                if (h.refuse) throw new Error('clipboard denied');
+                h.copied.push(text);
+            },
+        },
+    });
+});
+
+afterEach(() => {
+    (document as unknown as { createDiv: unknown }).createDiv = createDivInSetup;
+    Reflect.deleteProperty(navigator, 'clipboard');
+});
+
+describe('the command this switch hands out', () => {
+    it('names the command as the palette renders it', () => {
+        expect(TOGGLE_CONTEXT_MENU_COMMAND_ID).toBe('toggle-image-context-menu');
+        expect(TOGGLE_CONTEXT_MENU_COMMAND_NAME).toBe('Toggle image context menu');
+        expect(TOGGLE_CONTEXT_MENU_PALETTE_LABEL).toBe(
+            `Drag Image Auto Arrange: ${TOGGLE_CONTEXT_MENU_COMMAND_NAME}`
+        );
+    });
+});
+
+describe('the notice building helper', () => {
+    it('renders the lines as one bullet list, not as text', async () => {
+        const { facade } = facadeWith(true);
+
+        await setContextMenuEnabled(facade, false, true);
+
+        const message = h.notices[0];
+        expect(typeof message).not.toBe('string');
+        const fragment = message as DocumentFragment;
+        const lists = fragment.querySelectorAll('ul');
+        expect(lists).toHaveLength(1);
+        expect(lists[0].className).toContain('diaa-notice-list');
+        expect(fragment.querySelectorAll('li')).toHaveLength(3);
+    });
+
+    it('locks the create-AND-append trap that hid the missing notice', () => {
+        // Under the platform's semantics a detached element is impossible to get
+        // from `document.createDiv`; the regression that swallowed the notice had
+        // to throw here. If this stops throwing, the double is back and the trap
+        // is unguarded again.
+        let thrown: unknown;
+        try {
+            (document as unknown as { createDiv(o: { text: string }): unknown }).createDiv({
+                text: '游离行',
+            });
+        } catch (error) {
+            thrown = error;
+        }
+        expect((thrown as DOMException | undefined)?.name).toBe('HierarchyRequestError');
+    });
+});
+
+describe('setContextMenuEnabled', () => {
+    it('writes the switch and saves, silently, when not announcing', async () => {
+        const { facade, settings, saveSettings } = facadeWith(true);
+
+        await setContextMenuEnabled(facade, false, false);
+
+        expect(settings.enableContextMenu).toBe(false);
+        expect(saveSettings).toHaveBeenCalledTimes(1);
+        expect(h.notices).toEqual([]);
+        expect(h.copied).toEqual([]);
+    });
+
+    it('announces an enable without touching the clipboard', async () => {
+        const { facade, settings } = facadeWith(false);
+
+        await setContextMenuEnabled(facade, true, true);
+
+        expect(settings.enableContextMenu).toBe(true);
+        expect(h.notices).toEqual(['图片右键菜单已开启']);
+        expect(h.copied).toEqual([]);
+    });
+
+    it('hands the way back to the clipboard when switched off, and says so', async () => {
+        const { facade } = facadeWith(true);
+
+        await setContextMenuEnabled(facade, false, true);
+
+        expect(h.copied).toEqual([TOGGLE_CONTEXT_MENU_PALETTE_LABEL]);
+        expect(h.notices).toHaveLength(1);
+        expect(linesOf(h.notices[0])).toEqual([
+            '图片右键菜单已关闭',
+            `开启命令「${TOGGLE_CONTEXT_MENU_PALETTE_LABEL}」已复制到剪贴板`,
+            '在「设置 → 快捷键」中搜索该命令并绑定快捷键，即可随时重新开启。',
+        ]);
+    });
+
+    it('still switches off when the clipboard refuses, without claiming a copy', async () => {
+        const { facade, settings } = facadeWith(true);
+        h.refuse = true;
+
+        await setContextMenuEnabled(facade, false, true);
+
+        expect(settings.enableContextMenu).toBe(false);
+        expect(h.copied).toEqual([]);
+        expect(h.notices).toHaveLength(1);
+        expect(linesOf(h.notices[0])).toEqual([
+            '图片右键菜单已关闭',
+            `开启命令「${TOGGLE_CONTEXT_MENU_PALETTE_LABEL}」复制到剪贴板失败，可手动记下该名称`,
+            '在「设置 → 快捷键」中搜索该命令并绑定快捷键，即可随时重新开启。',
+        ]);
+    });
+});
+
+describe('toggleContextMenu', () => {
+    it('flips the stored value in both directions', async () => {
+        const on = facadeWith(true);
+        await toggleContextMenu(on.facade);
+        expect(on.settings.enableContextMenu).toBe(false);
+
+        const off = facadeWith(false);
+        await toggleContextMenu(off.facade);
+        expect(off.settings.enableContextMenu).toBe(true);
+        // The first toggle left its switch-off notice behind; the second is this one.
+        expect(h.notices).toHaveLength(2);
+        expect(linesOf(h.notices[1])).toEqual(['图片右键菜单已开启']);
+    });
+});

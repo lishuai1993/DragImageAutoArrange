@@ -35,6 +35,11 @@ describe('coerceSettings', () => {
         expect(coerceSettings({ showImageInfo: 'yes' }).showImageInfo).toBe(true);
     });
 
+    it('keeps an explicit false for the context-menu master switch', () => {
+        expect(coerceSettings({ enableContextMenu: false }).enableContextMenu).toBe(false);
+        expect(coerceSettings({ enableContextMenu: 'no' }).enableContextMenu).toBe(true);
+    });
+
     it('drops unknown ids and restores the canonical order', () => {
         const out = coerceSettings({
             fileOperationItems: [

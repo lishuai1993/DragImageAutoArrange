@@ -22,6 +22,9 @@ export interface FileOperationItem {
 }
 
 export interface ImageMenuSettings {
+    /** Master switch: when off, right-clicking an image opens no DIAA menu at
+     *  all, handing the event to Obsidian and the other plugins. */
+    enableContextMenu: boolean;
     /** Render the filename / dimension info rows at the top of the menu. */
     showImageInfo: boolean;
     /** Ask before a delete that would remove the image file itself. */
@@ -42,6 +45,7 @@ export const FILE_OPERATION_IDS: FileOperationId[] = [
 ];
 
 export const DEFAULT_IMAGE_MENU_SETTINGS: ImageMenuSettings = {
+    enableContextMenu: true,
     showImageInfo: true,
     confirmDelete: true,
     fileOperationItems: FILE_OPERATION_IDS.map(id => ({ id, visible: true })),
@@ -83,6 +87,10 @@ function coerceFileOperationItems(value: unknown): FileOperationItem[] {
 export function coerceSettings(stored: unknown): ImageMenuSettings {
     const raw = isRecord(stored) ? stored : {};
     return {
+        enableContextMenu:
+            typeof raw.enableContextMenu === 'boolean'
+                ? raw.enableContextMenu
+                : DEFAULT_IMAGE_MENU_SETTINGS.enableContextMenu,
         showImageInfo:
             typeof raw.showImageInfo === 'boolean'
                 ? raw.showImageInfo
