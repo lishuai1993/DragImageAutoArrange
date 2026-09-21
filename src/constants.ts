@@ -1,4 +1,5 @@
 import type { LogLevel } from "./logger";
+import type { Language } from "./i18n/language";
 
 export const CSS_PREFIX = "diaa";
 
@@ -32,6 +33,8 @@ export type Alignment = "left" | "center" | "right";
 export type SingleImageSizeMode = "natural" | "fixed";
 
 export const DEFAULT_SETTINGS = {
+  /** English, because the plugin addresses a global audience. */
+  language: "en" as Language,
   defaultRowHeight: 200,
   maxImagesPerRow: 10,
   gapSize: 4,

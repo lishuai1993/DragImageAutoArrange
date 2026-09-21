@@ -29,6 +29,7 @@ import {
   type SettingDefinitionItem,
 } from 'obsidian';
 import type { Alignment } from '../constants';
+import { t, type Localized } from '../i18n/language';
 import { clearPlan } from './clearDiaaFormat';
 import { makeNormalizePlan } from './normalizeDiaaFormat';
 import { applySettingButtonStyle } from '../settingsButton';
@@ -51,7 +52,20 @@ export interface MaintenanceBridge {
 
 /** The section heading. The declarative path hands it to the framework; the
  *  imperative path creates the heading element itself. */
-const HEADING = 'DIAA 格式维护';
+const HEADING: Localized = { zh: 'DIAA 格式维护', en: 'DIAA formatting upkeep' };
+
+/** Progress and failure copy shared by both actions. */
+const RUNNING_TEXT = {
+  /** The scan half always reads this; the write half names its own verb. */
+  scanning: { zh: '正在扫描', en: 'Scanning' },
+  files: { zh: '{verb} {done} / {total} 个文件…', en: '{verb} {done} / {total} files…' },
+  starting: { zh: '正在扫描…', en: 'Scanning…' },
+  busy: { zh: '处理中…', en: 'Working…' },
+  failed: { zh: '操作失败：{error}', en: 'Failed: {error}' },
+  cancel: { zh: '取消', en: 'Cancel' },
+  /** Nothing has run yet. */
+  resting: { zh: '尚未执行。', en: 'Not run yet.' },
+} as const satisfies Record<string, Localized>;
 
 /** The maintenance section as the settings tab sees it: definitions for the
  *  1.13 path, a mount point for the path below it. */
@@ -60,15 +74,21 @@ export interface MaintenanceSection {
   mount(containerEl: HTMLElement): void;
 }
 
-/** One vault-wide action: what it is called, what it says, which lines it owns. */
+/** One vault-wide action: what it is called, what it says, which lines it owns.
+ *
+ *  The fixed strings are `{ zh, en }` pairs resolved where they are drawn, since
+ *  the actions themselves are built once at import; the ones that interpolate a
+ *  scan result resolve when the pass reports, so they always speak the language
+ *  in force at that moment. */
 interface MaintenanceAction {
-  name: string;
-  desc: string;
-  buttonText: string;
-  confirmTitle: string;
-  confirmButton: string;
-  /** Progress label for the write half; the scan half always reads 正在扫描. */
-  applyLabel: string;
+  name: Localized;
+  desc: Localized;
+  buttonText: Localized;
+  confirmTitle: Localized;
+  confirmButton: Localized;
+  /** The verb for the write half of the progress label; the scan half is
+   *  always 正在扫描 / Scanning. */
+  applyLabel: Localized;
   /** The plan the run scans and writes with — built once per run, so both phases
    *  see the same policy even if the settings move underneath. */
   plan(bridge: MaintenanceBridge): LinePlan;
@@ -77,7 +97,7 @@ interface MaintenanceAction {
   emptyText(scan: VaultPassScan): string;
   cancelledText(scan: VaultPassScan): string;
   doneText(summary: VaultPassSummary): string;
-  failureNotice: string;
+  failureNotice: Localized;
 }
 
 /** Everything a row shows that a rebuild would otherwise wipe. Held by the
@@ -103,7 +123,7 @@ interface ActionView {
 
 /** The resting copy of every action: nothing has run yet. */
 function restingState(): ActionState {
-  return { label: '尚未执行。', fraction: 0, blue: false, busy: false, locked: false };
+  return { label: t(RUNNING_TEXT.resting), fraction: 0, blue: false, busy: false, locked: false };
 }
 
 /** Create the section. One instance per settings tab, so an in-flight pass and
@@ -132,10 +152,10 @@ class MaintenanceSectionImpl implements MaintenanceSection {
     return [
       {
         type: 'group',
-        heading: HEADING,
+        heading: t(HEADING),
         items: ACTIONS.map((action) => ({
-          name: action.name,
-          desc: action.desc,
+          name: t(action.name),
+          desc: t(action.desc),
           render: (setting: Setting) => this.renderRow(setting, action),
         })),
       },
@@ -144,7 +164,7 @@ class MaintenanceSectionImpl implements MaintenanceSection {
 
   /** Draw the group by hand, heading and div included — the path below 1.13. */
   mount(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName(HEADING).setHeading();
+    new Setting(containerEl).setName(t(HEADING)).setHeading();
     const group = containerEl.createDiv();
     group.addClass('diaa-settings-group');
 
@@ -155,7 +175,10 @@ class MaintenanceSectionImpl implements MaintenanceSection {
         const sep = group.createDiv();
         sep.addClass('diaa-vault-sep');
       }
-      this.renderRow(new Setting(group).setName(action.name).setDesc(action.desc), action);
+      this.renderRow(
+        new Setting(group).setName(t(action.name)).setDesc(t(action.desc)),
+        action
+      );
     });
   }
 
@@ -171,7 +194,7 @@ class MaintenanceSectionImpl implements MaintenanceSection {
     setting.addButton((component) => {
       button = component;
       applySettingButtonStyle(component)
-        .setButtonText(action.buttonText)
+        .setButtonText(t(action.buttonText))
         .onClick(() => void this.run(action));
     });
 
@@ -210,7 +233,7 @@ class MaintenanceSectionImpl implements MaintenanceSection {
     if (!view) return;
     const state = this.state(action);
     view.button.setDisabled(state.busy || state.locked);
-    view.button.setButtonText(state.busy ? '处理中…' : action.buttonText);
+    view.button.setButtonText(state.busy ? t(RUNNING_TEXT.busy) : t(action.buttonText));
     view.labelEl.setText(state.label);
     const pct = Math.max(0, Math.min(1, state.fraction)) * 100;
     view.barEl.style.width = `${pct.toFixed(1)}%`;
@@ -218,11 +241,11 @@ class MaintenanceSectionImpl implements MaintenanceSection {
   }
 
   private onProgress(action: MaintenanceAction, p: VaultPassProgress): void {
-    const verb = p.phase === 'scan' ? '正在扫描' : action.applyLabel;
+    const verb = t(p.phase === 'scan' ? RUNNING_TEXT.scanning : action.applyLabel);
     this.update(action, {
       fraction: p.total === 0 ? 1 : p.processed / p.total,
       blue: false,
-      label: `${verb} ${p.processed} / ${p.total} 个文件…`,
+      label: t(RUNNING_TEXT.files, { verb, done: p.processed, total: p.total }),
     });
   }
 
@@ -239,7 +262,7 @@ class MaintenanceSectionImpl implements MaintenanceSection {
     if (this.running) return;
     this.running = true;
     const bridge = this.bridge();
-    this.update(action, { busy: true, fraction: 0, blue: false, label: '正在扫描…' });
+    this.update(action, { busy: true, fraction: 0, blue: false, label: t(RUNNING_TEXT.starting) });
     this.lockOthers(action, true);
 
     try {
@@ -273,9 +296,9 @@ class MaintenanceSectionImpl implements MaintenanceSection {
       this.update(action, {
         fraction: 0,
         blue: false,
-        label: `操作失败：${String(error)}`,
+        label: t(RUNNING_TEXT.failed, { error: String(error) }),
       });
-      new Notice(action.failureNotice);
+      new Notice(t(action.failureNotice));
     } finally {
       this.update(action, { busy: false });
       this.lockOthers(action, false);
@@ -310,16 +333,18 @@ class MaintenanceConfirmModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass('diaa-vault-confirm');
-    new Setting(contentEl).setName(this.action.confirmTitle).setHeading();
+    new Setting(contentEl).setName(t(this.action.confirmTitle)).setHeading();
     this.action.writeConfirmBody(contentEl, this.scan);
 
     // Plain CTA rather than `setDestructive()`: that method only exists from
     // Obsidian 1.13 and this plugin declares minAppVersion 1.5.0.
     new Setting(contentEl)
-      .addButton((button) => button.setButtonText('取消').onClick(() => this.decide(false)))
+      .addButton((button) =>
+        button.setButtonText(t(RUNNING_TEXT.cancel)).onClick(() => this.decide(false))
+      )
       .addButton((button) =>
         button
-          .setButtonText(this.action.confirmButton)
+          .setButtonText(t(this.action.confirmButton))
           .setCta()
           .onClick(() => this.decide(true))
       );
@@ -354,84 +379,222 @@ function sampleBlock(containerEl: HTMLElement, before: string, after: string): v
 // ── Action: clear every DIAA row back to a bare embed ────────────────────
 
 const CLEAR_ACTION: MaintenanceAction = {
-  name: '清除 DIAA 格式（本库）',
-  desc:
-    '把全库中 DIAA 写入的图片参数还原为 Obsidian 原生的 ![[文件名]]：整行图片行清掉整个' +
-    '参数段，行内引用只清 DIAA 写的对齐词、Obsidian 原生的宽度保留。逐个文件处理，' +
-    '点击后先扫描、再确认、然后写入。清除会丢弃朝向、对齐、份额、填充与单图宽度，' +
-    '且不可自动恢复（原始图片文件不受影响）。' +
-    '注意：插件启用期间，笔记只要被打开或编辑，参数就会在第一帧被重新写回；' +
-    '若目的是卸载插件，建议清除前先关闭所有打开的笔记，并在清除完成后立即停用插件。',
-  buttonText: '开始清除',
-  confirmTitle: '清除 DIAA 格式（本库）',
-  confirmButton: '确认清除',
-  applyLabel: '正在清除',
+  name: { zh: '清除 DIAA 格式（本库）', en: 'Clear DIAA formatting (this vault)' },
+  desc: {
+    zh:
+      '把全库中 DIAA 写入的图片参数还原为 Obsidian 原生的 ![[文件名]]：整行图片行清掉整个' +
+      '参数段，行内引用只清 DIAA 写的对齐词、Obsidian 原生的宽度保留。逐个文件处理，' +
+      '点击后先扫描、再确认、然后写入。清除会丢弃朝向、对齐、份额、填充与单图宽度，' +
+      '且不可自动恢复（原始图片文件不受影响）。' +
+      '注意：插件启用期间，笔记只要被打开或编辑，参数就会在第一帧被重新写回；' +
+      '若目的是卸载插件，建议清除前先关闭所有打开的笔记，并在清除完成后立即停用插件。',
+    en:
+      'Restore the image parameters DIAA wrote back to Obsidian’s native ![[file name]]: on ' +
+      'a whole image row the entire parameter run goes, while an inline reference only loses ' +
+      'the alignment word DIAA wrote and keeps the width Obsidian set. Files are processed one ' +
+      'at a time — click, scan, confirm, write. Clearing discards orientation, alignment, share, ' +
+      'fill and single-image width, and cannot be undone automatically (the image files ' +
+      'themselves are untouched). Note: while the plugin is enabled, any note that is opened or ' +
+      'edited has its parameters written back on the first frame; if the goal is to uninstall ' +
+      'the plugin, close every open note before clearing and disable the plugin as soon as the ' +
+      'pass finishes.',
+  },
+  buttonText: { zh: '开始清除', en: 'Start clearing' },
+  confirmTitle: { zh: '清除 DIAA 格式（本库）', en: 'Clear DIAA formatting (this vault)' },
+  confirmButton: { zh: '确认清除', en: 'Confirm' },
+  applyLabel: { zh: '正在清除', en: 'Clearing' },
   plan: () => clearPlan,
   emptyText: (scan) =>
-    `扫描完成：${scan.scanned} 个 Markdown 文件中没有 DIAA 格式行，无需清除。`,
+    t(
+      {
+        zh: '扫描完成：{scanned} 个 Markdown 文件中没有 DIAA 格式行，无需清除。',
+        en: 'Scan complete: no DIAA-formatted lines in {scanned} Markdown files — nothing to clear.',
+      },
+      { scanned: scan.scanned }
+    ),
   cancelledText: (scan) =>
-    `已取消，未做任何修改。共检测到 ${scan.foundLines} 行 DIAA 格式，` +
-    `分布在 ${scan.entries.length} 个文件中。`,
+    t(
+      {
+        zh: '已取消，未做任何修改。共检测到 {foundLines} 行 DIAA 格式，分布在 {files} 个文件中。',
+        en: 'Cancelled, nothing was changed. {foundLines} DIAA-formatted lines were found across {files} files.',
+      },
+      { foundLines: scan.foundLines, files: scan.entries.length }
+    ),
   doneText: (summary) =>
-    `清除完成：共扫描 ${summary.scanned} 个文件，` +
-    `还原 ${summary.changedLines} 行，覆盖 ${summary.changedFiles} 个文件` +
-    (summary.failed > 0 ? `，${summary.failed} 个文件失败（见 log.txt）。` : '。') +
-    '若目的是卸载插件，请立即停用插件，并关闭所有打开的笔记。',
-  failureNotice: '清除 DIAA 格式失败',
+    summary.failed > 0
+      ? t(
+          {
+            zh: '清除完成：共扫描 {scanned} 个文件，还原 {changedLines} 行，覆盖 {changedFiles} 个文件，{failed} 个文件失败（见 log.txt）。若目的是卸载插件，请立即停用插件，并关闭所有打开的笔记。',
+            en: 'Clear complete: {scanned} files scanned, {changedLines} lines restored across {changedFiles} files, {failed} files failed (see log.txt). If the goal was to uninstall the plugin, disable it now and close every open note.',
+          },
+          {
+            scanned: summary.scanned,
+            changedLines: summary.changedLines,
+            changedFiles: summary.changedFiles,
+            failed: summary.failed,
+          }
+        )
+      : t(
+          {
+            zh: '清除完成：共扫描 {scanned} 个文件，还原 {changedLines} 行，覆盖 {changedFiles} 个文件。若目的是卸载插件，请立即停用插件，并关闭所有打开的笔记。',
+            en: 'Clear complete: {scanned} files scanned, {changedLines} lines restored across {changedFiles} files. If the goal was to uninstall the plugin, disable it now and close every open note.',
+          },
+          {
+            scanned: summary.scanned,
+            changedLines: summary.changedLines,
+            changedFiles: summary.changedFiles,
+          }
+        ),
+  failureNotice: { zh: '清除 DIAA 格式失败', en: 'Failed to clear DIAA formatting' },
   writeConfirmBody: (contentEl, scan) => {
     paragraph(
       contentEl,
-      `本次已扫描 ${scan.scanned} 个 Markdown 文件，命中 ${scan.foundLines} 行 ` +
-        `DIAA 写入的图片行参数，分布在 ${scan.entries.length} 个文件中。`
+      t(
+        {
+          zh: '本次已扫描 {scanned} 个 Markdown 文件，命中 {foundLines} 行 DIAA 写入的图片行参数，分布在 {files} 个文件中。',
+          en: 'Scanned {scanned} Markdown files and found {foundLines} image-parameter lines written by DIAA, across {files} files.',
+        },
+        { scanned: scan.scanned, foundLines: scan.foundLines, files: scan.entries.length }
+      )
     );
-    paragraph(contentEl, '这些行会被改写为 Obsidian 原生格式，例如：');
-    sampleBlock(contentEl, '![[示例图片.webp|orig|center|100|67]]', '![[示例图片.webp]]');
-    paragraph(contentEl, '整库改写不可撤销，建议先提交一次。');
+    paragraph(
+      contentEl,
+      t({
+        zh: '这些行会被改写为 Obsidian 原生格式，例如：',
+        en: 'These lines will be rewritten to Obsidian’s native form, for example:',
+      })
+    );
+    sampleBlock(
+      contentEl,
+      t({ zh: '![[示例图片.webp|orig|center|100|67]]', en: '![[example.webp|orig|center|100|67]]' }),
+      t({ zh: '![[示例图片.webp]]', en: '![[example.webp]]' })
+    );
+    paragraph(
+      contentEl,
+      t({
+        zh: '整库改写不可撤销，建议先提交一次。',
+        en: 'A vault-wide rewrite cannot be undone — commit first.',
+      })
+    );
   },
 };
 
 // ── Action: normalise every hostable line into the standard slot form ───
 
 const NORMALIZE_ACTION: MaintenanceAction = {
-  name: '归一化为标准格式（本库）',
-  desc:
-    '把全库中 DIAA 可托管的图片行补写成标准参数格式：朝向槽写入原朝向（直立时写 orig），' +
-    '对齐槽写入当前统一对齐设置，行内已有的数值参数原样保留。缺失的数值槽不在这里猜——' +
-    '份额要按各成员的自然像素尺寸才算得准、填充比要等图像画出来才量得到，' +
-    '所以交给该行首次渲染时按真实值补写，免得把一个凑出来的数钉死在笔记里。' +
-    '单图行手写的原生宽度（|400、|400x300）会转写为手动宽度 |1|400 保留下来。' +
-    '含别名等无法识别参数的行一律不动。',
-  buttonText: '开始归一化',
-  confirmTitle: '归一化为标准格式（本库）',
-  confirmButton: '确认归一化',
-  applyLabel: '正在归一化',
+  name: { zh: '归一化为标准格式（本库）', en: 'Normalise to the standard form (this vault)' },
+  desc: {
+    zh:
+      '把全库中 DIAA 可托管的图片行补写成标准参数格式：朝向槽写入原朝向（直立时写 orig），' +
+      '对齐槽写入当前统一对齐设置，行内已有的数值参数原样保留。缺失的数值槽不在这里猜——' +
+      '份额要按各成员的自然像素尺寸才算得准、填充比要等图像画出来才量得到，' +
+      '所以交给该行首次渲染时按真实值补写，免得把一个凑出来的数钉死在笔记里。' +
+      '单图行手写的原生宽度（|400、|400x300）会转写为手动宽度 |1|400 保留下来。' +
+      '含别名等无法识别参数的行一律不动。',
+    en:
+      'Fill in the standard parameter form on every image row DIAA can host: the orientation ' +
+      'slot takes the image’s current orientation (orig when upright), the alignment slot takes ' +
+      'the current global alignment, and any numeric parameters already on the line are kept as ' +
+      'they are. Missing numeric slots are not guessed here — a share needs each member’s ' +
+      'natural pixel size, and a fill ratio can only be measured once the picture is painted — ' +
+      'so the row fills those in from real values the first time it renders, rather than having ' +
+      'a made-up number pinned into the note. A hand-written native width on a single-image row ' +
+      '(|400, |400x300) is carried over as the manual width |1|400. Lines with parameters that ' +
+      'cannot be read, such as an alias, are left alone.',
+  },
+  buttonText: { zh: '开始归一化', en: 'Start normalising' },
+  confirmTitle: { zh: '归一化为标准格式（本库）', en: 'Normalise to the standard form (this vault)' },
+  confirmButton: { zh: '确认归一化', en: 'Confirm' },
+  applyLabel: { zh: '正在归一化', en: 'Normalising' },
   plan: (bridge) =>
     makeNormalizePlan({
       alignment: bridge.alignment,
       maxImagesPerRow: bridge.maxImagesPerRow,
     }),
   emptyText: (scan) =>
-    `扫描完成：${scan.scanned} 个 Markdown 文件中没有需要归一化的图片行。`,
+    t(
+      {
+        zh: '扫描完成：{scanned} 个 Markdown 文件中没有需要归一化的图片行。',
+        en: 'Scan complete: no image rows to normalise in {scanned} Markdown files.',
+      },
+      { scanned: scan.scanned }
+    ),
   cancelledText: (scan) =>
-    `已取消，未做任何修改。共检测到 ${scan.foundLines} 行可归一化，` +
-    `分布在 ${scan.entries.length} 个文件中。`,
+    t(
+      {
+        zh: '已取消，未做任何修改。共检测到 {foundLines} 行可归一化，分布在 {files} 个文件中。',
+        en: 'Cancelled, nothing was changed. {foundLines} normalisable lines were found across {files} files.',
+      },
+      { foundLines: scan.foundLines, files: scan.entries.length }
+    ),
   doneText: (summary) =>
-    `归一化完成：共扫描 ${summary.scanned} 个文件，` +
-    `改写 ${summary.changedLines} 行，覆盖 ${summary.changedFiles} 个文件` +
-    (summary.failed > 0 ? `，${summary.failed} 个文件失败（见 log.txt）。` : '。') +
-    '数值槽会在笔记下次打开时由首帧补齐，补齐后才是完整的标准格式。',
-  failureNotice: '归一化失败',
+    summary.failed > 0
+      ? t(
+          {
+            zh: '归一化完成：共扫描 {scanned} 个文件，改写 {changedLines} 行，覆盖 {changedFiles} 个文件，{failed} 个文件失败（见 log.txt）。数值槽会在笔记下次打开时由首帧补齐，补齐后才是完整的标准格式。',
+            en: 'Normalise complete: {scanned} files scanned, {changedLines} lines rewritten across {changedFiles} files, {failed} files failed (see log.txt). The numeric slots are filled in from the first frame the next time each note is opened; only then is the line in its full standard form.',
+          },
+          {
+            scanned: summary.scanned,
+            changedLines: summary.changedLines,
+            changedFiles: summary.changedFiles,
+            failed: summary.failed,
+          }
+        )
+      : t(
+          {
+            zh: '归一化完成：共扫描 {scanned} 个文件，改写 {changedLines} 行，覆盖 {changedFiles} 个文件。数值槽会在笔记下次打开时由首帧补齐，补齐后才是完整的标准格式。',
+            en: 'Normalise complete: {scanned} files scanned, {changedLines} lines rewritten across {changedFiles} files. The numeric slots are filled in from the first frame the next time each note is opened; only then is the line in its full standard form.',
+          },
+          {
+            scanned: summary.scanned,
+            changedLines: summary.changedLines,
+            changedFiles: summary.changedFiles,
+          }
+        ),
+  failureNotice: { zh: '归一化失败', en: 'Failed to normalise' },
   writeConfirmBody: (contentEl, scan) => {
     paragraph(
       contentEl,
-      `本次将扫描 ${scan.scanned} 个 Markdown 文件，命中 ${scan.foundLines} 行 ` +
-        `可归一化的图片行。`
+      t(
+        {
+          zh: '本次将扫描 {scanned} 个 Markdown 文件，命中 {foundLines} 行可归一化的图片行。',
+          en: 'This pass will scan {scanned} Markdown files and match {foundLines} normalisable image rows.',
+        },
+        { scanned: scan.scanned, foundLines: scan.foundLines }
+      )
     );
-    paragraph(contentEl, '每一行会补上朝向槽与对齐槽；自身没有对齐词的行取当前统一对齐设置：');
-    sampleBlock(contentEl, '![[示例图片.webp|center]]', '![[示例图片.webp|orig|left]]');
-    paragraph(contentEl, '单图行手写的原生宽度会转写为手动宽度，免得被首次渲染覆盖掉：');
-    sampleBlock(contentEl, '![[示例图片.webp|400]]', '![[示例图片.webp|orig|left|1|400]]');
-    paragraph(contentEl, '整库改写不可撤销，建议先提交一次。');
+    paragraph(
+      contentEl,
+      t({
+        zh: '每一行会补上朝向槽与对齐槽；自身没有对齐词的行取当前统一对齐设置：',
+        en: 'Each line gains an orientation slot and an alignment slot; a line with no alignment word of its own takes the current global alignment:',
+      })
+    );
+    sampleBlock(
+      contentEl,
+      t({ zh: '![[示例图片.webp|center]]', en: '![[example.webp|center]]' }),
+      t({ zh: '![[示例图片.webp|orig|left]]', en: '![[example.webp|orig|left]]' })
+    );
+    paragraph(
+      contentEl,
+      t({
+        zh: '单图行手写的原生宽度会转写为手动宽度，免得被首次渲染覆盖掉：',
+        en: 'A hand-written native width on a single-image row is carried over as the manual width, so the first render cannot overwrite it:',
+      })
+    );
+    sampleBlock(
+      contentEl,
+      t({ zh: '![[示例图片.webp|400]]', en: '![[example.webp|400]]' }),
+      t({ zh: '![[示例图片.webp|orig|left|1|400]]', en: '![[example.webp|orig|left|1|400]]' })
+    );
+    paragraph(
+      contentEl,
+      t({
+        zh: '整库改写不可撤销，建议先提交一次。',
+        en: 'A vault-wide rewrite cannot be undone — commit first.',
+      })
+    );
   },
 };
 

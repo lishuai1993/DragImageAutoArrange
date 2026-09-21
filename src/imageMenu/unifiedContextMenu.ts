@@ -45,9 +45,8 @@ import {
     cutImage,
     cutMenuItemEnabled,
     resolveClickedSourceLine,
-    CUT_IMAGE_FAILED,
     CUT_IMAGE_ICON,
-    CUT_IMAGE_TITLE,
+    CUT_TEXT,
 } from './cutImage';
 import {
     composeOrientation,
@@ -209,12 +208,12 @@ function addCutImageItem(
 ): void {
     addMenuItem(
         menu,
-        CUT_IMAGE_TITLE,
+        CUT_TEXT.title,
         () => {
             if (!target) return;
             return cutImage(facade, img, target.imgFile, target.noteFile, target.editor);
         },
-        { icon: CUT_IMAGE_ICON, failureNotice: CUT_IMAGE_FAILED, disabled }
+        { icon: CUT_IMAGE_ICON, failureNotice: CUT_TEXT.failed, disabled }
     );
 }
 
@@ -308,14 +307,19 @@ function addResetToSettingWidthItem(
     );
 }
 
-/** The five rotate/flip operations offered in the transform submenu. */
-const TRANSFORM_ACTIONS: Array<{ label: string; op: TransformOp }> = [
-    { label: MENU_TEXT.rotate90ccw, op: 'rotate90ccw' },
-    { label: MENU_TEXT.rotate90cw, op: 'rotate90cw' },
-    { label: MENU_TEXT.rotate180, op: 'rotate180' },
-    { label: MENU_TEXT.flipHorizontal, op: 'flipHorizontal' },
-    { label: MENU_TEXT.flipVertical, op: 'flipVertical' },
-];
+/** The five rotate/flip operations offered in the transform submenu. Built per
+ *  call rather than held at module level: the labels resolve when they are read,
+ *  and reading them while this module is imported would freeze the language the
+ *  plugin happened to load with. */
+function transformActions(): Array<{ label: string; op: TransformOp }> {
+    return [
+        { label: MENU_TEXT.rotate90ccw, op: 'rotate90ccw' },
+        { label: MENU_TEXT.rotate90cw, op: 'rotate90cw' },
+        { label: MENU_TEXT.rotate180, op: 'rotate180' },
+        { label: MENU_TEXT.flipHorizontal, op: 'flipHorizontal' },
+        { label: MENU_TEXT.flipVertical, op: 'flipVertical' },
+    ];
+}
 
 /**
  * Where a rotate/flip gets written: the editor, the source line the image sits
@@ -484,7 +488,7 @@ function addTransformGroup(menu: DomMenu, target: TransformTarget | null, disabl
 
     attachHoverSubmenu(parentRow, () => {
         const sub = new DomMenu();
-        for (const action of TRANSFORM_ACTIONS) {
+        for (const action of transformActions()) {
             sub.addItem(item => {
                 item.setTitle(action.label);
                 item.onClick(() => applyTransformOp(target, action.op));

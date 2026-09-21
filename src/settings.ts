@@ -24,8 +24,10 @@ import {
 import { applySettingButtonStyle } from "./settingsButton";
 import { setGeometryProbeEnabled } from "./diagnostics/probe";
 import { logger, type LogLevel } from "./logger";
+import { setLanguage, t, type Language, type Localized } from "./i18n/language";
 import {
   CONTROL_ROWS,
+  LANGUAGE_OPTIONS,
   SETTINGS_SECTIONS,
   type ControlRow,
   type HostId,
@@ -37,6 +39,8 @@ import { Alignment, SingleImageSizeMode } from "./constants";
 import { setStyleImportant } from "./utils";
 
 export interface DragImageSettings {
+  /** Display language for the settings tab and the image context menu. */
+  language: Language;
   defaultRowHeight: number;
   maxImagesPerRow: number;
   gapSize: number;
@@ -63,11 +67,19 @@ export interface DragImageSettings {
 /** Slider stops, least→most verbose. The slider index maps into this array. */
 const LOG_LEVELS: LogLevel[] = ["ERROR", "WARN", "INFO", "DEBUG"];
 
+/** The label the "Reset all…" rows carry, and the flash it shows once pressed. */
+const RESET_BUTTON_TEXT: Localized = {
+  zh: "全部重置为当前设置",
+  en: "Reset all to current setting",
+};
+const RESET_DONE_TEXT: Localized = { zh: "已重置", en: "Reset" };
+
 const asNumber = (value: unknown): number => (typeof value === "number" ? value : 0);
 const asBoolean = (value: unknown): boolean => value === true;
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
 const asAlignment = (value: unknown): Alignment =>
   value === "center" || value === "right" ? value : "left";
+const asLanguage = (value: unknown): Language => (value === "zh" ? "zh" : "en");
 
 export interface IDragImagePlugin extends Plugin {
   settings: DragImageSettings;
@@ -87,6 +99,7 @@ export async function loadSettings(plugin: { loadData(): Promise<unknown> }): Pr
   // Drop the pre-refactor `enabled` key so a stale saved `false` can't linger
   // in settings data — enable/disable is now exclusively the Obsidian plugin-list toggle.
   delete (merged as unknown as Record<string, unknown>).enabled;
+  merged.language = asLanguage(merged.language);
   return merged;
 }
 
@@ -98,7 +111,11 @@ function controlSpec(row: ControlRow): SettingControl {
     case "toggle":
       return { key: row.key, type: "toggle" };
     case "dropdown":
-      return { key: row.key, type: "dropdown", options: Object.fromEntries(row.options) };
+      return {
+        key: row.key,
+        type: "dropdown",
+        options: Object.fromEntries(row.options.map(([value, label]) => [value, t(label)])),
+      };
     case "text":
       return { key: row.key, type: "text" };
   }
@@ -154,7 +171,7 @@ export class DragImageSettingTab extends PluginSettingTab {
         if (this.hostAvailable(section.id)) this.mountHost(containerEl, section.id);
         continue;
       }
-      new Setting(containerEl).setName(section.heading).setHeading();
+      new Setting(containerEl).setName(t(section.heading)).setHeading();
       const group = containerEl.createDiv();
       group.addClass("diaa-settings-group");
       for (const row of section.rows) this.mountRow(group, row);
@@ -167,7 +184,7 @@ export class DragImageSettingTab extends PluginSettingTab {
   }
 
   private mountRow(containerEl: HTMLElement, row: RowSpec): void {
-    const setting = new Setting(containerEl).setName(row.name).setDesc(row.desc);
+    const setting = new Setting(containerEl).setName(t(row.name)).setDesc(t(row.desc));
     if (row.kind === "render") {
       this.buildRenderRow(setting, row.id);
       return;
@@ -194,7 +211,7 @@ export class DragImageSettingTab extends PluginSettingTab {
         break;
       case "dropdown":
         setting.addDropdown((dropdown) => {
-          for (const [value, label] of row.options) dropdown.addOption(value, label);
+          for (const [value, label] of row.options) dropdown.addOption(value, t(label));
           dropdown
             .setValue(this.plugin.settings[row.key])
             .onChange((value) => void this.assign(row.key, value as Alignment));
@@ -226,7 +243,7 @@ export class DragImageSettingTab extends PluginSettingTab {
       }
       items.push({
         type: "group",
-        heading: section.heading,
+        heading: t(section.heading),
         items: section.rows.map((row) => this.definitionFor(row)),
       });
     }
@@ -253,12 +270,12 @@ export class DragImageSettingTab extends PluginSettingTab {
   private definitionFor(row: RowSpec): SettingDefinition {
     if (row.kind === "render") {
       return {
-        name: row.name,
-        desc: row.desc,
+        name: t(row.name),
+        desc: t(row.desc),
         render: (setting) => this.buildRenderRow(setting, row.id),
       };
     }
-    return { name: row.name, desc: row.desc, control: controlSpec(row) };
+    return { name: t(row.name), desc: t(row.desc), control: controlSpec(row) };
   }
 
   // ── Value binding ────────────────────────────────────────────────────
@@ -292,6 +309,18 @@ export class DragImageSettingTab extends PluginSettingTab {
   /** Effects a setting change has beyond persisting the value. */
   private applySideEffect(key: keyof DragImageSettings, value: DragImageSettings[keyof DragImageSettings]): void {
     switch (key) {
+      case "language": {
+        setLanguage(value as Language);
+        // Every string on this page was resolved through `t()` as it was drawn,
+        // so the page has to be drawn again — the row table itself only holds
+        // pairs, it does not settle on a language. 1.13+ re-reads its
+        // definitions on `update()`; below it `display()` is the entry point.
+        // Nothing else has to be told: the context menu and the notices build
+        // their copy when they open.
+        if (requireApiVersion("1.13.0")) this.update();
+        else this.display();
+        break;
+      }
       case "logLevel":
         // Both sinks read the logger singleton, so a change takes effect on the
         // next log call — no plugin reload needed.
@@ -317,6 +346,9 @@ export class DragImageSettingTab extends PluginSettingTab {
   private buildRenderRow(setting: Setting, id: RenderRowId): void {
     this.ensureReflow();
     switch (id) {
+      case "language":
+        this.buildLanguageRow(setting);
+        break;
       case "singleImageSize":
         this.buildSingleImageSize(setting);
         break;
@@ -329,6 +361,39 @@ export class DragImageSettingTab extends PluginSettingTab {
       case "logLevel":
         this.buildLogLevel(setting);
         break;
+    }
+  }
+
+  /**
+   * Display language: a segmented bar rather than a dropdown, because the choice
+   * is binary and each segment is labelled in the language it selects — the
+   * control is its own sample.
+   *
+   * The two segments go into one `diaa-segmented` wrapper (see styles.css) so the
+   * pair reads as a single control: a grey track carrying both labels, one of
+   * which is filled in the same green as the reset buttons. That is why this row
+   * is the one control that does not wear `.diaa-setting-btn`.
+   *
+   * The buttons are still built by the framework, and the wrapper lives *inside*
+   * `controlEl`: the declarative path reuses a `settingEl` across updates and
+   * clears `controlEl` only, so a custom node placed here is repainted with the
+   * rest of the row instead of accumulating. Choosing a language re-renders the
+   * whole tab (see `applySideEffect`), which is also what moves the plate.
+   */
+  private buildLanguageRow(setting: Setting): void {
+    const bar = setting.controlEl.createDiv({ cls: "diaa-segmented" });
+    for (const [value, label] of LANGUAGE_OPTIONS) {
+      const selected = this.plugin.settings.language === value;
+      setting.addButton((button) => {
+        button.buttonEl.addClass("diaa-segment");
+        if (selected) button.buttonEl.addClass("is-on");
+        button.setButtonText(label).onClick(() => {
+          if (this.plugin.settings.language === value) return;
+          void this.assign("language", value);
+        });
+        // `addButton` appends to `controlEl`; the frame is where it belongs.
+        bar.appendChild(button.buttonEl);
+      });
     }
   }
 
@@ -349,8 +414,8 @@ export class DragImageSettingTab extends PluginSettingTab {
     setting
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("natural", "Natural size")
-          .addOption("fixed", "Fixed width")
+          .addOption("natural", t({ zh: "原始尺寸", en: "Natural size" }))
+          .addOption("fixed", t({ zh: "固定宽度", en: "Fixed width" }))
           .setValue(mode)
           .onChange((value) => {
             void this.assign("singleImageSizeMode", value as SingleImageSizeMode);
@@ -377,14 +442,14 @@ export class DragImageSettingTab extends PluginSettingTab {
 
   /**
    * One-click feedback for a "Reset all..." row: paint the accent color, shrink
-   * momentarily, swap the label to "已重置", then restore everything. Rapid
-   * double-clicks are ignored (the button is disabled for the 1.5s window).
+   * momentarily, swap the label to the done flash, then restore everything.
+   * Rapid double-clicks are ignored (the button is disabled for the 1.5s window).
    */
   private buildResetRow(setting: Setting, reset: () => void): void {
     setting.settingEl.addClass("diaa-row-sep-above");
     setting.addButton((button) => {
       applySettingButtonStyle(button)
-        .setButtonText("Reset all to current setting")
+        .setButtonText(t(RESET_BUTTON_TEXT))
         .onClick(() => {
           reset();
           this.flashResetFeedback(button);
@@ -570,7 +635,7 @@ export class DragImageSettingTab extends PluginSettingTab {
 
   /**
    * One-click feedback for the "Reset all..." buttons: paint the accent color,
-   * shrink momentarily, swap the label to "已重置", then restore everything.
+   * shrink momentarily, swap the label to the done flash, then restore everything.
    * Rapid double-clicks are ignored (the button is disabled for the 1.5s window).
    *
    * The fill and text colour are written inline because the competitor is the
@@ -581,11 +646,11 @@ export class DragImageSettingTab extends PluginSettingTab {
   private flashResetFeedback(button: ButtonComponent): void {
     const el = button.buttonEl;
     if (el.classList.contains("diaa-btn-pressed")) return;
-    const originalText = el.textContent ?? "Reset all to current setting";
-    // Pin the width so the shorter "已重置" label doesn't shrink the button.
+    const originalText = el.textContent ?? t(RESET_BUTTON_TEXT);
+    // Pin the width so the shorter flash label doesn't shrink the button.
     el.style.minWidth = `${el.offsetWidth}px`;
     button.setDisabled(true);
-    button.setButtonText("已重置");
+    button.setButtonText(t(RESET_DONE_TEXT));
     setStyleImportant(el, "background-color", "var(--color-green)");
     setStyleImportant(el, "color", "#fff");
     setStyleImportant(el, "opacity", "1");

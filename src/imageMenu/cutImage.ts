@@ -1,6 +1,7 @@
 import { Notice, type Editor, type TFile } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { logger } from '../logger';
+import { localize, t } from '../i18n/language';
 import { parseEmbedParams, stripSizingKeepOrientation } from '../imageParse/embedRaw';
 import { isOrientationWord } from '../imageTransform/orientation';
 import { trashFile } from '../utils';
@@ -14,30 +15,62 @@ import type { ImageMenuFacade } from './imageMenuHost';
 
 const log = logger.channel('cutImage');
 
-/** Right-click row label — sits directly above 「复制图像」. */
-export const CUT_IMAGE_TITLE = '剪切图像';
+/** Right-click row label — sits directly above the copy-image row. Resolved on
+ *  read, like everything else the menu shows. */
+export const CUT_TEXT = localize({
+  title: { zh: '剪切图像', en: 'Cut image' },
+  failed: { zh: '剪切图像失败', en: 'Failed to cut the image' },
+  /** The cut removed the vault's last reference, so the file went to the trash. */
+  done: {
+    zh: '图像已剪切到剪贴板（本地文件已删除）',
+    en: 'Image cut to the clipboard (the local file was deleted)',
+  },
+  /** The note has no link we could remove — only the clipboard was touched. */
+  noRef: {
+    zh: '未在当前笔记中找到该图片引用，仅复制到剪贴板',
+    en: 'No reference to this image in the current note — copied to the clipboard only',
+  },
+});
+
 export const CUT_IMAGE_ICON = 'scissors';
-export const CUT_IMAGE_FAILED = '剪切图像失败';
-/** The cut removed the vault's last reference, so the file went to the trash. */
-export const CUT_IMAGE_DONE = '图像已剪切到剪贴板（本地文件已删除）';
-/** The note has no link we could remove — only the clipboard was touched. */
-export const CUT_IMAGE_NO_REF = '未在当前笔记中找到该图片引用，仅复制到剪贴板';
+
 /** The reference was cut but other references remain, so the file stays. */
 export function cutImageKeptNotice(remaining: number): string {
-  return `仅剪切图像引用（文件仍被 ${remaining} 处引用）`;
+  return t(
+    {
+      zh: '仅剪切图像引用（文件仍被 {n} 处引用）',
+      en: 'Only the reference was cut (the file is still referenced {n} times elsewhere)',
+    },
+    { n: remaining }
+  );
 }
 
-export const DELETE_IMAGE_FAILED = '删除图像引用失败';
-/** The last reference is gone, so the image file went to the trash. */
-export const DELETE_IMAGE_DONE = '已删除图像引用（文件已移入回收站）';
-/** The note has no link we could remove — nothing was changed. */
-export const DELETE_IMAGE_NO_REF = '未在当前笔记中找到该图像引用，未做任何更改';
+export const DELETE_TEXT = localize({
+  failed: { zh: '删除图像引用失败', en: 'Failed to delete the image reference' },
+  /** The last reference is gone, so the image file went to the trash. */
+  done: {
+    zh: '已删除图像引用（文件已移入回收站）',
+    en: 'Image reference deleted (the file went to the trash)',
+  },
+  /** The note has no link we could remove — nothing was changed. */
+  noRef: {
+    zh: '未在当前笔记中找到该图像引用，未做任何更改',
+    en: 'No reference to this image in the current note — nothing was changed',
+  },
+  /** The reference went but the user declined the file deletion. */
+  cancelled: { zh: '已删除当前引用（文件保留）', en: 'Reference deleted (the file was kept)' },
+});
+
 /** The reference went, but other references (or a declined prompt) kept the file. */
 export function deleteImageKeptNotice(remaining: number): string {
-  return `仅已删除当前引用（文件保留，仍被 ${remaining} 处引用）`;
+  return t(
+    {
+      zh: '仅已删除当前引用（文件保留，仍被 {n} 处引用）',
+      en: 'Only this reference was deleted (the file is kept, still referenced {n} times elsewhere)',
+    },
+    { n: remaining }
+  );
 }
-/** The reference went but the user declined the file deletion. */
-export const DELETE_IMAGE_CANCELLED = '已删除当前引用（文件保留）';
 
 /**
  * Whether a reference-removing row may act. Removing a reference rewrites the
@@ -297,7 +330,7 @@ export async function cutImage(
       vaultSource: { app: facade.app, file: imgFile },
     });
   } catch {
-    new Notice(CUT_IMAGE_FAILED);
+    new Notice(CUT_TEXT.failed);
     return;
   }
 
@@ -305,12 +338,12 @@ export async function cutImage(
   try {
     outcome = await removeOneReference(facade, img, imgFile, noteFile, editor);
   } catch {
-    new Notice(CUT_IMAGE_FAILED);
+    new Notice(CUT_TEXT.failed);
     return;
   }
 
   if (outcome.removed === 0) {
-    new Notice(CUT_IMAGE_NO_REF);
+    new Notice(CUT_TEXT.noRef);
     return;
   }
   if (!outcome.deleteFile) {
@@ -322,7 +355,7 @@ export async function cutImage(
   // names nothing: drop it rather than leave it for a paste to find.
   forgetReference();
   await trashFile(facade.app, imgFile);
-  new Notice(CUT_IMAGE_DONE);
+  new Notice(CUT_TEXT.done);
 }
 
 /**
@@ -343,12 +376,12 @@ export async function deleteImageReference(
   try {
     outcome = await removeOneReference(facade, img, imgFile, noteFile, editor);
   } catch {
-    new Notice(DELETE_IMAGE_FAILED);
+    new Notice(DELETE_TEXT.failed);
     return;
   }
 
   if (outcome.removed === 0) {
-    new Notice(DELETE_IMAGE_NO_REF);
+    new Notice(DELETE_TEXT.noRef);
     return;
   }
   if (!outcome.deleteFile) {
@@ -359,11 +392,11 @@ export async function deleteImageReference(
   if (facade.settings.confirmDelete) {
     const confirmed = await confirmDelete(facade.app, imgFile);
     if (!confirmed) {
-      new Notice(DELETE_IMAGE_CANCELLED);
+      new Notice(DELETE_TEXT.cancelled);
       return;
     }
   }
 
   await trashFile(facade.app, imgFile);
-  new Notice(DELETE_IMAGE_DONE);
+  new Notice(DELETE_TEXT.done);
 }

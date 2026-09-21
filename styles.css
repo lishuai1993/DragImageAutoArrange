@@ -344,6 +344,88 @@
   box-shadow: inset 0 0 0 1px var(--color-green);
 }
 
+/* Settings tab: the language row is the one control that is not a button — it
+   is a macOS-style segmented bar, and deliberately does not wear
+   `.diaa-setting-btn`. Colour rather than the filler is what carries the
+   selection: a grey track with a solidly-filled segment on it, borders nowhere.
+   The two halves never disagree, because both halves are the same two colours
+   in both states.
+
+   The track is the grey the previous version's unselected segment wore — that
+   fill came from Obsidian's own `button` rule, so this reads the same variable
+   and follows the theme into dark mode instead of pinning a hex.
+
+   The selected fill is the one 「Reset all to current setting」 rests in, read
+   from the same variable pair the ring rules above use: the theme owns the CTA
+   fill (GitHub Theme paints it from `--color-btn-primary-bg`, and its accent
+   can be a different hue), theme-less Obsidian falls back to the accent. The
+   label reads the CTA's matching text variable the same way.
+
+   Both the track and the segments are borderless, so Obsidian's `button`
+   border and its `--input-shadow` ring are cleared — under `:not(:focus-visible)`
+   so the keyboard focus ring survives. Every selector below carries one of the
+   class slots this control owns (`diaa-segmented`, `diaa-segment` / `is-on`),
+   which lifts them past those rules on specificity — no `!important`.
+
+   `1fr 1fr` gives the halves equal width by construction: the widest label
+   ("English") sizes the track and "中文" takes the same one. Any `min-width`
+   picking a number instead would have to be re-tuned per font. */
+.diaa-settings .diaa-segmented {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-m);
+  background-color: var(--interactive-normal);
+}
+
+.diaa-settings .diaa-segmented .diaa-segment:not(:focus-visible) {
+  border: none;
+  box-shadow: none;
+}
+
+.diaa-settings .diaa-segmented .diaa-segment {
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: calc(var(--radius-m) - 2px);
+  background-color: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* Hover darkens the pill the label sits in, and the label with it.
+
+   The fill is a literal 5% black, not a state variable. A variable here is a
+   coin toss: an undefined `--…` inside `var()` makes the declaration invalid at
+   computed-value time, and `background-color` then falls back to its initial
+   value — transparent — which is a hover state that silently does nothing,
+   exactly what this one did. A literal cannot go missing, and 5% black over the
+   track's grey darkens it by 5% in either theme. It is the same technique the
+   button rules above use for their hover veil, at the number that reads right on
+   this smaller pill (15% then 10% were tried and both read too heavy).
+
+   Still a pill and never a solid block: a segment turning solid would read as a
+   second, competing selection. The selected segment is left out of this rule, so
+   resting and hovering it look the same. */
+.diaa-settings .diaa-segmented .diaa-segment:not(.is-on):hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--text-normal);
+}
+
+/* Written after the rule above, and repeated for `:hover`, so the selected
+   segment holds its fill and label in either state. */
+.diaa-settings .diaa-segmented .diaa-segment.is-on,
+.diaa-settings .diaa-segmented .diaa-segment.is-on:hover {
+  background-color: var(--color-btn-primary-bg, var(--interactive-accent));
+  color: var(--color-btn-primary-text, var(--text-on-accent));
+}
+
 /* Settings tab: long descriptions span the full card width below the label
    row instead of wrapping inside the narrow left info column. reflowDescriptions
    (settings.ts) re-parents each .setting-item-description onto the setting-item

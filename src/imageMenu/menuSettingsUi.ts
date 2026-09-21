@@ -15,6 +15,7 @@
 
 import { ButtonComponent, Setting, type SettingDefinitionItem } from 'obsidian';
 import { applySettingButtonStyle } from '../settingsButton';
+import { t, type Localized } from '../i18n/language';
 import { FILE_OPERATION_LABELS } from './menuLabels';
 import { restoreDefaultFileOperationOrder, type ImageMenuSettings } from './settingsModel';
 
@@ -26,8 +27,9 @@ export interface ImageMenuBridge {
 }
 
 /** The section heading. The declarative path hands it to the framework; the
- *  imperative path creates the heading element itself. */
-const HEADING = '图片右键菜单设置';
+ *  imperative path creates the heading element itself. A pair, since the rows
+ *  are built afresh on every render but this file is imported once. */
+const HEADING: Localized = { zh: '图片右键菜单设置', en: 'Image context menu' };
 
 /** One row: its copy, plus the body that fills its control area. */
 interface SectionRow {
@@ -54,7 +56,11 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
         const items = settings.fileOperationItems;
         applySettingButtonStyle(button)
             .setButtonText(delta < 0 ? '↑' : '↓')
-            .setTooltip(delta < 0 ? '上移' : '下移');
+            .setTooltip(
+                delta < 0
+                    ? t({ zh: '上移', en: 'Move up' })
+                    : t({ zh: '下移', en: 'Move down' })
+            );
         const target = index + delta;
         if (target < 0 || target >= items.length) {
             button.setDisabled(true);
@@ -72,8 +78,11 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
 
     const rows: SectionRow[] = [
         {
-            name: '启用图片右键菜单',
-            desc: '关闭后，右键图片不再弹出 DIAA 菜单，交还 Obsidian 与其他插件处理；可用命令或菜单项快速切换。',
+            name: t({ zh: '启用图片右键菜单', en: 'Enable image context menu' }),
+            desc: t({
+                zh: '关闭后，右键图片不再弹出 DIAA 菜单，交还 Obsidian 与其他插件处理；可用命令或菜单项快速切换。',
+                en: 'When off, right-clicking an image no longer opens the DIAA menu — Obsidian and other plugins handle it again. A command and a menu row can switch it back on.',
+            }),
             body: (setting) => {
                 setting.addToggle((toggle) =>
                     toggle.setValue(settings.enableContextMenu).onChange((value) => {
@@ -84,8 +93,11 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
             },
         },
         {
-            name: '显示文件信息',
-            desc: '在菜单顶部显示图片的文件名、当前缩放比例与原始像素尺寸。',
+            name: t({ zh: '显示文件信息', en: 'Show file info' }),
+            desc: t({
+                zh: '在菜单顶部显示图片的文件名、当前缩放比例与原始像素尺寸。',
+                en: 'Show the image’s file name, current scale and original pixel size at the top of the menu.',
+            }),
             body: (setting) => {
                 setting.addToggle((toggle) =>
                     toggle.setValue(settings.showImageInfo).onChange((value) => {
@@ -96,8 +108,11 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
             },
         },
         {
-            name: '删除前确认',
-            desc: '「删除」会一并移除图片文件时，先弹出确认；仅删除笔记中的引用时不询问。',
+            name: t({ zh: '删除前确认', en: 'Confirm before deleting' }),
+            desc: t({
+                zh: '「删除」会一并移除图片文件时，先弹出确认；仅删除笔记中的引用时不询问。',
+                en: 'Ask first when Delete would remove the image file too. Removing only the note’s reference asks nothing.',
+            }),
             body: (setting) => {
                 setting.addToggle((toggle) =>
                     toggle.setValue(settings.confirmDelete).onChange((value) => {
@@ -108,12 +123,15 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
             },
         },
         {
-            name: '文件操作',
-            desc: '菜单底部的文件操作项：开关控制是否显示，箭头调整先后顺序。',
+            name: t({ zh: '文件操作', en: 'File operations' }),
+            desc: t({
+                zh: '菜单底部的文件操作项：开关控制是否显示，箭头调整先后顺序。',
+                en: 'The file-operation rows at the bottom of the menu: a toggle shows or hides one, the arrows set their order.',
+            }),
             body: (setting) => {
                 setting.addButton((button) =>
                     applySettingButtonStyle(button)
-                        .setButtonText('恢复默认顺序')
+                        .setButtonText(t({ zh: '恢复默认顺序', en: 'Restore default order' }))
                         .onClick(() => {
                             settings.fileOperationItems = restoreDefaultFileOperationOrder(
                                 settings.fileOperationItems
@@ -159,7 +177,7 @@ export function imageMenuSectionDefinitions(
     return [
         {
             type: 'group',
-            heading: HEADING,
+            heading: t(HEADING),
             items: buildRows(bridge, refresh).map((row) => ({
                 name: row.name,
                 desc: row.desc,
@@ -172,7 +190,7 @@ export function imageMenuSectionDefinitions(
 /** Mount the image-menu settings section at the end of `containerEl`, the
  *  heading and group div included — the path for Obsidian below 1.13. */
 export function renderImageMenuSettings(containerEl: HTMLElement, bridge: ImageMenuBridge): void {
-    new Setting(containerEl).setName(HEADING).setHeading();
+    new Setting(containerEl).setName(t(HEADING)).setHeading();
     const group = containerEl.createDiv();
     group.addClass('diaa-settings-group');
 

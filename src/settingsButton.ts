@@ -6,6 +6,13 @@
  * the pressed-flash hook on top — see the `.diaa-setting-btn` rules in
  * styles.css. Keeping both in one place means a newly added button can't drift
  * into looking less available than its neighbours.
+ *
+ * The one control that bypasses this is the language row's segmented bar
+ * (`.diaa-segmented` in styles.css, built in `buildLanguageRow`). It is one
+ * control, not a row of buttons: both halves sit on a shared grey track with no
+ * borders anywhere, and the selection is a solid fill inside that track. That
+ * reads as a single object only while the halves keep the same shape and the
+ * same two colours — which a pair of separately framed CTA buttons cannot.
  */
 
 import type { ButtonComponent } from 'obsidian';

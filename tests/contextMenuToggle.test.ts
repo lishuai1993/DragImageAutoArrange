@@ -76,11 +76,14 @@ function installPlatformCreateDiv(): void {
 
 import {
     TOGGLE_CONTEXT_MENU_COMMAND_ID,
+    TOGGLE_CONTEXT_MENU_COMMAND_ID_ZH,
     TOGGLE_CONTEXT_MENU_COMMAND_NAME,
-    TOGGLE_CONTEXT_MENU_PALETTE_LABEL,
+    TOGGLE_CONTEXT_MENU_NAMES,
     setContextMenuEnabled,
     toggleContextMenu,
+    toggleCommandPaletteLabel,
 } from '../src/imageMenu/contextMenuToggle';
+import { setLanguage } from '../src/i18n/language';
 import { DEFAULT_IMAGE_MENU_SETTINGS } from '../src/imageMenu/settingsModel';
 import type { ImageMenuFacade } from '../src/imageMenu/imageMenuHost';
 
@@ -94,6 +97,9 @@ function facadeWith(enableContextMenu: boolean) {
 const createDivInSetup = (document as unknown as { createDiv: unknown }).createDiv;
 
 beforeEach(() => {
+    // The notice copy asserted below is the Chinese one; the English rendering of
+    // the same table is covered by the settings-copy guard in tests/i18n.test.ts.
+    setLanguage('zh');
     h.notices.length = 0;
     h.copied.length = 0;
     h.refuse = false;
@@ -112,15 +118,26 @@ beforeEach(() => {
 afterEach(() => {
     (document as unknown as { createDiv: unknown }).createDiv = createDivInSetup;
     Reflect.deleteProperty(navigator, 'clipboard');
+    setLanguage('en');
 });
 
 describe('the command this switch hands out', () => {
-    it('names the command as the palette renders it', () => {
+    it('names the command as the palette renders it, in the language of the notice', () => {
+        // Both languages are registered side by side, so the label the notice
+        // puts on the clipboard always names a command that exists.
         expect(TOGGLE_CONTEXT_MENU_COMMAND_ID).toBe('toggle-image-context-menu');
+        expect(TOGGLE_CONTEXT_MENU_COMMAND_ID_ZH).toBe('toggle-image-context-menu-zh');
         expect(TOGGLE_CONTEXT_MENU_COMMAND_NAME).toBe('Toggle image context menu');
-        expect(TOGGLE_CONTEXT_MENU_PALETTE_LABEL).toBe(
-            `Drag Image Auto Arrange: ${TOGGLE_CONTEXT_MENU_COMMAND_NAME}`
+
+        setLanguage('en');
+        expect(toggleCommandPaletteLabel()).toBe(
+            `Drag Image Auto Arrange: ${TOGGLE_CONTEXT_MENU_NAMES.en}`
         );
+        setLanguage('zh');
+        expect(toggleCommandPaletteLabel()).toBe(
+            `Drag Image Auto Arrange: ${TOGGLE_CONTEXT_MENU_NAMES.zh}`
+        );
+        setLanguage('en');
     });
 });
 
@@ -183,11 +200,11 @@ describe('setContextMenuEnabled', () => {
 
         await setContextMenuEnabled(facade, false, true);
 
-        expect(h.copied).toEqual([TOGGLE_CONTEXT_MENU_PALETTE_LABEL]);
+        expect(h.copied).toEqual([toggleCommandPaletteLabel()]);
         expect(h.notices).toHaveLength(1);
         expect(linesOf(h.notices[0])).toEqual([
             '图片右键菜单已关闭',
-            `开启命令「${TOGGLE_CONTEXT_MENU_PALETTE_LABEL}」已复制到剪贴板`,
+            `开启命令「${toggleCommandPaletteLabel()}」已复制到剪贴板`,
             '在「设置 → 快捷键」中搜索该命令并绑定快捷键，即可随时重新开启。',
         ]);
     });
@@ -203,7 +220,7 @@ describe('setContextMenuEnabled', () => {
         expect(h.notices).toHaveLength(1);
         expect(linesOf(h.notices[0])).toEqual([
             '图片右键菜单已关闭',
-            `开启命令「${TOGGLE_CONTEXT_MENU_PALETTE_LABEL}」复制到剪贴板失败，可手动记下该名称`,
+            `开启命令「${toggleCommandPaletteLabel()}」复制到剪贴板失败，可手动记下该名称`,
             '在「设置 → 快捷键」中搜索该命令并绑定快捷键，即可随时重新开启。',
         ]);
     });

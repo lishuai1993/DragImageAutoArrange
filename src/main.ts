@@ -1,4 +1,4 @@
-import { Plugin, MarkdownView } from "obsidian";
+import { Plugin, MarkdownView, type Editor, type MarkdownFileInfo } from "obsidian";
 import { activeMarkdownView } from "./utils";
 import { editorCmOf } from "./obsidianInternals";
 import {
@@ -26,12 +26,14 @@ import { createImageMenuFacade, type ImageMenuFacade } from "./imageMenu/imageMe
 import {
   toggleContextMenu,
   TOGGLE_CONTEXT_MENU_COMMAND_ID,
-  TOGGLE_CONTEXT_MENU_COMMAND_NAME,
+  TOGGLE_CONTEXT_MENU_COMMAND_ID_ZH,
+  TOGGLE_CONTEXT_MENU_NAMES,
 } from "./imageMenu/contextMenuToggle";
 import { findMarkdownViewForElement } from "./imageMenu/imageSource";
 import { installReferencePaste } from "./imageMenu/referencePaste";
 import { logger } from "./logger";
 import { setGeometryProbeEnabled } from "./diagnostics/probe";
+import { setLanguage } from "./i18n/language";
 const log = logger.channel("main");
 
 /** The plugin's own slice of `data.json`. Other modules (the image-menu host)
@@ -47,6 +49,7 @@ export default class DragImageAutoArrangePlugin
   implements IDragImagePlugin
 {
   settings: DragImageSettings = {
+    language: "en",
     defaultRowHeight: 200,
     maxImagesPerRow: 10,
     gapSize: 4,
@@ -87,6 +90,9 @@ export default class DragImageAutoArrangePlugin
     logger.setMinLevel(this.settings.logLevel);
     logger.setFileEnabled(this.settings.logToFile);
     setGeometryProbeEnabled(this.settings.geometryProbe);
+    // Before anything draws: the settings tab and the context menu resolve
+    // their copy through the language singleton as they render.
+    setLanguage(this.settings.language);
 
     log.info("Plugin loading", { version: this.manifest.version });
 
@@ -271,18 +277,28 @@ export default class DragImageAutoArrangePlugin
     );
     log.info("Standalone drop plugin registered");
 
-    // Command: rescan image groups
-    this.addCommand({
-      id: "rescan-image-groups",
-      name: "Rescan image groups in current note",
-      editorCallback: (_editor, view) => {
+    // Commands: rescan image groups. One per language, registered side by side
+    // rather than renamed on a language switch — a command name is also what a
+    // hotkey binds to, so both exist from the start and neither has to move.
+    const rescan = {
+      editorCallback: (_editor: Editor, view: MarkdownView | MarkdownFileInfo) => {
         log.info("Command: rescan-image-groups");
         if (view instanceof MarkdownView && view.previewMode) {
           view.previewMode.rerender(true);
-        } else {
+        } else if (_editor) {
           _editor.refresh();
         }
       },
+    };
+    this.addCommand({
+      ...rescan,
+      id: "rescan-image-groups",
+      name: "Rescan image groups in current note",
+    });
+    this.addCommand({
+      ...rescan,
+      id: "rescan-image-groups-zh",
+      name: "重新扫描当前笔记的图片分组",
     });
 
     log.info("Plugin loaded successfully");
@@ -297,10 +313,16 @@ export default class DragImageAutoArrangePlugin
     // The way back for anyone who switches the menu off from the menu itself —
     // its palette label is what the switch-off notice puts on the clipboard, so
     // the user can find this command in 设置 → 快捷键 without recalling it.
+    const switchMenu = { callback: () => void toggleContextMenu(imageMenu) };
     this.addCommand({
+      ...switchMenu,
       id: TOGGLE_CONTEXT_MENU_COMMAND_ID,
-      name: TOGGLE_CONTEXT_MENU_COMMAND_NAME,
-      callback: () => void toggleContextMenu(imageMenu),
+      name: TOGGLE_CONTEXT_MENU_NAMES.en,
+    });
+    this.addCommand({
+      ...switchMenu,
+      id: TOGGLE_CONTEXT_MENU_COMMAND_ID_ZH,
+      name: TOGGLE_CONTEXT_MENU_NAMES.zh,
     });
 
     // 设置页要编辑图片菜单的设置项（文件信息 / 删除前确认 / 文件操作），因此

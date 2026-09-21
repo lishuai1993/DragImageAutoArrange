@@ -15,7 +15,7 @@
  * control column, and the framework re-renders a matched row into the same
  * element rather than building a new one.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   Setting,
   type SettingDefinitionGroup,
@@ -38,6 +38,7 @@ import {
   type ImageMenuSettings,
 } from '../src/imageMenu/settingsModel';
 import { FILE_OPERATION_LABELS } from '../src/imageMenu/menuLabels';
+import { setLanguage } from '../src/i18n/language';
 import type {
   LinePlan,
   VaultPassProgress,
@@ -277,7 +278,16 @@ function menuBridge(
   return { getSettings: () => settings, saveSettings };
 }
 
-const operationNames = FILE_OPERATION_IDS.map((id) => FILE_OPERATION_LABELS[id]);
+/** Read per call, never held: the labels resolve against the language in force
+ *  when they are read. */
+const operationNames = (): string[] =>
+  FILE_OPERATION_IDS.map((id) => FILE_OPERATION_LABELS[id]);
+
+// The copy asserted below is the Chinese one, so pin the language for the file
+// and hand the singleton back as it was found. The English rendering of the same
+// tables is covered by the settings-copy guard in tests/i18n.test.ts.
+beforeEach(() => setLanguage('zh'));
+afterEach(() => setLanguage('en'));
 
 const MAINTENANCE_BRIDGE: MaintenanceBridge = {
   extensions: 'png',
@@ -303,11 +313,11 @@ describe('image menu section definitions', () => {
       '显示文件信息',
       '删除前确认',
       '文件操作',
-      ...operationNames,
+      ...operationNames(),
     ]);
     // Every row needs imperative code (a button, a pair of arrows), so none may
     // be handed over as a pure `control` definition the framework renders alone.
-    expect(rowsOf(group)).toHaveLength(4 + operationNames.length);
+    expect(rowsOf(group)).toHaveLength(4 + operationNames().length);
   });
 
   it('keeps the stored operation order', () => {
@@ -349,7 +359,7 @@ describe('image menu section definitions', () => {
     const rows = rowsOf(
       groupOf(imageMenuSectionDefinitions(menuBridge(menuSettings(), vi.fn()), vi.fn()))
     );
-    const setting = renderRow(rowNamed(rows, operationNames[0]), document.createDiv());
+    const setting = renderRow(rowNamed(rows, operationNames()[0]), document.createDiv());
 
     const arrows = Array.from(setting.controlEl.querySelectorAll('button'));
     expect(arrows.map((button) => button.disabled)).toEqual([true, false]);
@@ -408,7 +418,7 @@ describe('image menu section, imperative path', () => {
       '图片右键菜单设置'
     );
     const group = must(containerEl, '.diaa-settings-group');
-    expect(group.querySelectorAll('.setting-item')).toHaveLength(4 + operationNames.length);
+    expect(group.querySelectorAll('.setting-item')).toHaveLength(4 + operationNames().length);
   });
 
   it('rebuilds its group in the new order after a reorder', async () => {

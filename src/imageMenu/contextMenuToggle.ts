@@ -17,19 +17,36 @@
 import { Notice } from 'obsidian';
 import { CLASSES } from '../constants';
 import { logger } from '../logger';
+import { t, type Localized } from '../i18n/language';
 import type { ImageMenuFacade } from './imageMenuHost';
 import { NOTICE_DONE, contextMenuDisabledLines } from './menuLabels';
 
 const log = logger.channel('imageMenuToggle');
 
 export const TOGGLE_CONTEXT_MENU_COMMAND_ID = 'toggle-image-context-menu';
-export const TOGGLE_CONTEXT_MENU_COMMAND_NAME = 'Toggle image context menu';
+export const TOGGLE_CONTEXT_MENU_COMMAND_ID_ZH = 'toggle-image-context-menu-zh';
+
+/**
+ * The command's name in both languages. Both are registered as separate commands
+ * (see main.ts) rather than one command that renames itself: a command name is
+ * also a hotkey binding's identity, and re-registering on a language change would
+ * churn the hotkey list. Registering both means a user can find this command
+ * under a name they recognise whichever language the interface is showing.
+ */
+export const TOGGLE_CONTEXT_MENU_NAMES: Localized = {
+    zh: '开关 DIAA 图片右键菜单',
+    en: 'Toggle image context menu',
+};
+
+export const TOGGLE_CONTEXT_MENU_COMMAND_NAME = TOGGLE_CONTEXT_MENU_NAMES.en;
 
 /** The command as the palette renders it, plugin name included — exactly the
  *  string a search in 设置 → 快捷键 matches, which is what makes the clipboard
- *  hand-off useful. */
-export const TOGGLE_CONTEXT_MENU_PALETTE_LABEL =
-    'Drag Image Auto Arrange: Toggle image context menu';
+ *  hand-off useful. Resolved per call so the copy names the command in the
+ *  language of the notice that carries it. */
+export function toggleCommandPaletteLabel(): string {
+    return `Drag Image Auto Arrange: ${t(TOGGLE_CONTEXT_MENU_NAMES)}`;
+}
 
 /**
  * Write the master switch. `announce` is the difference between the two kinds
@@ -50,7 +67,7 @@ export async function setContextMenuEnabled(
         return;
     }
     const copied = await copyEnableCommand();
-    new Notice(noticeLines(contextMenuDisabledLines(TOGGLE_CONTEXT_MENU_PALETTE_LABEL, copied)));
+    new Notice(noticeLines(contextMenuDisabledLines(toggleCommandPaletteLabel(), copied)));
 }
 
 /**
@@ -86,7 +103,7 @@ export async function toggleContextMenu(facade: ImageMenuFacade): Promise<void> 
 /** A refused clipboard must not undo the switch, so this reports rather than throws. */
 async function copyEnableCommand(): Promise<boolean> {
     try {
-        await navigator.clipboard.writeText(TOGGLE_CONTEXT_MENU_PALETTE_LABEL);
+        await navigator.clipboard.writeText(toggleCommandPaletteLabel());
         return true;
     } catch (error) {
         log.warn('LOG_IMAGE_MENU_TOGGLE_CLIPBOARD_FAILED', { error: String(error) });

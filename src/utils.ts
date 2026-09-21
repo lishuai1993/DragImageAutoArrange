@@ -1,4 +1,5 @@
 import { MarkdownView, type App, type TAbstractFile } from "obsidian";
+import { t } from "./i18n/language";
 
 /**
  * Compile-time exhaustiveness guard for discriminated unions. Put it in the
@@ -189,5 +190,10 @@ export async function trashFile(app: App, file: TAbstractFile): Promise<void> {
     return;
   }
 
-  throw new Error("当前 Obsidian 版本不支持删除文件");
+  throw new Error(
+    t({
+      zh: "当前 Obsidian 版本不支持删除文件",
+      en: "This version of Obsidian cannot delete files",
+    })
+  );
 }

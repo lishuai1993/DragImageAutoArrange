@@ -7,6 +7,7 @@ import {
   normalizeRowAfterRemoval,
   sourceLineFromMarkers,
 } from '../src/imageMenu/cutImage';
+import { setLanguage } from '../src/i18n/language';
 import { planImageLinkRemoval, removeImageLinkOccurrences } from '../src/imageMenu/noteLinks';
 import { lineStartOffset, minimalTextChange } from '../src/imageMenu/noteEdit';
 
@@ -119,8 +120,13 @@ describe('normalizeRowAfterRemoval', () => {
 });
 
 describe('cutImageKeptNotice', () => {
-  it('matches the agreed wording', () => {
+  it('matches the agreed wording in both languages', () => {
+    setLanguage('zh');
     expect(cutImageKeptNotice(3)).toBe('仅剪切图像引用（文件仍被 3 处引用）');
+    setLanguage('en');
+    expect(cutImageKeptNotice(3)).toBe(
+      'Only the reference was cut (the file is still referenced 3 times elsewhere)'
+    );
   });
 });
 
