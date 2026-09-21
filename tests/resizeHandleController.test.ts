@@ -81,11 +81,16 @@ function makeRow(turned: boolean): Harness {
     getObjectPosition: () => 'left top',
     updateHandlePositions: () => undefined,
     isTurnedImage: () => turned,
+    noteDragGeometry: () => undefined,
     syncItemToDrawing: () => calls.push('syncItemToDrawing'),
     notifyLayoutChange: () => undefined,
     emitResizeEnd: () => undefined,
     setImageScale: () => undefined,
     setSingleImageWidth: (w) => calls.push(`setSingleImageWidth:${w}`),
+    getSnapSensitivity: () => 3,
+    // A lone row has no junction on either side, so it offers no bar — which is
+    // also the whole of what the drag asks before snapping.
+    setResizeSnapSide: () => false,
   };
   return { host, item, img, container, calls };
 }
@@ -173,5 +178,178 @@ describe('single-image resize drag', () => {
     dragSE(zoomed, 0, 3000);
     // Zoom is not representable as a capped width, so nothing is written.
     expect(zoomed.calls.some((c) => c.startsWith('setSingleImageWidth'))).toBe(false);
+  });
+});
+
+/**
+ * Snap behaviour of a multi-image resize drag, on a three-member row whose
+ * middle member is the one under the handle.
+ *
+ * The drag reads every height off the members themselves — which is what
+ * `recalculateRowHeight` leaves behind, each cell carrying its own drawn height —
+ * so the harness only has to say what each member stands at.  The middle member
+ * starts at 180 and the south-east corner is driven, where both weights are 1
+ * and the blended delta is `dy / 2`.
+ */
+interface ThreeRow {
+  host: ResizeHost;
+  items: HTMLElement[];
+  /** Every side the drag has asked for a bar on, in order. */
+  sides: Array<'left' | 'right' | null>;
+  /** Every rectangle the drag has handed the host as the model, in order. */
+  notes: Array<{ index: number; box: number; drawn: number }>;
+}
+
+function makeThreeRow(
+  heights: [number, number, number],
+  opts: { sensitivity?: number; canSnap?: boolean } = {}
+): ThreeRow {
+  const container = createDiv();
+  const items: HTMLElement[] = [];
+  const imgs: HTMLImageElement[] = [];
+  container.setCssStyles({ height: `${heights[2]}px` });
+  container.getBoundingClientRect = () => rect(CONTAINER_W, heights[2]);
+
+  for (let i = 0; i < heights.length; i++) {
+    const item = createDiv();
+    const img = createEl('img');
+    item.appendChild(img);
+    container.appendChild(item);
+    item.setCssStyles({ height: `${heights[i]}px` });
+    // Read through to the inline height so a cell and its picture always agree,
+    // which is the invariant the drag's own mismatch probe checks.
+    const cellH = () => Number.parseFloat(item.style.height) || 0;
+    const boxH = () => Number.parseFloat(img.style.height) || 0;
+    item.getBoundingClientRect = () => rect(CONTAINER_W / 3, cellH());
+    img.getBoundingClientRect = () => rect(CONTAINER_W / 3, boxH());
+    items.push(item);
+    imgs.push(img);
+  }
+
+  const sides: Array<'left' | 'right' | null> = [];
+  const notes: ThreeRow['notes'] = [];
+  const host: ResizeHost = {
+    getContainer: () => container,
+    getItemEls: () => items,
+    getImageEls: () => imgs,
+    getInterItemSpace: () => 0,
+    getSnapSensitivity: () => opts.sensitivity ?? 3,
+    getLoadedMeta: () => NATURAL,
+    getImageContentRect: (i) => ({
+      left: 0,
+      top: 0,
+      width: CONTAINER_W / 3,
+      height: heights[i],
+    }),
+    getObjectPosition: () => 'left top',
+    updateHandlePositions: () => undefined,
+    isTurnedImage: () => false,
+    boxHeightForDrawn: (h) => h,
+    noteDragGeometry: (i, box, drawn) => notes.push({ index: i, box, drawn }),
+    syncItemToDrawing: () => undefined,
+    notifyLayoutChange: () => undefined,
+    emitResizeEnd: () => undefined,
+    setImageScale: () => undefined,
+    setSingleImageWidth: () => undefined,
+    setResizeSnapSide: (_index, side) => {
+      sides.push(side);
+      return opts.canSnap ?? true;
+    },
+  };
+  return { host, items, sides, notes };
+}
+
+/**
+ * Press the middle member's south-east corner, move `dys` in turn, and release.
+ * Returns the sides asked for *during* the drag: releasing appends its own
+ * clearing call, which only the teardown case is about.
+ */
+function dragMiddle(h: ThreeRow, dys: number[]): Array<'left' | 'right' | null> {
+  const { handles } = new ResizeHandleController(h.host).buildHandles(h.items[1], 1);
+  handles[SE_CORNER].dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100 }));
+  for (const dy of dys) {
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100, clientY: 100 + dy }));
+  }
+  const during = [...h.sides];
+  document.dispatchEvent(new MouseEvent('mouseup'));
+  return during;
+}
+
+describe('multi-image resize drag snapping', () => {
+  it('lands on the neighbour the pointer has reached', () => {
+    // Middle starts at 180, the right neighbour stands at 220.
+    const h = makeThreeRow([160, 180, 220]);
+    const sides = dragMiddle(h, [80]);
+
+    expect(h.items[1].style.height).toBe('220px');
+    expect(sides).toEqual(['right']);
+  });
+
+  it('records everything it wrote as the model, dragged member and neighbours alike', () => {
+    // A member's model box is what the observer and the next layout pass read
+    // back; left at the pre-drag value it would be "something else wrote this"
+    // and the picture would snap back to the older rectangle on the first check.
+    const h = makeThreeRow([160, 180, 220]);
+    dragMiddle(h, [80]);
+
+    expect(h.notes).toEqual([
+      { index: 1, box: 220, drawn: 220 },
+      { index: 0, box: 160, drawn: 160 },
+      { index: 2, box: 220, drawn: 220 },
+    ]);
+  });
+
+  it('leaves the height on the pointer between zones', () => {
+    const h = makeThreeRow([160, 180, 220]);
+    // 190 sits 10 from the left neighbour and 30 from the right: in neither zone.
+    const sides = dragMiddle(h, [20]);
+
+    expect(h.items[1].style.height).toBe('190px');
+    expect(sides).toEqual([null]);
+  });
+
+  it('crosses to the other neighbour when the drag leaves its zone', () => {
+    const h = makeThreeRow([160, 180, 220]);
+    // Down onto the right neighbour at 220, then back up past its zone to 164,
+    // inside the left neighbour's (160 ± 4.8).
+    const sides = dragMiddle(h, [80, -32]);
+
+    expect(sides).toEqual(['right', 'left']);
+    expect(h.items[1].style.height).toBe('160px');
+  });
+
+  it('keeps its claim while the pointer stays in the zone it already holds', () => {
+    // Neighbours 200 and 204 — closer together than two zones, so both reach the
+    // pointer at once and the first move has to break the tie.
+    const h = makeThreeRow([200, 180, 204]);
+    // 202 is two from each; then 203, which the right neighbour is nearer to.
+    const sides = dragMiddle(h, [44, 46]);
+
+    expect(sides).toEqual(['left', 'left']);
+    expect(h.items[1].style.height).toBe('200px');
+  });
+
+  it('snaps nothing at zero sensitivity', () => {
+    const h = makeThreeRow([160, 180, 220], { sensitivity: 0 });
+    const sides = dragMiddle(h, [80]);
+
+    expect(h.items[1].style.height).toBe('220px');
+    expect(sides).toEqual([null]);
+  });
+
+  it('does not lock when the row has no bar to show', () => {
+    // Dividers switched off: the row cannot say why the height locked, so the
+    // drag runs unsnapped rather than locking silently.
+    const h = makeThreeRow([160, 180, 220], { canSnap: false });
+    dragMiddle(h, [80]);
+
+    expect(h.items[1].style.height).toBe('220px');
+  });
+
+  it('puts the bar out when the drag ends', () => {
+    const h = makeThreeRow([160, 180, 220]);
+    dragMiddle(h, [80]);
+
+    expect(h.sides.at(-1)).toBeNull();
   });
 });

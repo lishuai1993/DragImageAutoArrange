@@ -212,6 +212,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private imageEls: HTMLImageElement[] = [];
   private itemEls: HTMLElement[] = [];
   private dividerEls: HTMLElement[] = [];
+  /** The divider a resize drag has lit as its equilibrium bar, so the next side
+   *  can take the light off it — and so teardown can put it out. */
+  private resizeSnapDivider: HTMLElement | null = null;
   private resizeHandles: HTMLElement[][] = [];
   private handleDefs: HandleDef[][] = [];
   private resizeObserver: ResizeObserver | null = null;
@@ -441,6 +444,30 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this._scaleDirtyImages.add(index);
   }
   /**
+   * The equilibrium bar a resize drag shows: the divider on one side of `index`,
+   * which is the junction between the two members the snap has just equalised.
+   * `dividerEls[k]` is built by `build(k)` and sits before member `k + 1`, so the
+   * junction on a member's left is `index - 1` and the one on its right is
+   * `index` itself.
+   *
+   * One bar at a time: the light is taken off whichever divider held it before,
+   * which covers both a drag crossing to the other side of the member and a
+   * teardown.  A null side is the teardown form and has no junction of its own —
+   * it only puts out what is lit.
+   */
+  setResizeSnapSide(index: number, side: "left" | "right" | null): boolean {
+    const junction = side === "left" ? index - 1 : side === "right" ? index : -1;
+    const divider = junction >= 0 ? this.dividerEls[junction] : undefined;
+
+    const lit = this.resizeSnapDivider;
+    if (lit && lit !== divider) lit.classList.remove(CLASSES.dividerSnap);
+    this.resizeSnapDivider = divider ?? null;
+
+    if (!divider) return false;
+    divider.classList.toggle(CLASSES.dividerSnap, side !== null);
+    return true;
+  }
+  /**
    * Persist a single image's manually-resized width as `|1|W` (S=1 = manual).
    * `screenWidthPx` is the width the picture takes across the page, not the
    * width of the box it is laid out in — the two differ whenever a quarter turn
@@ -569,6 +596,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    *  own writes too, so this is a self-inflicted overwrite whenever the two
    *  rectangles disagree. */
   private expectedImgBoxHeight(index: number): string | null {
+    // A resize drag *is* the writer while it runs: it re-derives the box from
+    // the pointer on every mousemove. Policing it against the model here would
+    // restore the box the layout solved for and undo the drag — visibly so on a
+    // turned member, where the two never coincide during the drag. The drag's own
+    // inline value is the expectation for as long as it owns the row.
+    if (this.itemEls.some((el) => el?.classList.contains(CLASSES.resizing))) {
+      return this.imageEls[index]?.style.height || null;
+    }
     if (this.isSingleRow() && this.isTurnedImage(index) && this.singleImgBoxH > 0) {
       return `${this.singleImgBoxH}px`;
     }
@@ -607,9 +642,19 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.modelDrawn.set(index, drawn);
   }
 
+  /** A resize drag's own rectangle, recorded as the model for one member. See
+   *  ResizeHost.noteDragGeometry: the drag is a legitimate writer of the box, and
+   *  a model left at the last layout pass's value would be read as "the drag
+   *  wrote something foreign" by the next pass and every restore in between. */
+  noteDragGeometry(index: number, boxHeight: number, drawnHeight: number): void {
+    this.recordGeometry(index, boxHeight, drawnHeight);
+  }
+
   /** Whether a member's rendered frame may be read back into the note as its
-   *  fill ratio — `content width / item width`.  That ratio only means "how much
-   *  of its column this picture fills" while the frame is the one the layout
+   *  fill ratio — `content width / item width`, i.e. the layout box over the
+   *  column's width.  (How wide the picture *paints* is a separate figure: at a
+   *  quarter turn only `k / a` of that box is painted.)  The ratio means that
+   *  only while the frame is the one the layout
    *  pass produced: the picture has loaded, the container is still the width the
    *  pass solved for, and the img still carries the box the pass wrote.  A frame
    *  that fails any of these draws a picture nobody asked for, and freezing its
@@ -905,6 +950,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.imageEls = [];
     this.itemEls = [];
     this.dividerEls = [];
+    this.resizeSnapDivider = null;
     this.resizeHandles = [];
 
     for (let i = 0; i < images.length; i++) {
@@ -2791,6 +2837,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         if (h._destroy) h._destroy();
       }
     }
+    this.resizeSnapDivider = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.narrowUnsub?.();
@@ -2833,6 +2880,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.imageEls = [];
     this.itemEls = [];
     this.dividerEls = [];
+    this.resizeSnapDivider = null;
     this.resizeHandles = [];
     this.handleDefs = [];
     if (this.container) {

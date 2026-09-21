@@ -30,7 +30,7 @@ export type RowKind = "multi" | "single";
 
 export type ImageDisplay =
   | { kind: "multi"; share: number; fill: number | null }
-  //  行宽份额 (flexGrow)      列内填充比 (scale)，null = 满格默认
+  //  行宽份额 (flexGrow)      列内填充比 (fill)：布局框宽 ÷ 本格宽，封顶 1；null = 满格默认
   | { kind: "single-follow" }                 // S=0 跟随设置
   | { kind: "single-manual"; widthPx: number }; // S=1 手动态：图片在屏幕上的横向占宽（px）
 

@@ -189,14 +189,16 @@ export interface ScaleBasedHeightsResult {
 /**
  * The coefficient `c` with `drawnHeight = c × itemWidth` for a member.
  *
- * Normally `fill / aspect`: the picture spans `fill` of its slot in width and
- * its height follows from the bitmap's own ratio.  A quarter turn keeps the
- * bitmap's ratio — the turned rectangle is the upright one on its side — and
- * scales it down (`quarterTurnFitScale`) so it fits inside the very rectangle it
- * came from: `fill / aspect` for a landscape, which keeps its height and
- * narrows, and `fill × aspect` for a portrait, which keeps its width and
- * shortens.  The picture is never enlarged and never clipped, and the row can
- * only ever get shorter.
+ * Normally `fill / aspect`: `fill` is the layout box over the slot
+ * (`boxW = fill × slotW`), and the width the picture actually paints is that box
+ * folded by the turn — the box itself upright or mirrored, `boxW × k / a` at a
+ * quarter turn — so the height follows from the bitmap's own ratio.  A quarter
+ * turn keeps the bitmap's ratio — the turned rectangle is the upright one on its
+ * side — and scales it down (`quarterTurnFitScale`) so it fits inside the very
+ * rectangle it came from: `fill / aspect` for a landscape, which keeps its
+ * height and narrows, and `fill × aspect` for a portrait, which keeps its width
+ * and shortens.  The box is never widened past its slot and the picture is never
+ * enlarged or clipped, so the row can only ever get shorter.
  *
  * This is the one place the drawn frame is defined; every model entry point
  * that has to agree on "equal heights" derives from it.
@@ -221,14 +223,14 @@ export function drawnHeightCoefficient(
  * `drawnHeightCoefficient(meta, fill, from)`, so the fill that reproduces it in
  * the new orientation is that number over the coefficient at fill 1:
  *
- *     fill' = k(fill, from) / k(1, to)
+ *     fill' = c(fill, from) / c(1, to)
  *
- * Clamped to 1: the whole reason a turn needs a write at all is that a member
- * can paint less than its slot (a turned portrait keeps its width and
- * shortens), and that is exactly what fill records — but the reverse (a member
- * needing to paint *more* than its slot, e.g. an upright portrait asked to lie
- * down) is not representable and the turn is the only gesture allowed to make
- * the member shorter.
+ * Clamped to 1: the whole reason a turn needs a write at all is that a member's
+ * box can come out narrower than its slot (a turned portrait keeps its width and
+ * shortens), and that is exactly what fill records — but the reverse (a box
+ * needing to be *wider* than its slot, e.g. an upright portrait asked to lie
+ * down needs `fill = 1 / aspect² > 1`) is not representable, and the turn is the
+ * only gesture allowed to make the member shorter.
  */
 export function fillForTurn(
   meta: ImageMeta,

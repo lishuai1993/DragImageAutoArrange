@@ -152,4 +152,39 @@ describe('applyFlexGrowChanges', () => {
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0].changes[0].insert).toBe('![[a.webp|orig|center|310|52]]');
   });
+
+  it('keeps the word the document holds, not the one the group was built with', () => {
+    // The rotate repro: the new orientation word is written into the document,
+    // and the teardown persist then fires from the group parsed *before* that
+    // edit.  Rebuilding the line out of that group stamped the old word back
+    // over the rotate — the picture turned, then snapped back a frame later.
+    const doc = '![[a.webp|r90fh|center|310|100]]';
+    const stale: RowImage = {
+      ...multiImage(0, '![[a.webp|fh|center|310|100]]', 3.1),
+      orientation: { turns: 0, mirror: true },
+    };
+    const { view, dispatched } = fakeView([doc]);
+    applyFlexGrowChanges(view as never, [stale], [3.1], [0.52], 'center');
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].changes[0].insert).toBe('![[a.webp|r90fh|center|310|52]]');
+  });
+
+  it('keeps the document alignment over the stale one, and the model alignment when the document has none', () => {
+    const stale: RowImage = {
+      ...multiImage(0, '![[a.webp|r90|left|310|100]]', 3.1),
+      alignment: 'left',
+      orientation: { turns: 1, mirror: false },
+    };
+
+    const moved = fakeView(['![[a.webp|r90|right|310|100]]']);
+    applyFlexGrowChanges(moved.view as never, [stale], [3.1], [0.52], 'center');
+    expect(moved.dispatched[0].changes[0].insert).toBe('![[a.webp|r90|right|310|52]]');
+
+    // A line with no alignment slot is not a vote for "none": the group's own
+    // word still lands, as it does today.
+    const bare = fakeView(['![[a.webp|r90|310|100]]']);
+    applyFlexGrowChanges(bare.view as never, [stale], [3.1], [0.52], 'center');
+    expect(bare.dispatched[0].changes[0].insert).toBe('![[a.webp|r90|left|310|52]]');
+  });
 });

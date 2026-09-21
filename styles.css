@@ -126,11 +126,6 @@
   border-radius: 2px;
 }
 
-/* Snap highlight on image items */
-.diaa-item.diaa-snap {
-  box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.7);
-}
-
 /* Resize handles on image content — square, more prominent */
 .diaa-resize-handle {
   position: absolute;

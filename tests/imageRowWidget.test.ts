@@ -517,8 +517,8 @@ describe('ImageRowWidget replays each member orientation as a CSS transform', ()
     const imgs = el.querySelectorAll('img');
     expect(imgs.length).toBe(2);
     // A row member carries its bitmap's aspect as the scale, so the turned
-    // drawing keeps spanning its fill share of the slot instead of being fitted
-    // back into the un-rotated box.
+    // member's box keeps the fill share of the slot it was given, instead of
+    // being fitted back into the un-rotated box.
     expect(imgs[0].style.transform).toBe(`scale(${500 / 654}) rotate(270deg)`);
     expect(imgs[1].style.transform).toBe('scaleX(-1)');
   });
@@ -787,7 +787,7 @@ describe('ImageRowWidget divider double-click', () => {
     // The shrunk member's 0.52 is what used to hand it a *wider* slot than the
     // picture — equal heights came out, but 135 px of the slot stayed empty.  On
     // aspect ratios the two 500×654 members get the same slot as each other, and
-    // every member draws the width of the slot it was given.
+    // every member's box fills the slot it was given.
     const items = Array.from(el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`));
     const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img'));
 
@@ -1149,5 +1149,151 @@ describe('handleRect', () => {
       width: 380,
       height: 288.4,
     });
+  });
+});
+
+/**
+ * Which divider a resize drag lights as its equilibrium bar.
+ *
+ * The side of a member is a junction, and a junction is one of the dividers the
+ * row built — `dividerEls[k]` is built by `build(k)` and appended before member
+ * `k + 1`.  Reading that off by one would light the wrong junction (or none, at
+ * the first and last members), which is a defect the geometry tests cannot see:
+ * the height still snaps, only the bar lands elsewhere.
+ */
+describe('equilibrium bar for a resize drag', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function threeRow(enableDividers = true): { widget: ImageRowWidget; el: HTMLElement } {
+    const group = makeGroup([
+      makeImage('a.webp', 17, 1),
+      makeImage('b.webp', 18, 4),
+      makeImage('c.webp', 19, 4),
+    ]);
+    const widget = new ImageRowWidget(group, { ...makeOptions(), enableDividers });
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 800, h: 1200 },
+      { w: 800, h: 1200 },
+      { w: 800, h: 1200 },
+    ]);
+    return { widget, el };
+  }
+
+  const snapClass = CLASSES.dividerSnap;
+
+  it('lights the junction on the side asked for, and only that one', () => {
+    const { widget } = threeRow();
+    const dividers = widget.getDividerEls();
+    expect(dividers).toHaveLength(2);
+
+    // The middle member's left junction is the divider before it, its right
+    // junction the one after it.
+    expect(widget.setResizeSnapSide(1, 'left')).toBe(true);
+    expect(dividers[0].classList.contains(snapClass)).toBe(true);
+    expect(dividers[1].classList.contains(snapClass)).toBe(false);
+  });
+
+  it('moves the bar across when the drag crosses to the other side', () => {
+    const { widget } = threeRow();
+    const dividers = widget.getDividerEls();
+
+    widget.setResizeSnapSide(1, 'left');
+    widget.setResizeSnapSide(1, 'right');
+
+    expect(dividers[0].classList.contains(snapClass)).toBe(false);
+    expect(dividers[1].classList.contains(snapClass)).toBe(true);
+  });
+
+  it('puts the bar out when asked for no side', () => {
+    const { widget } = threeRow();
+    const dividers = widget.getDividerEls();
+
+    widget.setResizeSnapSide(1, 'right');
+    widget.setResizeSnapSide(1, null);
+
+    expect(dividers[0].classList.contains(snapClass)).toBe(false);
+    expect(dividers[1].classList.contains(snapClass)).toBe(false);
+  });
+
+  it('has no junction outside the row, and lights nothing there', () => {
+    const { widget } = threeRow();
+    const dividers = widget.getDividerEls();
+
+    // A first member has no neighbour on its left: the drag must be told so,
+    // since it reads that as "do not snap at all".
+    expect(widget.setResizeSnapSide(0, 'left')).toBe(false);
+    expect(dividers.some((d) => d.classList.contains(snapClass))).toBe(false);
+  });
+
+  it('offers no bar when dividers are switched off', () => {
+    const { widget, el } = threeRow(false);
+    expect(widget.getDividerEls()).toHaveLength(0);
+    expect(el.querySelectorAll(`.${CLASSES.divider}`)).toHaveLength(0);
+
+    expect(widget.setResizeSnapSide(1, 'right')).toBe(false);
+  });
+});
+
+/**
+ * The observer that puts a third party's inline height back on the img has to
+ * stand down while a resize drag is running.  The drag re-derives that height
+ * from the pointer on every mousemove, and on a turned member the value it
+ * writes never matches the one the layout pass solved for — so the observer
+ * restored the model's box after each move, the picture stayed put and only the
+ * cell grew.  Pinned both ways: with the drag's marker on the row the write
+ * survives, and without it the observer still does its job.
+ */
+describe('ImageRowWidget yields the img box to a running resize drag', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** A two-member row whose first member is a turned portrait. */
+  function turnedRow(): { item: HTMLElement; img: HTMLImageElement } {
+    const group = makeGroup([
+      makeImage('a.png', 17, 1, false, { turns: 1, mirror: false }),
+      makeImage('b.png', 18, 1),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 944);
+    simulateImagesLoaded(widget, el, [
+      { w: 500, h: 654 },
+      { w: 500, h: 654 },
+    ]);
+    const items = el.querySelectorAll(`.${CLASSES.imageItem}`);
+    const imgs = el.querySelectorAll('img');
+    return { item: items[0] as HTMLElement, img: imgs[0] as HTMLImageElement };
+  }
+
+  /** MutationObserver callbacks are delivered as microtasks; jsdom's land after
+   *  a macrotask turn, so give the queue one. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('leaves the drag’s own height alone while the row carries the resizing marker', async () => {
+    const { item, img } = turnedRow();
+    item.classList.add(CLASSES.resizing);
+
+    img.style.height = '300px';
+    await settle();
+
+    expect(img.style.height).toBe('300px');
+  });
+
+  it('restores the model box once no drag is running', async () => {
+    const { img } = turnedRow();
+    const model = img.style.height;
+    expect(model).not.toBe('');
+
+    img.style.height = '300px';
+    await settle();
+
+    expect(img.style.height).toBe(model);
   });
 });

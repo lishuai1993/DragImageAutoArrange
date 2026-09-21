@@ -94,7 +94,8 @@ export interface PreviewOptions {
     /** Uniform scale prefixed onto the transform.  When supplied it is used
      *  verbatim — a container sized by `displayedImageSize` passes the fit factor
      *  that made the two agree, and a row member passes its bitmap's aspect so
-     *  the turned picture keeps spanning the same share of its slot; when omitted
+     *  the box keeps the share of the slot the layout solved for — the picture
+     *  painted inside it is what the turn folds; when omitted
      *  the scale is measured off the element's own box for the fixed-box callers. */
     scale?: number;
 }

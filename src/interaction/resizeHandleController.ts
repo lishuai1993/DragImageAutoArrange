@@ -28,6 +28,9 @@ export interface ResizeHost {
   /** Space one junction between adjacent items occupies, dividers included —
    *  the row width left to the items.  Not the CSS `gap`. */
   getInterItemSpace(): number;
+  /** Percent of a neighbour's height within which the drag counts as reaching
+   *  it.  The same figure the divider drag snaps on. */
+  getSnapSensitivity(): number;
   getLoadedMeta(index: number): ImageMeta | undefined;
   getImageContentRect(index: number): { left: number; top: number; width: number; height: number } | null;
   getObjectPosition(): string;
@@ -38,6 +41,11 @@ export interface ResizeHost {
   /** The layout-box height that paints as `drawnHeight` for this member — the
    *  identity unless it is turned, where the drawing is the box scaled down. */
   boxHeightForDrawn(drawnHeight: number, index: number): number;
+  /** Record the box a drag just wrote for one member, so the layout model holds
+   *  the drag's rectangle rather than the one the last layout pass solved for.
+   *  A member's model box is otherwise only ever written by a layout pass, and
+   *  the first pass after a drag would treat the drag's own box as foreign. */
+  noteDragGeometry(index: number, boxHeight: number, drawnHeight: number): void;
   /** Replay that member's orientation against the box as it now stands and
    *  re-fit a lone image's item to the drawing. */
   syncItemToDrawing(index: number): void;
@@ -45,7 +53,18 @@ export interface ResizeHost {
   emitResizeEnd(index: number, flexGrow: number): void;
   setImageScale(index: number, scale: number): void;
   setSingleImageWidth(widthPx: number): void;
+  /**
+   * Light the equilibrium bar on the divider at one side of `index`, or clear
+   * the one this drag lit (`side === null`).  Returns false when the row has no
+   * divider there to light — the dividers are switched off — which the drag
+   * reads as "this row cannot show a snap" and honours by not snapping: a height
+   * that locks with nothing on screen to explain it is worse than no snapping.
+   */
+  setResizeSnapSide(index: number, side: "left" | "right" | null): boolean;
 }
+
+/** Which neighbour a resize drag has locked onto, and the height it asks for. */
+type SnapSide = "left" | "right";
 
 /**
  * Builds the 8 resize handles (4 corners + 4 edge midpoints) for a flex item
@@ -55,6 +74,52 @@ export interface ResizeHost {
  */
 export class ResizeHandleController {
   constructor(private host: ResizeHost) {}
+
+  /**
+   * Which neighbour's snap zone the pointer has reached, if any, and the height
+   * that side asks for.
+   *
+   * `previous` is the side the drag locked on last time.  A zone that still
+   * holds the pointer keeps its claim, and that is the whole of "whichever zone
+   * the drag reached first wins" — leaving a zone drops the claim, and the next
+   * move resolves a fresh one.  Deciding purely on proximity instead would let a
+   * drag that is sitting in one zone flip to the other and back.
+   *
+   * With no claim to keep: the reached side takes it, and when both zones hold
+   * the pointer at once — the two neighbours closer together than two zones —
+   * the nearer target wins, an exact tie falling left.  The tie is geometrically
+   * meaningless (both sides ask for the same height and differ only in which
+   * divider lights), so the rule only has to be deterministic.
+   *
+   * A side whose neighbour has no height of its own — the row has not laid that
+   * member out yet — never claims.
+   */
+  private resolveSnapSide(
+    index: number,
+    rawHeight: number,
+    zone: number,
+    neighbourHeights: readonly number[],
+    previous: SnapSide | null
+  ): { side: SnapSide | null; height: number } {
+    const targets: Array<{ side: SnapSide; height: number }> = [];
+    if (index > 0) targets.push({ side: "left", height: neighbourHeights[index - 1] });
+    if (index + 1 < neighbourHeights.length) {
+      targets.push({ side: "right", height: neighbourHeights[index + 1] });
+    }
+
+    const reached = targets.filter(
+      (t) => zone > 0 && t.height > 0 && Math.abs(rawHeight - t.height) <= t.height * zone
+    );
+    if (reached.length === 0) return { side: null, height: rawHeight };
+    const kept = reached.find((t) => t.side === previous);
+    if (kept) return kept;
+
+    let best = reached[0];
+    for (const t of reached) {
+      if (Math.abs(rawHeight - t.height) < Math.abs(rawHeight - best.height)) best = t;
+    }
+    return best;
+  }
 
   buildHandles(
     item: HTMLElement,
@@ -95,7 +160,14 @@ export class ResizeHandleController {
       // Resize drag — feedforward: compute target flex-grow directly
       // from cursor position so the handle follows the cursor 1:1 without
       // overshoot/oscillation.
+      //
+      // In a multi-image row the drag also snaps: a neighbour's height the
+      // pointer comes within a zone of pulls the picture onto it and lights that
+      // side's divider.  `snappedSide` is the side that claim currently sits on,
+      // remembered across moves so the bar tracks a drag that leaves one zone for
+      // the other rather than flickering; cleared with the drag.
       let dragging = false;
+      let snappedSide: SnapSide | null = null;
       let currentOnMove: ((e: MouseEvent) => void) | null = null;
       let currentOnUp: (() => void) | null = null;
 
@@ -110,6 +182,7 @@ export class ResizeHandleController {
       handle.onmousedown = (e) => {
         try {
         dragging = true;
+        snappedSide = null;
         item.classList.add(CLASSES.resizing);
         log.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
         e.preventDefault();
@@ -276,15 +349,34 @@ export class ResizeHandleController {
           // Use image content height as delta baseline — not container height.
           // This eliminates the dead zone that occurs when container is taller
           // than the image (e.g. from a prior resize).
-          const targetDrawnH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
+          const rawH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
+
+          // A neighbour standing at the height the pointer asks for — within the
+          // snap zone, the same relative band the divider drag uses — claims the
+          // drag: that side's divider lights up and the picture is painted at
+          // exactly the neighbour's height.  The lock goes on the painted value
+          // only; `rawH` stays what the pointer says, so the drag can walk out of
+          // a zone it walked into.  A row with no divider to light refuses the
+          // claim (see `setResizeSnapSide`), and the drag runs unsnapped.
+          const zone = this.host.getSnapSensitivity() / 100;
+          const reached = this.resolveSnapSide(index, rawH, zone, startItemHeights, snappedSide);
+          const side = this.host.setResizeSnapSide(index, reached.side) ? reached.side : null;
+          if (side !== snappedSide) {
+            log.debug("resize-snap", { index, rawH, side, targetH: reached.height });
+          }
+          snappedSide = side;
+          const targetDrawnH = side ? reached.height : rawH;
+
           // The pointer drives the *drawing*: that is what the handles hug, and
           // that is what the cell is.  Only the img's layout box has to be
           // derived back out of it, and only a turn makes them differ — writing
           // the drawn height straight onto the box (as this did) moved a turned
           // member's cell without moving the picture at all.
-          const imageH = `${this.host.boxHeightForDrawn(targetDrawnH, index)}px`;
+          const boxH = this.host.boxHeightForDrawn(targetDrawnH, index);
+          const imageH = `${boxH}px`;
           this.host.getImageEls()[index].style.height = imageH;
           this.host.getItemEls()[index].style.height = `${targetDrawnH}px`;
+          this.host.noteDragGeometry(index, boxH, targetDrawnH);
           // Preserve each non-dragged image's original height (may differ
           // from container height due to prior manual resizes).  Those are cell
           // heights, which is the unit the row is measured in.
@@ -293,7 +385,9 @@ export class ResizeHandleController {
             if (j === index) continue;
             const h = `${startItemHeights[j]}px`;
             this.host.getItemEls()[j].style.height = h;
-            this.host.getImageEls()[j].style.height = `${this.host.boxHeightForDrawn(startItemHeights[j], j)}px`;
+            const otherBoxH = this.host.boxHeightForDrawn(startItemHeights[j], j);
+            this.host.getImageEls()[j].style.height = `${otherBoxH}px`;
+            this.host.noteDragGeometry(j, otherBoxH, startItemHeights[j]);
             otherMax = Math.max(otherMax, startItemHeights[j]);
           }
           const containerH = Math.max(targetDrawnH, otherMax);
@@ -323,8 +417,9 @@ export class ResizeHandleController {
             log.error("ImageRowWidget resize mousemove error", { error: String(err) });
             // Silently terminate the drag and clean up listeners.
             dragging = false;
+            snappedSide = null;
+            this.host.setResizeSnapSide(index, null);
             item.classList.remove(CLASSES.resizing);
-            item.classList.remove(CLASSES.itemSnap);
             if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
             if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
             currentOnMove = null;
@@ -335,8 +430,9 @@ export class ResizeHandleController {
         currentOnUp = () => {
           try {
           dragging = false;
+          snappedSide = null;
+          this.host.setResizeSnapSide(index, null);
           item.classList.remove(CLASSES.resizing);
-          item.classList.remove(CLASSES.itemSnap);
 
           // ── Persist scale ratio ──
           // Compute image-content-width / item-width ratio.  This captures the
@@ -408,6 +504,12 @@ export class ResizeHandleController {
       handle._destroy = () => {
         if (currentOnMove) document.removeEventListener("mousemove", currentOnMove);
         if (currentOnUp) document.removeEventListener("mouseup", currentOnUp);
+        // A widget torn down mid-drag leaves its bar lit; the divider it sits on
+        // is about to be dropped along with the rest of the row.
+        if (snappedSide) {
+          snappedSide = null;
+          this.host.setResizeSnapSide(index, null);
+        }
       };
 
       item.appendChild(handle);

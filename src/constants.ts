@@ -13,7 +13,6 @@ export const CLASSES = {
   placeholder: `${CSS_PREFIX}-placeholder`,
   dividerActive: `${CSS_PREFIX}-divider-active`,
   dividerSnap: `${CSS_PREFIX}-divider-snap`,
-  itemSnap: `${CSS_PREFIX}-snap`,
   topBar: `${CSS_PREFIX}-top-bar`,
   resizing: `${CSS_PREFIX}-resizing`,
   /** Reading-Mode row image sized by height, keeping its aspect ratio. */

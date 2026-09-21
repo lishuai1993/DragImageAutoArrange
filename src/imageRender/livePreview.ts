@@ -16,7 +16,7 @@ import {
 import { editorLivePreviewField } from "obsidian";
 import { detectRowGroups } from "../imageParse/imageDetector";
 import type { RowGroup } from "../imageParse/imageDetector";
-import { write as writeRowImage } from "../imageParse/rowParams";
+import { write as writeRowImage, isAlignmentWord } from "../imageParse/rowParams";
 import type { RowImage, Alignment } from "../imageParse/rowParams";
 import { ImageRowWidget, ImageRowOptions, getSidebarWidths } from "./imageRowWidget";
 import { DragImageSettings } from "../settings";
@@ -254,9 +254,37 @@ export function applyFlexGrowChanges(
     const img = images[i];
     if (img.display.kind !== "multi") continue;
     const fill = scales ? scales[i] : img.display.fill;
+
+    const line = img.line + 1; // 1-indexed
+    if (line < 1 || line > view.state.doc.lines) continue;
+    const lineObj = view.state.doc.line(line);
+    // Anti-resurrection: a deferred persist may fire after a structural move
+    // (moveLine) relocated this image. If the cached line no longer references
+    // the same file, skip it — otherwise we'd rewrite a now-blank/different line
+    // and resurrect the moved embed at its old position.
+    if (!lineObj.text.includes(img.fileName)) continue;
+
+    // Base the rewrite on the document's own line, not on `img`. Only the share
+    // and fill slots are the caller's to set; every other slot (orientation,
+    // alignment) is re-read from the text as it stands now. `img` comes from the
+    // group the widget was built with, so a word-slot-only edit (rotate, flip,
+    // align) that already landed in the document but whose rebuild is still
+    // in flight would otherwise be stamped back to the pre-edit word by this
+    // write — the rotate would visibly revert ~one frame later.
+    const params = embedParamString(lineObj.text);
+    const tokens = params.split("|");
+    const alignOffset = isOrientationWord(tokens[0]) ? 1 : 0;
+    // Same rule as the parser's multi-alignment read: the word only occupies the
+    // slot when a `|` follows it, so a trailing lone word is not an alignment.
+    const docAlignment =
+      isAlignmentWord(tokens[alignOffset]) && tokens.length > alignOffset + 1
+        ? tokens[alignOffset]
+        : undefined;
     const edited: RowImage = {
       ...img,
-      alignment: img.alignment ?? defaultAlignment,
+      raw: lineObj.text,
+      orientation: parseOrientationWord(params) ?? IDENTITY_STATE,
+      alignment: docAlignment ?? img.alignment ?? defaultAlignment,
       display: {
         kind: "multi",
         // Rounded onto the persisted grid here, at the single funnel every
@@ -268,15 +296,6 @@ export function applyFlexGrowChanges(
       },
     };
     const newLine = writeRowImage(edited);
-
-    const line = img.line + 1; // 1-indexed
-    if (line < 1 || line > view.state.doc.lines) continue;
-    const lineObj = view.state.doc.line(line);
-    // Anti-resurrection: a deferred persist may fire after a structural move
-    // (moveLine) relocated this image. If the cached line no longer references
-    // the same file, skip it — otherwise we'd rewrite a now-blank/different line
-    // and resurrect the moved embed at its old position.
-    if (!lineObj.text.includes(img.fileName)) continue;
     // Compare against the document, never against `img.raw`: a param-only write
     // does not rebuild the widget (`eqInner` strips the params before comparing),
     // so `img.raw` keeps whatever it held when the DOM was last built. A later
