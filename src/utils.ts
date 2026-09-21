@@ -25,6 +25,13 @@ export function assertNever(x: never): never {
   throw new Error(`Unexpected variant: ${JSON.stringify(x)}`);
 }
 
+/** A pixel measurement rounded to two decimals, for log lines: the rects the
+ *  render paths read return long fractions, and two otherwise identical frames
+ *  would read as different ones. */
+export function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
 /**
  * Resolve an Obsidian image wikilink to its actual file resource path.
  *

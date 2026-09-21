@@ -32,8 +32,7 @@ export type ToggleKey =
   | "enableDividers"
   | "enableReadingModeContextMenu"
   | "enableReadingModeDoubleClickZoom"
-  | "logToFile"
-  | "geometryProbe";
+  | "logToFile";
 
 export type DropdownKey = "alignment";
 
@@ -350,15 +349,6 @@ export const SETTINGS_SECTIONS: SectionSpec[] = [
         desc: {
           zh: "开启后，符合级别的日志写入插件目录下的 log.txt（开启时清空一次，便于读取本次会话）。",
           en: "When enabled, logs at or above the level go to log.txt in the plugin folder. Turning it on clears the file once, so it only holds the current session.",
-        },
-      },
-      {
-        kind: "toggle",
-        key: "geometryProbe",
-        name: { zh: "诊断快照（临时）", en: "Geometry probe (temporary)" },
-        desc: {
-          zh: "开启后，布局过程中会把每张图的「模型 / 写入 / 实测」三组几何写入 log.txt（DIAAGEO 行），用于定位尺寸异常；快照忽略日志级别，但需 logToFile 通道可用。排查结束后请关闭。",
-          en: "When enabled, layout writes each image's model / saved / measured geometry to log.txt (DIAAGEO lines) to pin down sizing anomalies. Snapshots ignore the log level but still need the logToFile channel. Turn it off when the investigation is over.",
         },
       },
     ],

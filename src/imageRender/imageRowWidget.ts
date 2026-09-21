@@ -10,9 +10,8 @@ import * as scrollDiag from "../scrollSync/scrollDiag";
 import { stripObsidianClasses, neutralizeWrappers } from "./rowRenderer";
 import { attachDiaImageMarkers } from "./imageMarkers";
 import { applyOrientationPreview, boxForScreenWidth, displayedImageSize } from "../imageTransform/transformPreview";
-import { orientationWord, orientedSize, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
-import { emitSnapshot, hasChanged, isGeometryProbeEnabled } from "../diagnostics/probe";
-import { round2, snapshotPayload, type MemberFrames } from "../diagnostics/rowSnapshot";
+import { orientedSize, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
+import { hasChanged } from "../diagnostics/logChange";
 import { DividerController, DividerHost } from "../interaction/dividerController";
 import { ResizeHandleController, ResizeHost, HandleDef } from "../interaction/resizeHandleController";
 import { DragReorderController, DragReorderHost } from "../interaction/dragReorderController";
@@ -251,14 +250,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   /** The container width the last layout pass solved at, so a backfill can tell
    *  whether the DOM it is about to measure is still the frame that pass made. */
   private lastLayoutWidthPx = 0;
-  /** Diagnostics (temporary): the layout box height and drawn height the layout
-   *  engine asked for, and the last value our own code put on the img.  Keeping
-   *  the two apart is what tells a wrong write apart from a clobbered one. */
+  /** The layout box height and drawn height the layout engine asked for, per
+   *  member. Kept beside the DOM because a restore has to tell a value *this*
+   *  code wrote from one a third party put back: only the former may be read
+   *  back as the member's fill ratio. */
   private modelBoxH = new Map<number, number>();
   private modelDrawn = new Map<number, number>();
-  private imgBoxWitness = new Map<number, { value: number; writer: string }>();
-  private snapshotTimer: number | null = null;
-  private snapshotReason = "";
   onLayoutChange: (() => void) | null = null;
   /** Per-image indices whose scale ratios have been updated and need persistence. */
   _scaleDirtyImages: Set<number> = new Set();
@@ -625,18 +622,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     return this.itemEls[index]?.style.height || null;
   }
 
-  // ── Diagnostics (temporary) ────────────────────────────────────────────
-  // Every write to an img's layout-box height funnels through here so the
-  // snapshot can tell the value the layout chose from one a third party put
-  // back; `recordGeometry` keeps the layout engine's own numbers beside it.
-
+  /** Every write to an img's layout-box height funnels through here, so the
+   *  log line below names the writer that set it. */
   private setImgBoxHeight(index: number, value: string | number, writer: string): void {
     const img = this.imageEls[index];
     if (!img) return;
     const css = typeof value === "number" ? `${value}px` : value;
     img.style.height = css;
-    const px = parseFloat(css);
-    this.imgBoxWitness.set(index, { value: Number.isFinite(px) ? px : 0, writer });
     if (hasChanged(`imgH:${this.group.lineStart}:${index}`, { css, writer })) {
       log.debug("img box height written", {
         index,
@@ -681,85 +673,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const modelBoxH = this.modelBoxH.get(index);
     if (modelBoxH == null || modelBoxH <= 0) return false;
     return Math.abs(img.clientHeight - modelBoxH) <= 1;
-  }
-
-  private measureMemberGeometry(index: number): MemberFrames | null {
-    const img = this.imageEls[index];
-    const item = this.itemEls[index];
-    const member = this.group.images[index];
-    if (!img || !item || !member) return null;
-    const meta = this.loadedMetas.get(index);
-    const aspect = meta && meta.naturalWidth > 0 && meta.naturalHeight > 0
-      ? meta.naturalWidth / meta.naturalHeight
-      : 1;
-    const boxH = this.modelBoxH.get(index) ?? 0;
-    const witness = this.imgBoxWitness.get(index) ?? null;
-    const itemRect = item.getBoundingClientRect();
-    const imgRect = img.getBoundingClientRect();
-    const styleW = parseFloat(img.style.width);
-    const styleItemW = parseFloat(item.style.width);
-    return {
-      label: `${index}:${member.fileName}`,
-      model: {
-        fill: this.fillOf(member),
-        share: this.shareOf(member),
-        word: orientationWord(member.orientation),
-        aspect: Number(aspect.toFixed(4)),
-        boxW: Number((boxH * aspect).toFixed(2)),
-        boxH,
-        drawn: this.modelDrawn.get(index) ?? 0,
-        expectedScale: this.isSingleRow() && this.isTurnedImage(index) ? this.singleScale : null,
-      },
-      wrote: {
-        imgW: Number.isFinite(styleW) ? styleW : null,
-        imgH: witness ? witness.value : null,
-        itemW: Number.isFinite(styleItemW) ? styleItemW : null,
-        itemH: parseFloat(item.style.height) || null,
-        imgTransform: img.style.transform,
-      },
-      measured: {
-        itemW: round2(itemRect.width),
-        itemH: round2(itemRect.height),
-        imgClientW: img.clientWidth,
-        imgClientH: img.clientHeight,
-        paintW: round2(imgRect.width),
-        paintH: round2(imgRect.height),
-        paintOffsetX: round2(imgRect.left - itemRect.left),
-        paintOffsetY: round2(imgRect.top - itemRect.top),
-        transform: getComputedStyle(img).transform,
-        display: getComputedStyle(img).display,
-      },
-    };
-  }
-
-  /** Coalesce a settle burst into one snapshot, taken after layout has stopped
-   *  moving — inside a timer, never during a CodeMirror update. */
-  private scheduleRowSnapshot(reason: string): void {
-    if (!isGeometryProbeEnabled()) return;
-    this.snapshotReason = reason;
-    if (this.snapshotTimer !== null) return;
-    this.snapshotTimer = window.setTimeout(() => {
-      this.snapshotTimer = null;
-      this.emitRowSnapshot();
-    }, 200);
-  }
-
-  private emitRowSnapshot(): void {
-    if (!this.container) return;
-    const members: Array<Record<string, unknown>> = [];
-    for (let i = 0; i < this.group.images.length; i++) {
-      const frames = this.measureMemberGeometry(i);
-      if (frames) members.push(snapshotPayload(frames));
-    }
-    emitSnapshot(`row:${this.options.sourcePath}:${this.group.lineStart}`, "DIAAGEO row", {
-      side: "LP",
-      reason: this.snapshotReason,
-      line: this.group.lineStart,
-      kind: this.group.kind,
-      containerW: this.containerWidthPx(),
-      viewportW: this.getRowWidth(),
-      members,
-    });
   }
 
   /**
@@ -1945,7 +1858,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       // quarter turn, which the browser only measures once the transform is on
       // the element.
       this.updateAllHandlePositions();
-      this.scheduleRowSnapshot("applyLayout");
     }
   }
 
@@ -2356,7 +2268,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         atWidth: containerWidth,
       });
     }
-    this.scheduleRowSnapshot("recalculateRowHeight");
     window.requestAnimationFrame(() => this._logRenderedState("LivePreview"));
     } catch (e) {
       log.error("ImageRowWidget recalculateRowHeight error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
@@ -2780,7 +2691,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
 
     this.recalculateRowHeight();
-    this.scheduleRowSnapshot("snapAllToEquilibrium");
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore the uniform heights correctly.
@@ -2836,10 +2746,6 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    * Clean up all event listeners.
    */
   destroy(): void {
-    if (this.snapshotTimer !== null) {
-      window.clearTimeout(this.snapshotTimer);
-      this.snapshotTimer = null;
-    }
     for (const divider of this.dividerEls) {
       if (divider._destroy) divider._destroy();
     }

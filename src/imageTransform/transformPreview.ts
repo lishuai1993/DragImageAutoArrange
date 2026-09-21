@@ -32,7 +32,6 @@
 
 import type { OrientationState } from './orientation';
 import { orientationToCss, orientedSize } from './orientation';
-import { probeDebug } from '../diagnostics/probe';
 
 /** Size the `object-fit: contain` drawing occupies in a box, i.e. the content
  *  before any transform.  `aspect` is the image's natural width/height; a
@@ -77,17 +76,7 @@ function measuredQuarterTurnScale(img: HTMLImageElement): number {
     if (content.width <= 0 || content.height <= 0) return 1;
     // After a quarter turn the drawn content measures (content.h × content.w).
     const k = Math.min(bw / content.height, bh / content.width);
-    const measured = Number.isFinite(k) && k < 1 ? Number(k.toFixed(4)) : 1;
-    probeDebug('transformPreview measure', {
-        boxW: bw,
-        boxH: bh,
-        aspect: Number(aspect.toFixed(4)),
-        contentW: Number(content.width.toFixed(2)),
-        contentH: Number(content.height.toFixed(2)),
-        k: Number(k.toFixed(4)),
-        measured,
-    });
-    return measured;
+    return Number.isFinite(k) && k < 1 ? Number(k.toFixed(4)) : 1;
 }
 
 export interface PreviewOptions {
@@ -110,14 +99,6 @@ export function applyOrientationPreview(
         const k = opts?.scale ?? measuredQuarterTurnScale(img);
         if (k !== 1) css = `scale(${k}) ${css}`;
     }
-    probeDebug('transformPreview apply', {
-        turns: state.turns,
-        mirror: state.mirror,
-        suppliedScale: opts?.scale ?? null,
-        css,
-        boxW: img.clientWidth,
-        boxH: img.clientHeight,
-    });
     img.style.transform = css;
 }
 

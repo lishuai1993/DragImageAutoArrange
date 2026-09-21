@@ -32,7 +32,6 @@ import {
 import { findMarkdownViewForElement } from "./imageMenu/imageSource";
 import { installReferencePaste } from "./imageMenu/referencePaste";
 import { logger } from "./logger";
-import { setGeometryProbeEnabled } from "./diagnostics/probe";
 import { setLanguage } from "./i18n/language";
 const log = logger.channel("main");
 
@@ -69,7 +68,6 @@ export default class DragImageAutoArrangePlugin
     menuScalePercent: 100,
     logLevel: "ERROR",
     logToFile: false,
-    geometryProbe: false,
   };
 
   /** Image right-click menu runtime (settings store + facade). */
@@ -89,7 +87,6 @@ export default class DragImageAutoArrangePlugin
     this.settings = await loadSettings(this);
     logger.setMinLevel(this.settings.logLevel);
     logger.setFileEnabled(this.settings.logToFile);
-    setGeometryProbeEnabled(this.settings.geometryProbe);
     // Before anything draws: the settings tab and the context menu resolve
     // their copy through the language singleton as they render.
     setLanguage(this.settings.language);

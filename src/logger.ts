@@ -211,22 +211,10 @@ class Logger {
 
   // ── Internal ──
 
-  /** Diagnostic probe sink: always emitted while the probe is on, regardless
-   *  of the configured minimum level. Used by the geometry snapshots. */
-  writeProbe(message: string, data?: unknown): void {
-    const channel = this.channel("diag");
-    // Snapshots are asked for explicitly, so they reach the file even if the
-    // per-channel file switches were turned off wholesale.
-    channel.outputToFile = true;
-    this._write(channel, "INFO", message, data, true);
-  }
-
-  _write(channel: LogChannel, level: LogLevel, message: string, data?: unknown, bypassLevel = false): void {
+  _write(channel: LogChannel, level: LogLevel, message: string, data?: unknown): void {
     const rank = LEVEL_RANK[level];
-    const pass = bypassLevel || rank >= LEVEL_RANK[this._minLevel];
-    // A probe bypasses both gates: it is on only while the diagnostic switch is
-    // on, and it has to reach log.txt even when the level gate would drop INFO.
-    const toFile = (this._fileEnabled || bypassLevel) && pass;
+    const pass = rank >= LEVEL_RANK[this._minLevel];
+    const toFile = this._fileEnabled && pass;
     const toConsole = channel.outputToConsole && pass;
     if (!toFile && !toConsole) return;
 

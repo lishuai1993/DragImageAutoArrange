@@ -3,7 +3,7 @@ import { CLASSES, SINGLE_IMAGE_MIN_WIDTH, computeInterItemSpace } from "../const
 import { ImageRowOptions } from "../types";
 import { ImageMeta } from "../imageParse/imageDetector";
 import { computeFlexGrows, computeRowHeight, computeScaleBasedHeights, computeSingleImageWidth, drawnHeightCoefficient } from "../imageLayout/layoutEngine";
-import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, setStyleImportant } from "../utils";
+import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, round2, setStyleImportant } from "../utils";
 import { logger } from "../logger";
 const log = logger.channel("rmFlexRow");
 import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
@@ -12,11 +12,6 @@ import { storePendingAlignment } from "./rmAlignStore";
 import { attachDiaImageMarkers } from "./imageMarkers";
 import { IDENTITY_STATE, isIdentityOrientation, orientationWord, orientedSize, parseOrientationWord, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
 import { applyOrientationPreview, boxForScreenWidth, displayedImageSize, naturalAspect } from "../imageTransform/transformPreview";
-import { emitSnapshot, isGeometryProbeEnabled } from "../diagnostics/probe";
-import { round2, snapshotPayload, type MemberFrames } from "../diagnostics/rowSnapshot";
-
-/** Diagnostics (temporary): coalesce a row's settle burst into one snapshot. */
-const rmSnapshotTimers = new Map<string, number>();
 
 /**
  * The layout-box height our own sizing wrote onto an img, keyed by the element.
@@ -72,66 +67,6 @@ function guardImgBox(img: HTMLImageElement): void {
     }
   });
   guard.observe(img, { attributes: true, attributeFilter: ["class", "style"] });
-}
-
-function scheduleRmSnapshot(key: string, build: () => Record<string, unknown>): void {
-  if (!isGeometryProbeEnabled()) return;
-  const pending = rmSnapshotTimers.get(key);
-  if (pending !== undefined) window.clearTimeout(pending);
-  const id = window.setTimeout(() => {
-    rmSnapshotTimers.delete(key);
-    emitSnapshot(key, "DIAAGEO row", build());
-  }, 200);
-  rmSnapshotTimers.set(key, id);
-}
-
-/** One member's three frames, in the same shape the Live Preview widget
- *  reports, so a Reading Mode row and a Live Preview row can be compared. */
-function rmMemberFrames(
-  embed: HTMLElement,
-  img: HTMLImageElement,
-  model: {
-    word: string;
-    fill: number | null;
-    share: number | null;
-    boxH: number;
-    drawn: number;
-    expectedScale: number | null;
-  }
-): MemberFrames {
-  const aspect = img.naturalWidth > 0 && img.naturalHeight > 0
-    ? img.naturalWidth / img.naturalHeight
-    : 1;
-  const itemRect = embed.getBoundingClientRect();
-  const imgRect = img.getBoundingClientRect();
-  const cs = getComputedStyle(img);
-  return {
-    label: getFileNameFromEmbed(embed) || "(unknown)",
-    model: {
-      ...model,
-      aspect: Number(aspect.toFixed(4)),
-      boxW: Number((model.boxH * aspect).toFixed(2)),
-    },
-    wrote: {
-      imgW: parseFloat(img.style.width) || null,
-      imgH: parseFloat(img.style.height) || null,
-      itemW: parseFloat(embed.style.width) || null,
-      itemH: parseFloat(embed.style.height) || null,
-      imgTransform: img.style.transform,
-    },
-    measured: {
-      itemW: round2(itemRect.width),
-      itemH: round2(itemRect.height),
-      imgClientW: img.clientWidth,
-      imgClientH: img.clientHeight,
-      paintW: round2(imgRect.width),
-      paintH: round2(imgRect.height),
-      paintOffsetX: round2(imgRect.left - itemRect.left),
-      paintOffsetY: round2(imgRect.top - itemRect.top),
-      transform: cs.transform,
-      display: cs.display,
-    },
-  };
 }
 
 /** Every embed's persisted rotate/flip, in item order — the frame the height
@@ -284,29 +219,6 @@ export function applyStandaloneSize(
       // to paint through it, and this path has no other writer.
       transformNow: img.style.transform,
     });
-
-    const fileName = getFileNameFromEmbed(embed);
-    scheduleRmSnapshot(`rm-standalone:${fileName}`, () => ({
-      side: "RM",
-      scope: "standalone",
-      fileName,
-      containerWidth,
-      manualWidthPx,
-      mode: options.singleImageSizeMode,
-      turned,
-      members: [
-        snapshotPayload(
-          rmMemberFrames(embed, img, {
-            word: orientationWord(state),
-            fill: null,
-            share: null,
-            boxH: imageH,
-            drawn: Math.max(1, Math.round(shown.height)),
-            expectedScale: turned ? shown.scale : null,
-          })
-        ),
-      ],
-    }));
   };
 
   layout();
@@ -776,11 +688,6 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
 
     const n = embeds.length;
 
-    /** Diagnostics (temporary): the box height and drawn height the sizing
-     *  model asked of each member, kept for the settle-time snapshot. */
-    const modelBoxH: number[] = new Array<number>(n).fill(0);
-    const modelDrawnH: number[] = new Array<number>(n).fill(0);
-
     // Below the narrow-screen breakpoint the media query wraps the row and the
     // stylesheet sizes it; any inline pixel height left here outranks that, so
     // the row is handed over wholesale.  The images then follow their item's
@@ -809,8 +716,6 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         // only on a quarter turn, where the drawing is folded back inside the
         // box: the cell then has to follow the drawing, or a balanced row leaves
         // the turned picture centred in a taller cell with a gap under the row.
-        modelBoxH[i] = boxes[i];
-        modelDrawnH[i] = heights[i];
         embeds[i].style.setProperty("flex", `${finalGrows[i]} 1 0%`, "important");
         embeds[i].style.setProperty("height", `${heights[i]}px`, "important");
         const embedImg = embeds[i].querySelector<HTMLImageElement>("img");
@@ -849,8 +754,6 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       let rowCellH = 0;
       for (let j = 0; j < n; j++) {
         const drawn = drawnOf(j);
-        modelBoxH[j] = rowHeightPx;
-        modelDrawnH[j] = drawn;
         embeds[j].style.setProperty("flex", `${finalGrows[j]} 1 0%`, "important");
         embeds[j].style.setProperty("height", `${drawn}px`, "important");
         const embedImg = embeds[j].querySelector<HTMLImageElement>("img");
@@ -866,41 +769,6 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     }
 
     applyEmbedOrientations(embeds);
-
-    // ── Diagnostics: one snapshot per row, taken after everything settles ──
-    {
-      const key = `rm-row:${embeds.map((e) => getFileNameFromEmbed(e)).join("|")}`;
-      const orientations = readOrientations(embeds);
-      const modelBox = modelBoxH.slice();
-      const modelDrawn = modelDrawnH.slice();
-      const usedFill = n > 1 && hasScale;
-      scheduleRmSnapshot(key, () => {
-        const members: Array<Record<string, unknown>> = [];
-        for (let i = 0; i < embeds.length; i++) {
-          const img = embeds[i].querySelector<HTMLImageElement>("img");
-          if (!img) continue;
-          members.push(snapshotPayload(
-            rmMemberFrames(embeds[i], img, {
-              word: orientationWord(orientations[i] ?? IDENTITY_STATE),
-              fill: usedFill ? (scales[i] ?? null) : null,
-              share: finalGrows[i] ?? null,
-              boxH: modelBox[i] ?? 0,
-              drawn: modelDrawn[i] ?? 0,
-              expectedScale: null,
-            })
-          ));
-        }
-        return {
-          side: "RM",
-          scope: "row",
-          containerWidth,
-          rowSetH: row.style.height,
-          n,
-          hasScale,
-          members,
-        };
-      });
-    }
 
     const rowDiagnostic = () => {
       try {

@@ -54,7 +54,6 @@ export const DEFAULT_SETTINGS = {
   menuScalePercent: 100,
   logLevel: "ERROR" as LogLevel,
   logToFile: false,
-  geometryProbe: false,
 } as const;
 
 export const SINGLE_IMAGE_MIN_WIDTH = 100;

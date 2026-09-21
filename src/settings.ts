@@ -22,7 +22,6 @@ import {
   type MaintenanceSection,
 } from "./maintenance/maintenanceSettingsUi";
 import { applySettingButtonStyle } from "./settingsButton";
-import { setGeometryProbeEnabled } from "./diagnostics/probe";
 import { logger, type LogLevel } from "./logger";
 import { setLanguage, t, type Language, type Localized } from "./i18n/language";
 import {
@@ -60,8 +59,6 @@ export interface DragImageSettings {
   menuScalePercent: number;
   logLevel: LogLevel;
   logToFile: boolean;
-  /** Temporary diagnostics: write the per-image geometry snapshots to log.txt. */
-  geometryProbe: boolean;
 }
 
 /** Slider stops, least→most verbose. The slider index maps into this array. */
@@ -333,9 +330,6 @@ export class DragImageSettingTab extends PluginSettingTab {
         if (enabled) void logger.clearLogFile();
         break;
       }
-      case "geometryProbe":
-        setGeometryProbeEnabled(value as boolean);
-        break;
       default:
         break;
     }
