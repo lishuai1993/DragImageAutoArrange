@@ -81,6 +81,7 @@ function makeRow(turned: boolean): Harness {
     getObjectPosition: () => 'left top',
     updateHandlePositions: () => undefined,
     isTurnedImage: () => turned,
+    maxDrawnHeight: () => 0,
     noteDragGeometry: () => undefined,
     syncItemToDrawing: () => calls.push('syncItemToDrawing'),
     notifyLayoutChange: () => undefined,
@@ -198,11 +199,20 @@ interface ThreeRow {
   sides: Array<'left' | 'right' | null>;
   /** Every rectangle the drag has handed the host as the model, in order. */
   notes: Array<{ index: number; box: number; drawn: number }>;
+  /** What the drag persisted, as it persisted it. */
+  calls: string[];
 }
 
 function makeThreeRow(
   heights: [number, number, number],
-  opts: { sensitivity?: number; canSnap?: boolean } = {}
+  opts: {
+    sensitivity?: number;
+    canSnap?: boolean;
+    ceiling?: number;
+    /** Px the measured picture falls short of its cell — the sub-pixel the box
+     *  height's own rounding leaves behind, exaggerated so a ratio of 99 shows. */
+    contentInset?: number;
+  } = {}
 ): ThreeRow {
   const container = createDiv();
   const items: HTMLElement[] = [];
@@ -228,6 +238,7 @@ function makeThreeRow(
 
   const sides: Array<'left' | 'right' | null> = [];
   const notes: ThreeRow['notes'] = [];
+  const calls: string[] = [];
   const host: ResizeHost = {
     getContainer: () => container,
     getItemEls: () => items,
@@ -238,25 +249,26 @@ function makeThreeRow(
     getImageContentRect: (i) => ({
       left: 0,
       top: 0,
-      width: CONTAINER_W / 3,
+      width: CONTAINER_W / 3 - (opts.contentInset ?? 0),
       height: heights[i],
     }),
     getObjectPosition: () => 'left top',
     updateHandlePositions: () => undefined,
     isTurnedImage: () => false,
     boxHeightForDrawn: (h) => h,
+    maxDrawnHeight: () => opts.ceiling ?? 0,
     noteDragGeometry: (i, box, drawn) => notes.push({ index: i, box, drawn }),
     syncItemToDrawing: () => undefined,
     notifyLayoutChange: () => undefined,
-    emitResizeEnd: () => undefined,
-    setImageScale: () => undefined,
+    emitResizeEnd: () => calls.push('emitResizeEnd'),
+    setImageScale: (_index, scale) => calls.push(`setImageScale:${scale}`),
     setSingleImageWidth: () => undefined,
     setResizeSnapSide: (_index, side) => {
       sides.push(side);
       return opts.canSnap ?? true;
     },
   };
-  return { host, items, sides, notes };
+  return { host, items, sides, notes, calls };
 }
 
 /**
@@ -351,5 +363,166 @@ describe('multi-image resize drag snapping', () => {
     dragMiddle(h, [80]);
 
     expect(h.sides.at(-1)).toBeNull();
+  });
+});
+
+/**
+ * The far end of a multi-image resize drag: the drawn height at which the
+ * member's box spans its whole cell (`fill = 1`).  Past it a taller box only
+ * spills out of the cell — the picture is clipped by it and the row grows with
+ * nothing on screen to show for it — so the drag is void there.  Only the host
+ * can say where that is (it alone knows the bitmap and the cell), so the drag
+ * reads it off `maxDrawnHeight` and clamps its own request before snapping.
+ */
+describe('multi-image resize drag ceiling', () => {
+  it('stops at the ceiling instead of growing the row', () => {
+    // The middle member can fill its cell only up to 200; its right neighbour
+    // stands at 300, beyond anything this member could reach.
+    const h = makeThreeRow([160, 180, 300], { ceiling: 200 });
+    const sides = dragMiddle(h, [200]);
+
+    expect(h.items[1].style.height).toBe('200px');
+    // The row is its tallest cell, and that is where it stays.
+    expect(h.host.getContainer()!.style.height).toBe('300px');
+    expect(sides).toEqual([null]);
+  });
+
+  it('still snaps to a neighbour the ceiling allows', () => {
+    // 195 sits inside the 3% zone of the clamped 200 and below the ceiling, so
+    // it claims: this is a height the member can actually take.
+    const h = makeThreeRow([160, 180, 195], { ceiling: 200 });
+    const sides = dragMiddle(h, [40]);
+
+    expect(h.items[1].style.height).toBe('195px');
+    expect(sides).toEqual(['right']);
+  });
+
+  it('never claims from above the ceiling', () => {
+    // 204 is inside the zone of the clamped pointer but cannot be reached — the
+    // box may not be wider than the cell — so no bar lights for it.
+    const h = makeThreeRow([160, 180, 204], { ceiling: 200 });
+    const sides = dragMiddle(h, [40]);
+
+    expect(h.items[1].style.height).toBe('200px');
+    expect(sides).toEqual([null]);
+  });
+
+  it("lands on the row's own rounding of the ceiling", () => {
+    // The height model rounds this length to 201; a drag that floored it would
+    // stop at 200 and sit a pixel under a neighbour standing on 201.
+    const h = makeThreeRow([160, 180, 300], { ceiling: 200.6 });
+    dragMiddle(h, [400]);
+
+    expect(h.items[1].style.height).toBe('201px');
+  });
+
+  it('lets a neighbour standing on the ceiling claim the drag', () => {
+    // The repro: a column dragged to its ceiling, which is where its neighbour
+    // already stands.  The ceiling and that height are one length put through
+    // two roundings, so they can land a pixel apart — and the bar must light
+    // anyway.  It exists to announce exactly this equality.
+    const h = makeThreeRow([160, 180, 201], { ceiling: 200 });
+    const sides = dragMiddle(h, [400]);
+
+    expect(h.items[1].style.height).toBe('201px');
+    expect(sides).toEqual(['right']);
+  });
+
+  it('never claims from more than the rounding above the ceiling', () => {
+    // 202 is two above: no rounding of that one length explains it, so the
+    // equality really is out of reach and no bar lights.
+    const h = makeThreeRow([160, 180, 202], { ceiling: 200 });
+    const sides = dragMiddle(h, [400]);
+
+    expect(h.items[1].style.height).toBe('200px');
+    expect(sides).toEqual([null]);
+  });
+
+  it('writes nothing when the drag never leaves the ceiling', () => {
+    // Already full: the member stands at the height where its box spans the cell,
+    // so dragging outward cannot move it.  A drag that changes nothing must not
+    // edit the note either — an explicit |100 would replace the default 满格 for
+    // no reason at all.
+    const h = makeThreeRow([160, 200, 220], { ceiling: 200 });
+    dragMiddle(h, [40, 400]);
+
+    expect(h.items[1].style.height).toBe('200px');
+    expect(h.calls).toEqual([]);
+  });
+
+  it('writes the scale and the row once the drag has moved', () => {
+    // dy 800 blended by the corner's ½ → 580 asked, 400 delivered: a drag the
+    // ceiling stopped has still moved, so it is recorded as it stands.
+    const h = makeThreeRow([160, 180, 220], { ceiling: 400 });
+    dragMiddle(h, [800]);
+
+    expect(h.items[1].style.height).toBe('400px');
+    expect(h.calls).toEqual(['setImageScale:1', 'emitResizeEnd']);
+  });
+});
+
+/**
+ * The ceiling is also a snap target.  满格 is an equality every member can
+ * reach, so a pointer that comes within the zone of it is pulled onto it the
+ * way a pointer near a neighbour is — but silently: the ceiling is not a
+ * neighbour and has no divider of its own to light.
+ *
+ * The lock is what makes the far end of the drag reachable at all.  The pointer
+ * drives an integer drawn height while the ceiling is fractional, so a drag that
+ * stops a pixel or two short would otherwise settle just under 满格 and record
+ * 99 for a cell it visibly fills.
+ */
+describe('multi-image resize drag near-full lock', () => {
+  it('pulls a pointer within the zone onto the ceiling', () => {
+    // 390 is past the clamped 400's 3% line (388) while both neighbours are far
+    // away, so nothing else claims: the member lands on 满格.
+    const h = makeThreeRow([160, 180, 220], { ceiling: 400 });
+    const sides = dragMiddle(h, [420]);
+
+    expect(h.items[1].style.height).toBe('400px');
+    expect(sides).toEqual([null]);
+  });
+
+  it('leaves a pointer short of the zone where it stands', () => {
+    // 380 is outside the 388 line, so the drag keeps its own height — the lock
+    // is a band, not a trap.
+    const h = makeThreeRow([160, 180, 220], { ceiling: 400 });
+    const sides = dragMiddle(h, [400]);
+
+    expect(h.items[1].style.height).toBe('380px');
+    expect(sides).toEqual([null]);
+  });
+
+  it('lets a neighbour standing inside the band keep the claim', () => {
+    // 394 is within the band of 400 and within the zone of the right neighbour
+    // at 394.  The neighbour wins: its claim is the deliberate equality, and it
+    // is the nearer target — so the bar lights and the picture sits on 394.
+    const h = makeThreeRow([160, 180, 394], { ceiling: 400 });
+    const sides = dragMiddle(h, [428]);
+
+    expect(h.items[1].style.height).toBe('394px');
+    expect(sides).toEqual(['right']);
+  });
+
+  it('records the ceiling as exactly full despite a short measurement', () => {
+    // The box height is an integer, so the box lands a hair inside the cell and
+    // the measured ratio reads 98 for a cell the picture fills.  At the ceiling
+    // the member *is* 满格, and that is what the note gets.
+    const h = makeThreeRow([160, 180, 220], { ceiling: 400, contentInset: 5 });
+    dragMiddle(h, [800]);
+
+    expect(h.items[1].style.height).toBe('400px');
+    expect(h.calls).toEqual(['setImageScale:1', 'emitResizeEnd']);
+  });
+
+  it('records the measurement when the drag stops short of the ceiling', () => {
+    // Same short measurement, but the drag ends outside the band: the member is
+    // genuinely narrower than its cell, so its own ratio is the honest record.
+    const h = makeThreeRow([160, 180, 220], { ceiling: 400, contentInset: 5 });
+    dragMiddle(h, [400]);
+
+    expect(h.items[1].style.height).toBe('380px');
+    expect(h.calls[0]).not.toBe('setImageScale:1');
+    expect(h.calls[1]).toBe('emitResizeEnd');
   });
 });

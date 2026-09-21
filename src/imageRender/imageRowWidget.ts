@@ -369,6 +369,17 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const perBox = drawnHeightCoefficient(meta, 1, member.orientation) * ar;
     return perBox > 0 ? Math.round(drawnHeight / perBox) : Math.round(drawnHeight);
   }
+  /** See ResizeHost.maxDrawnHeight: the member's cell width through the height
+   *  model, i.e. the drawn height at which its box would span the whole cell.
+   *  The cell is the item, and its width is read the same way the drag's own
+   *  persistence reads it.  Fractional; the drag rounds it. */
+  maxDrawnHeight(index: number): number {
+    const meta = this.loadedMetas.get(index);
+    const member = this.group.images[index];
+    const cellW = this.itemEls[index]?.getBoundingClientRect().width ?? 0;
+    if (!meta || !member || !(cellW > 0)) return 0;
+    return drawnHeightCoefficient(meta, 1, member.orientation) * cellW;
+  }
   /** Current container width in px, or 0 when it cannot be measured. */
   private containerWidthPx(): number {
     return this.container ? Math.round(this.container.getBoundingClientRect().width) : 0;

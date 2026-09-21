@@ -1297,3 +1297,67 @@ describe('ImageRowWidget yields the img box to a running resize drag', () => {
     expect(img.style.height).toBe(model);
   });
 });
+
+/**
+ * Where a resize drag runs out.
+ *
+ * The drag drives the drawn height, and past the point where the member's box
+ * would be wider than its cell there is nothing left to grow into: the box
+ * spills out of the cell (the picture is clipped) and the row grows with nothing
+ * on screen to show for it.  The widget is the only side that can name that
+ * height — it alone holds the bitmap and the cell — and it hands the drag the
+ * cell's width through the height model, folding a quarter turn in as the drag's
+ * own `boxHeightForDrawn` does.
+ */
+describe('the ceiling a member hands a resize drag', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** Two members of a 400×800 bitmap each, the first one optionally turned. */
+  function row(turned: boolean): { widget: ImageRowWidget; el: HTMLElement } {
+    const group = makeGroup([
+      makeImage('a.png', 17, 1, false, turned ? { turns: 1, mirror: false } : IDENTITY),
+      makeImage('b.png', 18, 1),
+    ]);
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 600);
+    simulateImagesLoaded(widget, el, [
+      { w: 400, h: 800 },
+      { w: 400, h: 800 },
+    ]);
+    return { widget, el };
+  }
+
+  /** jsdom lays nothing out, so the cells have to be told their width. */
+  function cells(el: HTMLElement, width: number): void {
+    for (const item of Array.from(el.querySelectorAll<HTMLElement>(`.${CLASSES.imageItem}`))) {
+      item.getBoundingClientRect = () =>
+        ({ x: 0, y: 0, top: 0, left: 0, right: width, bottom: 200, width, height: 200, toJSON() {} });
+    }
+  }
+
+  it('is the height at which the box would span the cell', () => {
+    const { widget, el } = row(false);
+    cells(el, 300);
+
+    // 400×800 upright in a 300-wide cell: 300 ÷ 0.5.
+    expect(widget.maxDrawnHeight(0)).toBe(600);
+  });
+
+  it('folds a quarter turn in, since the drag drives the drawing', () => {
+    const { widget, el } = row(true);
+    cells(el, 300);
+
+    // Turned, the box spans the cell at the drawing's own height: 300 × 0.5.
+    expect(widget.maxDrawnHeight(0)).toBe(150);
+  });
+
+  it('offers no ceiling while the cell cannot be measured', () => {
+    const { widget } = row(false);
+
+    expect(widget.maxDrawnHeight(0)).toBe(0);
+  });
+});

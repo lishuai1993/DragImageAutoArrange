@@ -41,6 +41,11 @@ export interface ResizeHost {
   /** The layout-box height that paints as `drawnHeight` for this member — the
    *  identity unless it is turned, where the drawing is the box scaled down. */
   boxHeightForDrawn(drawnHeight: number, index: number): number;
+  /** The drawn height at which this member's layout box exactly fills its cell —
+   *  the far end of a resize drag.  Past it a taller box only spills out of the
+   *  cell (the picture is clipped) while the row keeps growing, so the drag is
+   *  void there.  0 when the row cannot say: no bitmap, or no measured cell. */
+  maxDrawnHeight(index: number): number;
   /** Record the box a drag just wrote for one member, so the layout model holds
    *  the drag's rectangle rather than the one the last layout pass solved for.
    *  A member's model box is otherwise only ever written by a layout pass, and
@@ -92,14 +97,25 @@ export class ResizeHandleController {
    * divider lights), so the rule only has to be deterministic.
    *
    * A side whose neighbour has no height of its own — the row has not laid that
-   * member out yet — never claims.
+   * member out yet — never claims, and neither does one standing above this
+   * member's `ceiling`: a box may not grow wider than its cell, so that height
+   * cannot be reached at all, and a bar lit for it would announce an equality
+   * the row cannot show.
+   *
+   * That exclusion is one pixel shy of exact, by construction: the ceiling and
+   * the neighbour's height are the *same* length put through two different
+   * roundings — the drag's own, and the height model's `Math.round` — so a
+   * neighbour that *is* the equality can sit a pixel above the ceiling.  The
+   * band is `ceiling + 1` rather than `ceiling` so that the equality the bar
+   * exists to announce is not the thing it throws away.
    */
   private resolveSnapSide(
     index: number,
     rawHeight: number,
     zone: number,
     neighbourHeights: readonly number[],
-    previous: SnapSide | null
+    previous: SnapSide | null,
+    ceiling: number
   ): { side: SnapSide | null; height: number } {
     const targets: Array<{ side: SnapSide; height: number }> = [];
     if (index > 0) targets.push({ side: "left", height: neighbourHeights[index - 1] });
@@ -108,7 +124,11 @@ export class ResizeHandleController {
     }
 
     const reached = targets.filter(
-      (t) => zone > 0 && t.height > 0 && Math.abs(rawHeight - t.height) <= t.height * zone
+      (t) =>
+        zone > 0 &&
+        t.height > 0 &&
+        t.height <= ceiling + 1 &&
+        Math.abs(rawHeight - t.height) <= t.height * zone
     );
     if (reached.length === 0) return { side: null, height: rawHeight };
     const kept = reached.find((t) => t.side === previous);
@@ -168,6 +188,15 @@ export class ResizeHandleController {
       // the other rather than flickering; cleared with the drag.
       let dragging = false;
       let snappedSide: SnapSide | null = null;
+      /** Whether a multi-image drag has changed the height it was given.  A drag
+       *  the ceiling holds still — or a click that never moved — writes nothing. */
+      let moved = false;
+      /** Whether the drag has taken this member to the ceiling, i.e. to the
+       *  height where its box spans the cell.  That height *is* 满格, so it is
+       *  recorded as exactly 1 rather than as the ratio a measurement implies —
+       *  the box height's own rounding leaves the box a hair inside the cell, and
+       *  the measurement would report 99 for what is meant to be full. */
+      let atCeiling = false;
       let currentOnMove: ((e: MouseEvent) => void) | null = null;
       let currentOnUp: (() => void) | null = null;
 
@@ -183,6 +212,8 @@ export class ResizeHandleController {
         try {
         dragging = true;
         snappedSide = null;
+        moved = false;
+        atCeiling = false;
         item.classList.add(CLASSES.resizing);
         log.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
         e.preventDefault();
@@ -349,7 +380,22 @@ export class ResizeHandleController {
           // Use image content height as delta baseline — not container height.
           // This eliminates the dead zone that occurs when container is taller
           // than the image (e.g. from a prior resize).
-          const rawH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta)));
+          //
+          // The drag stops where the box fills the cell (`fill = 1`): past that a
+          // taller box only spills out of the cell, so the picture is clipped and
+          // the row grows with nothing on screen to show for it.  The pointer's
+          // request is clamped first, and the snap then runs on the clamped value
+          // — a neighbour above the ceiling is unreachable by construction and so
+          // never claims a bar.
+          //
+          // Rounded, and deliberately the same `Math.round` the height model
+          // applies to the height this member paints at fill 1: a ceiling that
+          // took a different rounding of that one length would disagree with the
+          // row by a pixel, and a neighbour standing on the row's figure would be
+          // read as standing above the drag's.
+          const maxDrawn = this.host.maxDrawnHeight(index);
+          const ceiling = maxDrawn > 0 ? Math.round(maxDrawn) : Infinity;
+          const rawH = Math.max(50, Math.min(2000, Math.round(startDisplayH + yDelta), ceiling));
 
           // A neighbour standing at the height the pointer asks for — within the
           // snap zone, the same relative band the divider drag uses — claims the
@@ -359,13 +405,26 @@ export class ResizeHandleController {
           // a zone it walked into.  A row with no divider to light refuses the
           // claim (see `setResizeSnapSide`), and the drag runs unsnapped.
           const zone = this.host.getSnapSensitivity() / 100;
-          const reached = this.resolveSnapSide(index, rawH, zone, startItemHeights, snappedSide);
+          const reached = this.resolveSnapSide(
+            index, rawH, zone, startItemHeights, snappedSide, ceiling
+          );
           const side = this.host.setResizeSnapSide(index, reached.side) ? reached.side : null;
           if (side !== snappedSide) {
-            log.debug("resize-snap", { index, rawH, side, targetH: reached.height });
+            log.debug("resize-snap", { index, rawH, side, targetH: reached.height, ceiling });
           }
           snappedSide = side;
-          const targetDrawnH = side ? reached.height : rawH;
+          // 满格 is an equality every member can reach, so the drag snaps to it
+          // the way it snaps to a neighbour — silently, because it is not a
+          // neighbour and has no divider of its own to light.  A neighbour's
+          // claim wins where the two zones overlap: that one is a deliberate
+          // equality with visible feedback, and it is the nearer target there.
+          const nearFull =
+            !side && Number.isFinite(ceiling) && ceiling - rawH <= ceiling * zone;
+          const targetDrawnH = side ? reached.height : nearFull ? ceiling : rawH;
+          atCeiling = Number.isFinite(ceiling) && targetDrawnH >= ceiling;
+          // Did this drag move anything at all? A drag pinned at the ceiling from
+          // its first move never does, and must leave the note alone.
+          moved = moved || targetDrawnH !== Math.round(startDisplayH);
 
           // The pointer drives the *drawing*: that is what the handles hug, and
           // that is what the cell is.  Only the img's layout box has to be
@@ -438,18 +497,29 @@ export class ResizeHandleController {
           // Compute image-content-width / item-width ratio.  This captures the
           // resize state as a dimensionless number that survives container-width
           // changes.  Persisted to markdown as ![[file|flexGrow|scale]].
+          //
+          // Only for a drag that moved: one held at the ceiling records a picture
+          // exactly where it was, and writing its ratio would stamp an explicit
+          // 满格 (`|100`) onto a member that keeps its default for no gain.
           if (nItems > 1) {
-            const itemRect = this.host.getItemEls()[index].getBoundingClientRect();
-            const contentRect = this.host.getImageContentRect(index);
-            if (itemRect.width > 0 && contentRect && contentRect.width > 0) {
-              const scale = contentRect.width / itemRect.width;
-              this.host.setImageScale(index, scale);
-              log.debug("resize-mouseup scale saved", {
-                index,
-                scale: Math.round(scale * 100),
-                contentW: Math.round(contentRect.width),
-                itemW: Math.round(itemRect.width),
-              });
+            if (moved) {
+              const itemRect = this.host.getItemEls()[index].getBoundingClientRect();
+              const contentRect = this.host.getImageContentRect(index);
+              if (itemRect.width > 0 && contentRect && contentRect.width > 0) {
+                // A drag that ended at the ceiling is 满格 by definition.  The
+                // measured ratio is not: the box height is an integer, so the box
+                // lands a hair inside the cell and the quotient reads 99 for a
+                // cell the picture visibly fills.  Record the ceiling as 1.
+                const scale = atCeiling ? 1 : contentRect.width / itemRect.width;
+                this.host.setImageScale(index, scale);
+                log.debug("resize-mouseup scale saved", {
+                  index,
+                  scale: Math.round(scale * 100),
+                  contentW: Math.round(contentRect.width),
+                  itemW: Math.round(itemRect.width),
+                  atCeiling,
+                });
+              }
             }
           } else {
             // ── Single-image row: persist the manual screen width as |1|W ──
@@ -477,8 +547,10 @@ export class ResizeHandleController {
           }
 
           const finalFlex = parseFloat(item.style.flexGrow || "1");
-          log.debug("resize-mouseup", { index, finalFlex, nItems, timestamp: Date.now() });
-          this.host.emitResizeEnd(index, finalFlex);
+          log.debug("resize-mouseup", { index, finalFlex, nItems, moved, timestamp: Date.now() });
+          // A lone row always has its width to write; a multi-image row only when
+          // the drag actually moved something.
+          if (nItems === 1 || moved) this.host.emitResizeEnd(index, finalFlex);
           document.removeEventListener("mousemove", currentOnMove!);
           document.removeEventListener("mouseup", currentOnUp!);
           currentOnMove = null;
