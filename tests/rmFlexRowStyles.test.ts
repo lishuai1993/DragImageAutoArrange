@@ -167,6 +167,9 @@ describe('Standalone embed shrink-wrap', () => {
     expect(embed.style.getPropertyValue('display')).toBe('inline-block');
     expect(embed.style.getPropertyPriority('display')).toBe('important');
     expect(embed.classList.contains('diaa-row-inline')).toBe(true);
+    // Alone on its line, top alignment is what keeps the font's descender from
+    // showing as a gap under the picture.
+    expect(embed.style.getPropertyValue('vertical-align')).toBe('top');
     // Its wrapper is what text-align acts on, so the extraction has to happen.
     expect(embed.parentElement?.getAttribute('data-diaa-standalone')).toBe('true');
   });
@@ -181,6 +184,69 @@ describe('Standalone embed shrink-wrap', () => {
 
     expect(embed.style.getPropertyValue('display')).toBe('inline-block');
     expect(embed.classList.contains('diaa-row-inline')).toBe(true);
+    expect(embed.style.getPropertyValue('vertical-align')).toBe('top');
+  });
+
+  it('leaves an embed that sits inside a sentence where it is', () => {
+    // `文字![[img]]文字` — one line, no break, so the picture is part of the
+    // sentence. Pulling it out would reflow the words around it, which is not
+    // something an alignment click may do; only the shrink-wrap is honest here.
+    const view = document.body.createDiv({ cls: 'markdown-preview-view' });
+    const block = view.createEl('p');
+    block.appendChild(document.createTextNode('前面的话'));
+    const embed = block.createDiv({ cls: 'internal-embed' });
+    embed.createEl('img');
+    block.appendChild(document.createTextNode('后面的话'));
+
+    applyStandaloneAlignment(embed, 'center');
+
+    expect(embed.parentElement).toBe(block);
+    expect(block.querySelector('[data-diaa-standalone]')).toBeNull();
+    // The block is shared with the prose, so its text-align must stay untouched.
+    expect(block.style.getPropertyValue('text-align')).toBe('');
+    expect(embed.style.getPropertyValue('display')).toBe('inline-block');
+    expect(embed.classList.contains('diaa-row-inline')).toBe(true);
+    // Sharing the line with prose, the picture sits on the text's baseline —
+    // the same alignment Live Preview gives it. Top alignment is for a picture
+    // that has the line to itself, and would lift this one off the sentence.
+    expect(embed.style.getPropertyValue('vertical-align')).toBe('baseline');
+    expect(embed.style.getPropertyPriority('vertical-align')).toBe('important');
+    expect(Array.from(block.childNodes).map((n) => n.textContent)).toEqual([
+      '前面的话', '', '后面的话',
+    ]);
+  });
+
+  it('still extracts an image that has the line to itself', () => {
+    // The break is what separates prose from image — with it, the image is on
+    // its own line and the extraction is exactly what the text block needs.
+    const { embed, block } = buildMixedBlock();
+
+    applyStandaloneAlignment(embed, 'center');
+
+    expect(embed.parentElement).not.toBe(block);
+    expect(embed.parentElement?.getAttribute('data-diaa-standalone')).toBe('true');
+    expect(embed.parentElement?.style.getPropertyValue('text-align')).toBe('center');
+    expect(block.textContent).toBe('文字');
+    expect(block.querySelector('[data-diaa-standalone]')).toBeNull();
+  });
+
+  it('does not extract an image butted straight against the prose', () => {
+    // No `<br>` and no space: the embed is still on the sentence's line, so it
+    // stays. This is the boundary the `<br>`-only reading of "on its own line"
+    // gets wrong.
+    const view = document.body.createDiv({ cls: 'markdown-preview-view' });
+    const block = view.createEl('p');
+    block.appendChild(document.createTextNode('文字'));
+    const embed = block.createDiv({ cls: 'internal-embed' });
+    embed.createEl('img');
+
+    applyStandaloneAlignment(embed, 'center');
+
+    expect(embed.parentElement).toBe(block);
+    expect(block.querySelector('[data-diaa-standalone]')).toBeNull();
+    expect(block.style.getPropertyValue('text-align')).toBe('');
+    expect(embed.classList.contains('diaa-row-inline')).toBe(true);
+    expect(embed.style.getPropertyValue('vertical-align')).toBe('baseline');
   });
 });
 

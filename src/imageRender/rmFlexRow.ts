@@ -341,6 +341,32 @@ export function isImageOnlyBlock(block: HTMLElement | null): boolean {
 }
 
 /**
+ * Is the embed sharing its line with prose?
+ *
+ * A source line like `文字![[img]]文字` puts the embed and the words in one
+ * paragraph, with only text nodes between them. That image is inline in the
+ * sentence and must stay there — moving it onto a line of its own is not an
+ * alignment, it is a reflow of the sentence. A line-separated shape
+ * (`文字\n![[img]]`) has a `<br>` between them instead, which is not prose.
+ *
+ * Only the immediate siblings count: anything further along the paragraph is
+ * prose the embed is not sitting in.
+ */
+function touchesProse(embed: HTMLElement): boolean {
+  for (const node of [embed.previousSibling, embed.nextSibling]) {
+    if (!node) continue;
+    if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim()) return true;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      if (!el.classList.contains("internal-embed") && el.tagName !== "BR" && (el.textContent ?? "").trim()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Mark an embed as shrink-wrapped, so the text-align its block carries can
  * place it.
  *
@@ -349,17 +375,27 @@ export function isImageOnlyBlock(block: HTMLElement | null): boolean {
  * is written inline, because Obsidian's own `.internal-embed` rule sets
  * `display` too and outranks a plugin class by specificity; inline is the only
  * placement that wins without the stylesheet carrying an `!important`.
+ *
+ * `verticalAlign` is the caller's call, because it follows from whether the
+ * picture shares its line with text.  Alone on its line, an inline-block sits
+ * on the block's baseline, which reserves the font's descender below it — the
+ * gap the reader sees under a lone picture (and, on hover, between the picture
+ * and the ring drawn on the hosting block); top alignment takes the box off the
+ * baseline, so the line holds just the box.  Sharing a line with prose, that
+ * same baseline is the whole point — it is what puts the picture's bottom on
+ * the sentence's bottom, as Live Preview draws it.  Written either way rather
+ * than left alone: a pass over the same element may be undoing an earlier one's
+ * `!important` inline value.
  */
-function markInlineEmbed(embed: HTMLElement): void {
+function markInlineEmbed(
+  embed: HTMLElement,
+  verticalAlign: "top" | "baseline"
+): void {
   embed.addClass(CLASSES.rowInline);
   // The shrink-wrap runs on every alignment change, so it has to hand the turn
   // its centring back rather than write a bare inline-block over it.
   applyInlinePlacement(embed, embed.querySelector<HTMLImageElement>("img"), embedTurned(embed));
-  // An inline-block sits on the block's baseline, which reserves the font's
-  // descender below it — the gap the reader sees under a lone picture (and, on
-  // hover, between the picture and the ring drawn on the hosting block).  Top
-  // alignment takes the box off the baseline, so the line holds just the box.
-  setStyleImportant(embed, "vertical-align", "top");
+  setStyleImportant(embed, "vertical-align", verticalAlign);
   const cs = getComputedStyle(embed);
   log.debug("RM markInlineEmbed", {
     fileName: getFileNameFromEmbed(embed),
@@ -393,8 +429,9 @@ export function applyStandaloneAlignment(
   // isImageOnlyBlock ignores text nodes, so a "text\n![[img]]" paragraph (one
   // block holding text + a single image) passes its check. Setting text-align
   // on that block would drag the text along with the image. Detect the mixed
-  // case and, when present, extract the image into its own aligned block so the
-  // text keeps its default flow — text stays text, image stays image.
+  // case: an embed inside a sentence stays put and is only shrink-wrapped, while
+  // one on its own line is extracted into its own aligned block — text stays
+  // text, image stays image.
   const probe = block.cloneNode(true) as HTMLElement;
   probe.querySelectorAll(".internal-embed").forEach((e) => e.remove());
   const blockHasText = (probe.textContent ?? "").trim().length > 0;
@@ -402,9 +439,20 @@ export function applyStandaloneAlignment(
   if (!blockHasText) {
     // Pure image block: align the block itself (original behavior).
     block.style.setProperty("text-align", textAlign, "important");
-    markInlineEmbed(embed);
+    markInlineEmbed(embed, "top");
     // TEMP-DIAG: which branch ran, and what the block it aligned measures.
     diagAlign("standalone-apply:pure", embed, {
+      perImage, defaultAlignment, alignment, textAlign, block: diagBox(block),
+    });
+    return;
+  }
+
+  if (touchesProse(embed)) {
+    // The embed sits inside a sentence, so there is no image-only line to align
+    // — the shrink-wrap is all this can honestly do, and it is what keeps the
+    // picture sized with the text rather than blown up to the block.
+    markInlineEmbed(embed, "baseline");
+    diagAlign("standalone-apply:inline", embed, {
       perImage, defaultAlignment, alignment, textAlign, block: diagBox(block),
     });
     return;
@@ -434,7 +482,7 @@ export function applyStandaloneAlignment(
   const wrapper = createDiv();
   wrapper.setAttribute("data-diaa-standalone", "true");
   wrapper.style.setProperty("text-align", textAlign, "important");
-  markInlineEmbed(embed);
+  markInlineEmbed(embed, "top");
   wrapper.appendChild(embed);
 
   if (textBefore) {
