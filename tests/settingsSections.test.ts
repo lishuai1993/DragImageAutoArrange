@@ -32,6 +32,7 @@ import {
   createMaintenanceSection,
   type MaintenanceBridge,
 } from '../src/maintenance/maintenanceSettingsUi';
+import { setContextMenuEnabled } from '../src/imageMenu/contextMenuToggle';
 import {
   DEFAULT_IMAGE_MENU_SETTINGS,
   FILE_OPERATION_IDS,
@@ -63,6 +64,9 @@ type ApplyFn = (
 
 const scanVaultMock = vi.hoisted(() => vi.fn<ScanFn>());
 const applyPassMock = vi.hoisted(() => vi.fn<ApplyFn>());
+/** The master switch announces through `Notice`; the mock factory below has to
+ *  be in place before the module under test is imported, so the sink is hoisted. */
+const noticesMock = vi.hoisted(() => [] as (string | DocumentFragment)[]);
 
 vi.mock('../src/maintenance/vaultPass', () => ({
   scanVault: scanVaultMock,
@@ -98,7 +102,11 @@ vi.mock('obsidian', () => {
   }
 
   class StubToggle {
-    readonly inputEl = document.createEl('input');
+    /** Obsidian's own shape: a wrapper element with the checkbox inside it. The
+     *  wrapper is what the section's in-place sync reads to tell a control that
+     *  is on screen from one that has been torn down. */
+    readonly toggleEl = document.createDiv();
+    readonly inputEl = this.toggleEl.createEl('input');
 
     constructor() {
       this.inputEl.type = 'checkbox';
@@ -171,7 +179,7 @@ vi.mock('obsidian', () => {
 
     addToggle(callback: (component: StubToggle) => unknown): this {
       const toggle = new StubToggle();
-      this.controlEl.appendChild(toggle.inputEl);
+      this.controlEl.appendChild(toggle.toggleEl);
       callback(toggle);
       return this;
     }
@@ -190,7 +198,9 @@ vi.mock('obsidian', () => {
   }
 
   class StubNotice {
-    constructor(_message: string) {}
+    constructor(message: string | DocumentFragment) {
+      noticesMock.push(message);
+    }
   }
 
   return { Setting: StubSetting, Modal: StubModal, Notice: StubNotice };
@@ -283,11 +293,34 @@ function menuBridge(
 const operationNames = (): string[] =>
   FILE_OPERATION_IDS.map((id) => FILE_OPERATION_LABELS[id]);
 
+/** The master switch's clipboard hand-off. jsdom has no clipboard at all, and a
+ *  refused one is a different path (covered where the switch itself is tested). */
+const copiedMock: string[] = [];
+
+function installClipboard(): void {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        copiedMock.push(text);
+      },
+    },
+  });
+}
+
 // The copy asserted below is the Chinese one, so pin the language for the file
 // and hand the singleton back as it was found. The English rendering of the same
 // tables is covered by the settings-copy guard in tests/i18n.test.ts.
-beforeEach(() => setLanguage('zh'));
-afterEach(() => setLanguage('en'));
+beforeEach(() => {
+  setLanguage('zh');
+  noticesMock.length = 0;
+  copiedMock.length = 0;
+  installClipboard();
+});
+afterEach(() => {
+  setLanguage('en');
+  Reflect.deleteProperty(navigator, 'clipboard');
+});
 
 const MAINTENANCE_BRIDGE: MaintenanceBridge = {
   extensions: 'png',
@@ -318,6 +351,94 @@ describe('image menu section definitions', () => {
     // Every row needs imperative code (a button, a pair of arrows), so none may
     // be handed over as a pure `control` definition the framework renders alone.
     expect(rowsOf(group)).toHaveLength(4 + operationNames().length);
+  });
+
+  it('hands the way back out when the master switch is turned off here', async () => {
+    const settings = menuSettings();
+    const rows = rowsOf(
+      groupOf(imageMenuSectionDefinitions(menuBridge(settings, vi.fn()), vi.fn()))
+    );
+    const setting = renderRow(rowNamed(rows, '启用图片右键菜单'), document.createDiv());
+
+    const input = must<HTMLInputElement>(setting.controlEl, 'input[type="checkbox"]');
+    expect(input.checked).toBe(true);
+    input.checked = false;
+    input.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => expect(settings.enableContextMenu).toBe(false));
+    // Turning the menu off from here strands the user exactly as the command and
+    // the menu row do, so this row owes them the same hand-off: the notice as a
+    // bullet list, and the command's palette label on the clipboard.
+    await vi.waitFor(() => expect(noticesMock).toHaveLength(1));
+    const notice = noticesMock[0] as DocumentFragment;
+    expect(notice.querySelectorAll('li')).toHaveLength(3);
+    expect(copiedMock[copiedMock.length - 1]).toContain('开关 DIAA 图片右键菜单');
+  });
+
+  it('says nothing when the master switch is turned back on here', async () => {
+    const settings = menuSettings();
+    settings.enableContextMenu = false;
+    const rows = rowsOf(
+      groupOf(imageMenuSectionDefinitions(menuBridge(settings, vi.fn()), vi.fn()))
+    );
+    const setting = renderRow(rowNamed(rows, '启用图片右键菜单'), document.createDiv());
+
+    const input = must<HTMLInputElement>(setting.controlEl, 'input[type="checkbox"]');
+    expect(input.checked).toBe(false);
+    input.checked = true;
+    input.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => expect(settings.enableContextMenu).toBe(true));
+    // The toggle the user just flipped already shows the new state, and nothing
+    // is stranded — so this direction is the quiet one.
+    expect(noticesMock).toEqual([]);
+    expect(copiedMock).toEqual([]);
+  });
+
+  it('follows a flip made from the command', async () => {
+    const settings = menuSettings();
+    const bridge = menuBridge(settings, vi.fn());
+    // Attached to the document, because that is the state under test: the page
+    // is the thing on screen when the command is run.
+    const container = document.body.createDiv();
+    const setting = renderRow(
+      rowNamed(
+        rowsOf(groupOf(imageMenuSectionDefinitions(bridge, vi.fn()))),
+        '启用图片右键菜单'
+      ),
+      container
+    );
+    const input = must<HTMLInputElement>(setting.controlEl, 'input[type="checkbox"]');
+    expect(input.checked).toBe(true);
+
+    // The command writes the setting and stops there. This toggle is the one
+    // surface that shows the state, so it has to follow on its own — in place,
+    // since the element the assertion below holds is the page's own.
+    await setContextMenuEnabled(bridge, false, false);
+
+    expect(input.checked).toBe(false);
+    expect(setting.controlEl.contains(input)).toBe(true);
+    container.remove();
+  });
+
+  it('leaves a control that is no longer on the page alone', async () => {
+    const settings = menuSettings();
+    const bridge = menuBridge(settings, vi.fn());
+    // Detached: this is the page after it has been closed. Nothing is showing,
+    // and the next drawing reads the stored value anyway.
+    const setting = renderRow(
+      rowNamed(
+        rowsOf(groupOf(imageMenuSectionDefinitions(bridge, vi.fn()))),
+        '启用图片右键菜单'
+      ),
+      document.createDiv()
+    );
+    const input = must<HTMLInputElement>(setting.controlEl, 'input[type="checkbox"]');
+
+    await setContextMenuEnabled(bridge, false, false);
+
+    expect(settings.enableContextMenu).toBe(false);
+    expect(input.checked).toBe(true);
   });
 
   it('keeps the stored operation order', () => {

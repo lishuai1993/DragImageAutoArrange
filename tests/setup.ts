@@ -43,8 +43,9 @@ if (typeof document !== 'undefined') {
   }
 
   // Obsidian exposes element creation as *global* functions too (createEl /
-  // createDiv / createSpan), which is the form src code calls to build detached
-  // elements. They are not module exports, so they cannot be imported.
+  // createDiv / createSpan / createFragment), which is the form src code calls
+  // to build detached elements. They are not module exports, so they cannot be
+  // imported.
   const globals = globalThis as Record<string, unknown>;
   if (typeof globals.createEl !== 'function') {
     globals.createEl = createEl;
@@ -52,6 +53,13 @@ if (typeof document !== 'undefined') {
       createEl('div', o);
     globals.createSpan = (o?: { cls?: string | string[]; text?: string } | string) =>
       createEl('span', o);
+  }
+  if (typeof globals.createFragment !== 'function') {
+    globals.createFragment = (callback?: (el: DocumentFragment) => void): DocumentFragment => {
+      const fragment = document.createDocumentFragment();
+      callback?.(fragment);
+      return fragment;
+    };
   }
 
   const elProto = Element.prototype as Element & Record<string, unknown>;

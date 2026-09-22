@@ -3,8 +3,10 @@
  * file-operation editor (per-row visibility, with up/down reordering).
  *
  * The host is reached only through `ImageMenuBridge`, so this module never sees
- * the facade, the persistence key or Obsidian's data object — it just asks for
- * the current settings, mutates them in place, and asks for a save.
+ * the facade, the persistence key or Obsidian's data object — it asks for the
+ * current settings, mutates them in place, and asks for a save. The master
+ * switch is the exception: it goes through the one writer, which is also what
+ * hands the way back out when the menu is turned off.
  *
  * One row table, two render paths. Obsidian 1.13 renders a settings tab from
  * definitions, and puts a group's heading and card around the rows itself, so
@@ -13,9 +15,10 @@
  * heading and the group div by hand and mounts the same rows into it.
  */
 
-import { ButtonComponent, Setting, type SettingDefinitionItem } from 'obsidian';
+import { ButtonComponent, Setting, ToggleComponent, type SettingDefinitionItem } from 'obsidian';
 import { applySettingButtonStyle } from '../settingsButton';
 import { t, type Localized } from '../i18n/language';
+import { onContextMenuSwitchChanged, setContextMenuEnabled } from './contextMenuToggle';
 import { FILE_OPERATION_LABELS } from './menuLabels';
 import { restoreDefaultFileOperationOrder, type ImageMenuSettings } from './settingsModel';
 
@@ -37,6 +40,46 @@ interface SectionRow {
     desc?: string;
     /** Called with a row that already carries its name and description. */
     body(setting: Setting): void;
+}
+
+/**
+ * The master switch's control, as last drawn.
+ *
+ * The switch has three surfaces and this toggle is the only one whose state
+ * lives in a drawn control — the command and the menu row just write the setting
+ * — so a flip made there has to be reflected *here*, and reflected in place: a
+ * redraw would rebuild the page under the user's cursor. Reassigned on every
+ * render; both render paths go through `buildRows`, so both keep it current.
+ */
+let masterToggle: ToggleComponent | null = null;
+
+/**
+ * Reflect a switch value changed elsewhere.
+ *
+ * A no-op until the row has been drawn, and once that drawing has been torn down
+ * (the page closed, a rebuild replaced it): either way the value is read again
+ * when the row is next drawn, so there is nothing to chase.
+ */
+export function syncContextMenuToggleValue(enabled: boolean): void {
+    const toggle = masterToggle;
+    if (!toggle || !toggle.toggleEl.isConnected) return;
+    toggle.setValue(enabled);
+}
+
+/**
+ * Put this section on the switch's broadcast list, once.
+ *
+ * Hung off the first drawing rather than off import or the settings tab, since
+ * before a row is drawn there is no control to keep current. It is never taken
+ * down: the section is a singleton for the life of the plugin, and the
+ * subscription holds the module's own sync function, not any drawn element.
+ */
+let switchSyncInstalled = false;
+
+function installSwitchSync(): void {
+    if (switchSyncInstalled) return;
+    switchSyncInstalled = true;
+    onContextMenuSwitchChanged(syncContextMenuToggleValue);
 }
 
 /**
@@ -84,12 +127,15 @@ function buildRows(bridge: ImageMenuBridge, refresh: () => void): SectionRow[] {
                 en: 'When off, right-clicking an image no longer opens the DIAA menu — Obsidian and other plugins handle it again. A command and a menu row can switch it back on.',
             }),
             body: (setting) => {
-                setting.addToggle((toggle) =>
+                setting.addToggle((toggle) => {
+                    installSwitchSync();
+                    masterToggle = toggle;
                     toggle.setValue(settings.enableContextMenu).onChange((value) => {
-                        settings.enableContextMenu = value;
-                        void bridge.saveSettings();
-                    })
-                );
+                        // Through the one writer, so switching off here hands the
+                        // way back out exactly as the command and the menu row do.
+                        void setContextMenuEnabled(bridge, value, !value);
+                    });
+                });
             },
         },
         {

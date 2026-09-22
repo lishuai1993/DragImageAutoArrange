@@ -3,8 +3,9 @@
  *
  * Tests for the image right-click menu's master switch: the state write plus
  * the two shut-off concerns — the clipboard hand-off of the command that turns
- * the menu back on, and the notice that explains it. The settings row's silence
- * is part of the contract too, since it shares this write path.
+ * the menu back on, and the notice that explains it. `announce` is what the
+ * three surfaces differ by, and all three share this write path — including the
+ * broadcast that keeps the settings page's own toggle showing the right value.
  *
  * The switch-off notice is a real bullet list, so the assertions read the
  * fragment's `ul > li` texts rather than splitting a string: the shape is the
@@ -79,18 +80,22 @@ import {
     TOGGLE_CONTEXT_MENU_COMMAND_ID_ZH,
     TOGGLE_CONTEXT_MENU_COMMAND_NAME,
     TOGGLE_CONTEXT_MENU_NAMES,
+    onContextMenuSwitchChanged,
     setContextMenuEnabled,
     toggleContextMenu,
     toggleCommandPaletteLabel,
+    type ContextMenuSwitchHost,
 } from '../src/imageMenu/contextMenuToggle';
 import { setLanguage } from '../src/i18n/language';
 import { DEFAULT_IMAGE_MENU_SETTINGS } from '../src/imageMenu/settingsModel';
-import type { ImageMenuFacade } from '../src/imageMenu/imageMenuHost';
 
 function facadeWith(enableContextMenu: boolean) {
     const settings = { ...DEFAULT_IMAGE_MENU_SETTINGS, enableContextMenu };
     const saveSettings = vi.fn(async () => {});
-    const facade = { settings, saveSettings } as unknown as ImageMenuFacade;
+    // The switch needs only these two, which is the whole point of the narrow
+    // host type: the real facade and the settings section's bridge both fit it,
+    // so the row can drive this write path without the facade leaking in.
+    const facade: ContextMenuSwitchHost = { getSettings: () => settings, saveSettings };
     return { facade, settings, saveSettings };
 }
 
@@ -223,6 +228,33 @@ describe('setContextMenuEnabled', () => {
             `开启命令「${toggleCommandPaletteLabel()}」复制到剪贴板失败，可手动记下该名称`,
             '在「设置 → 快捷键」中搜索该命令并绑定快捷键，即可随时重新开启。',
         ]);
+    });
+});
+
+describe('the switch change broadcast', () => {
+    it('tells listeners the value that landed, once it has landed', async () => {
+        const { facade, settings } = facadeWith(true);
+        const heard: boolean[] = [];
+        const unsubscribe = onContextMenuSwitchChanged((enabled) => {
+            heard.push(enabled);
+            expect(settings.enableContextMenu).toBe(enabled);
+        });
+
+        await setContextMenuEnabled(facade, false, false);
+        unsubscribe();
+
+        expect(heard).toEqual([false]);
+    });
+
+    it('stops telling a listener that unsubscribed', async () => {
+        const { facade } = facadeWith(true);
+        const heard: boolean[] = [];
+        const unsubscribe = onContextMenuSwitchChanged((enabled) => heard.push(enabled));
+        unsubscribe();
+
+        await setContextMenuEnabled(facade, false, false);
+
+        expect(heard).toEqual([]);
     });
 });
 

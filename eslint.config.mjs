@@ -37,9 +37,9 @@ export default defineConfig([
     files: ["tests/setup.ts"],
     rules: {
       "obsidianmd/no-global-this": "off",
-      // This file *is* the `createEl`/`createDiv`/`createSpan` implementation
-      // the rule wants callers to use, so its body necessarily starts from the
-      // raw `document.createElement` primitive.
+      // This file *is* the `createEl`/`createDiv`/`createSpan`/`createFragment`
+      // implementation the rule wants callers to use, so its body necessarily
+      // starts from the raw `document.createElement` primitive.
       "obsidianmd/prefer-create-el": "off",
     },
   },
