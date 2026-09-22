@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { read, write } from "../src/imageParse/rowParams";
+import { read, write, mergeRewrite } from "../src/imageParse/rowParams";
 
 const EXTS = "png,jpg,webp";
 
@@ -260,6 +260,74 @@ describe("read orientation word", () => {
     expect(read("![[a.png|r90|200]]", "multi", EXTS)[0].hasSizing).toBe(true);
     expect(read("![[a.webp|r90]]", "single", EXTS)[0].hasSizing).toBe(false);
     expect(read("![[a.webp|r90|1|350]]", "single", EXTS)[0].hasSizing).toBe(true);
+  });
+});
+
+// ── mergeRewrite: which slots follow the document ───────────────────────
+describe("mergeRewrite", () => {
+  it("takes every unclaimed slot from the line, not from the model", () => {
+    // The rotate repro: the document already holds the new word *and* the fill
+    // the turn wrote, while the model is the snapshot from before that edit.
+    const model = read("![[a.png|fh|center|310|100]]", "multi", EXTS)[0];
+    const merged = mergeRewrite(
+      "![[a.png|r90fh|center|310|51]]",
+      "multi",
+      { ...model, display: { kind: "multi", share: 3.1, fill: 0.87 } }
+    );
+    expect(write(merged)).toBe("![[a.png|r90fh|center|310|51]]");
+  });
+
+  it("lets a claimed slot win over the line", () => {
+    const model = read("![[a.png|fh|center|310|100]]", "multi", EXTS)[0];
+    const merged = mergeRewrite(
+      "![[a.png|r90fh|center|310|51]]",
+      "multi",
+      { ...model, display: { kind: "multi", share: 2.5, fill: 0.87 } },
+      { share: true, fill: true }
+    );
+    expect(write(merged)).toBe("![[a.png|r90fh|center|250|87]]");
+  });
+
+  it("takes a single row's S|W from the line when the tail holds no local edit", () => {
+    // The single-row counterpart of the rotate repro: the turn writes its own
+    // `|1|turned width` straight to the line, and the widget built before that
+    // edit still holds the width it last laid out.
+    const model = read("![[a.webp|fh|left|1|200]]", "single", EXTS)[0];
+    const merged = mergeRewrite("![[a.webp|r90|center|1|350]]", "single", model);
+    expect(write(merged)).toBe("![[a.webp|r90|center|1|350]]");
+  });
+
+  it("lets a claimed single tail win over the line", () => {
+    const model = read("![[a.webp|fh|left|1|200]]", "single", EXTS)[0];
+    const merged = mergeRewrite("![[a.webp|r90|center|1|350]]", "single", model, {
+      sizing: true,
+    });
+    expect(write(merged)).toBe("![[a.webp|r90|center|1|200]]");
+  });
+
+  it("takes the line's follow flag over a stale manual model", () => {
+    // S is the line's to decide: a return to setting-driven (or a settings pass
+    // that unpinned the row) must not be undone by the widget's manual width.
+    const model = read("![[a.webp|fh|left|1|200]]", "single", EXTS)[0];
+    const merged = mergeRewrite("![[a.webp|r90|center|0|350]]", "single", model);
+    expect(merged.display).toEqual({ kind: "single-follow" });
+    expect(write(merged)).toBe("![[a.webp|r90|center|0|350]]");
+    // A follow row's W is still the caller's measurement when one is supplied.
+    expect(write(merged, { followWidthPx: 400 })).toBe("![[a.webp|r90|center|0|400]]");
+  });
+
+  it("omits the alignment word when the line carries none and none is claimed", () => {
+    const model = read("![[a.png|left|310|100]]", "multi", EXTS)[0];
+    const merged = mergeRewrite("![[a.png|310|100]]", "multi", model);
+    expect(write(merged)).toBe("![[a.png|orig|310|100]]");
+  });
+
+  it("reads a line that is not an embed as empty slots without throwing", () => {
+    const model = read("![[a.png|left|310|100]]", "multi", EXTS)[0];
+    const merged = mergeRewrite("plain text", "multi", model);
+    expect(merged.orientation).toEqual({ turns: 0, mirror: false });
+    expect(merged.alignment).toBeUndefined();
+    expect(write(merged)).toBe("plain text");
   });
 });
 

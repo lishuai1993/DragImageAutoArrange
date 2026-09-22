@@ -6,8 +6,11 @@
  * `var(--text-highlight-bg) !important` for three seconds.  On a flex row the
  * pictures cover the band, so what the user sees is a yellow blink in the
  * letterbox and the gaps beside them.  The class is stripped from any block
- * that holds a row — once when the section renders, and continuously while the
- * flash can still arrive (Obsidian applies it *after* rendering the section).
+ * that holds a row or an image embed — the marker once the pass has placed one
+ * of our pictures, the bare embed before it has, which is the state the block is
+ * in when the flash arrives.  It is stripped once as the section renders, and
+ * continuously while the flash can still arrive (Obsidian applies it *after*
+ * rendering the section).
  *
  * The watcher is a module singleton, so each test starts by calling
  * suppressRowFlash() to install its own; the afterEach runs the watch window
@@ -31,6 +34,17 @@ function block(marker: string | null): HTMLElement {
   if (marker) inner.setAttribute(marker, '');
   inner.textContent = 'Body';
   el.appendChild(inner);
+  document.body.appendChild(el);
+  return el;
+}
+
+/** The commonest single-image row, and the shape that used to slip through:
+ *  `applyStandaloneAlignment` sizes a pure image block where it stands and marks
+ *  the *embed*, so the block carries no `data-diaa-*` attribute at all. */
+function inlineBlock(): HTMLElement {
+  const el = document.createDiv({ cls: FLASH });
+  const embed = el.createDiv({ cls: 'internal-embed diaa-row-inline' });
+  embed.textContent = 'Body';
   document.body.appendChild(el);
   return el;
 }
@@ -63,10 +77,66 @@ describe('suppressRowFlash', () => {
     expect(single.classList.contains(FLASH)).toBe(false);
   });
 
+  it('strips it from a block holding a lone picture sized where it stands', () => {
+    // No wrapper marker to read: this is the shape the strip used to miss, so
+    // the amber band along the block's uncovered edge stayed for Obsidian's
+    // own three seconds.
+    const single = inlineBlock();
+    suppressRowFlash();
+    expect(single.classList.contains(FLASH)).toBe(false);
+  });
+
+  it('strips a flash that lands on the embed itself', () => {
+    const el = document.createDiv();
+    const embed = el.createDiv({ cls: 'internal-embed diaa-row-inline' });
+    embed.textContent = 'Body';
+    document.body.appendChild(el);
+    embed.classList.add(FLASH);
+
+    suppressRowFlash();
+    expect(embed.classList.contains(FLASH)).toBe(false);
+  });
+
   it('leaves a block with no row alone', () => {
     const plain = block(null);
     suppressRowFlash();
     expect(plain.classList.contains(FLASH)).toBe(true);
+  });
+
+  it('strips it from a block that holds only a bare image embed so far', () => {
+    // What Obsidian hands the strip: it flashes the restored line as it builds
+    // the section, so the block holds the embed Obsidian made and nothing of
+    // ours — no wrapper, no `diaa-row-inline` — until this pass wraps or sizes
+    // it.  A marker-only test declines the flash there and leaves the band to
+    // the sweep; the embed alone is enough to know the band will be covered.
+    const el = document.createDiv({ cls: FLASH });
+    el.createDiv({ cls: 'internal-embed media-embed image-embed' }).textContent = 'Body';
+    document.body.appendChild(el);
+
+    suppressRowFlash();
+    expect(el.classList.contains(FLASH)).toBe(false);
+  });
+
+  it('leaves a block holding a note embed alone', () => {
+    // Only an image embed is ours to clear: a note embed's block is not a
+    // picture the plugin paints over, so its flash is still Obsidian's.
+    const el = document.createDiv({ cls: FLASH });
+    el.createDiv({ cls: 'internal-embed' }).textContent = 'Body';
+    document.body.appendChild(el);
+
+    suppressRowFlash();
+    expect(el.classList.contains(FLASH)).toBe(true);
+  });
+
+  it('catches a flash that lands before our marker does', async () => {
+    const el = document.createDiv();
+    el.createDiv({ cls: 'internal-embed image-embed' }).textContent = 'Body';
+    document.body.appendChild(el);
+
+    suppressRowFlash();
+    el.classList.add(FLASH);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(el.classList.contains(FLASH)).toBe(false);
   });
 
   it('catches a flash applied after the section rendered', async () => {
@@ -85,6 +155,18 @@ describe('suppressRowFlash', () => {
     late.classList.add(FLASH);
     await vi.advanceTimersByTimeAsync(1);
     expect(late.classList.contains(FLASH)).toBe(false);
+  });
+
+  it('catches a late flash on a lone picture sized where it stands', async () => {
+    const el = document.createDiv();
+    const embed = el.createDiv({ cls: 'internal-embed diaa-row-inline' });
+    embed.textContent = 'Body';
+    document.body.appendChild(el);
+
+    suppressRowFlash();
+    el.classList.add(FLASH);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(el.classList.contains(FLASH)).toBe(false);
   });
 
   it('sweeps a flash whose block only becomes a row afterwards', async () => {

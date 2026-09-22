@@ -113,8 +113,7 @@ describe('applyFlexGrowChanges', () => {
       view as never,
       [multiImage(0, stale, 3.1)],
       [3.1],
-      [1],
-      'center'
+      { fillDirty: new Set([0]), defaultAlignment: 'center' }
     );
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0].changes[0].insert).toBe(stale);
@@ -125,7 +124,10 @@ describe('applyFlexGrowChanges', () => {
   it('skips the write when the document already holds the new line', () => {
     const doc = '![[a.webp|orig|center|310|100]]';
     const { view, dispatched } = fakeView([doc]);
-    applyFlexGrowChanges(view as never, [multiImage(0, doc, 3.1)], [3.1], [1], 'center');
+    applyFlexGrowChanges(view as never, [multiImage(0, doc, 3.1)], [3.1], {
+      fillDirty: new Set([0]),
+      defaultAlignment: 'center',
+    });
     expect(dispatched).toHaveLength(0);
   });
 
@@ -137,40 +139,86 @@ describe('applyFlexGrowChanges', () => {
       view as never,
       [multiImage(0, '![[a.webp|orig|center|310|100]]', 3.1)],
       [3.1],
-      [1],
-      'center'
+      { fillDirty: new Set([0]), defaultAlignment: 'center' }
     );
     expect(dispatched).toHaveLength(0);
   });
 
-  it('folds in a fill change on the same line', () => {
+  it('leaves a skipped line out of the satisfied set so its marks survive', () => {
+    const { view } = fakeView(['some other text']);
+    const satisfied = applyFlexGrowChanges(
+      view as never,
+      [multiImage(0, '![[a.webp|orig|center|310|100]]', 3.1)],
+      [3.1],
+      { fillDirty: new Set([0]), defaultAlignment: 'center' }
+    );
+    expect(satisfied).toEqual([]);
+  });
+
+  it('folds in a fill change the widget holds a pending edit for', () => {
     const stale = '![[a.webp|orig|center|310|100]]';
     const doc = '![[a.webp|orig|center|310|100]]';
     const img = multiImage(0, stale, 3.1);
     const { view, dispatched } = fakeView([doc]);
-    applyFlexGrowChanges(view as never, [img], [3.1], [0.52], 'center');
+    applyFlexGrowChanges(view as never, [img], [3.1], {
+      scales: [0.52],
+      fillDirty: new Set([0]),
+      defaultAlignment: 'center',
+    });
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0].changes[0].insert).toBe('![[a.webp|orig|center|310|52]]');
   });
 
-  it('keeps the word the document holds, not the one the group was built with', () => {
-    // The rotate repro: the new orientation word is written into the document,
-    // and the teardown persist then fires from the group parsed *before* that
-    // edit.  Rebuilding the line out of that group stamped the old word back
-    // over the rotate — the picture turned, then snapped back a frame later.
-    const doc = '![[a.webp|r90fh|center|310|100]]';
+  it('reports the written index as satisfied for the caller to clear', () => {
+    const doc = '![[a.webp|orig|center|310|100]]';
+    const { view } = fakeView([doc]);
+    const satisfied = applyFlexGrowChanges(
+      view as never,
+      [multiImage(0, doc, 3.1)],
+      [3.1],
+      { scales: [0.52], fillDirty: new Set([0]), defaultAlignment: 'center' }
+    );
+    expect(satisfied).toEqual([0]);
+  });
+
+  it('keeps the fill the document holds for an index with no pending edit', () => {
+    // The reported repro: a turn rewrites the member's fill in the document, the
+    // widget it fires from still holds the pre-turn fill, and the teardown
+    // persist then wrote that stale value back — the picture snapped out to the
+    // row height a frame later.  Only a pending local edit may outrank the line.
+    const doc = '![[a.webp|r90fh|center|310|51]]';
     const stale: RowImage = {
       ...multiImage(0, '![[a.webp|fh|center|310|100]]', 3.1),
       orientation: { turns: 0, mirror: true },
+      display: { kind: 'multi', share: 3.1, fill: 0.87 },
     };
     const { view, dispatched } = fakeView([doc]);
-    applyFlexGrowChanges(view as never, [stale], [3.1], [0.52], 'center');
+    applyFlexGrowChanges(view as never, [stale], [2.5], {
+      scales: [0.87],
+      defaultAlignment: 'center',
+    });
 
+    // Only the share moved, so the write carries the document's word and fill.
     expect(dispatched).toHaveLength(1);
-    expect(dispatched[0].changes[0].insert).toBe('![[a.webp|r90fh|center|310|52]]');
+    expect(dispatched[0].changes[0].insert).toBe('![[a.webp|r90fh|center|250|51]]');
   });
 
-  it('keeps the document alignment over the stale one, and the model alignment when the document has none', () => {
+  it('skips the persist entirely when nothing the caller holds is pending', () => {
+    const doc = '![[a.webp|r90fh|center|310|51]]';
+    const stale: RowImage = {
+      ...multiImage(0, '![[a.webp|fh|center|310|100]]', 3.1),
+      orientation: { turns: 0, mirror: true },
+      display: { kind: 'multi', share: 3.1, fill: 0.87 },
+    };
+    const { view, dispatched } = fakeView([doc]);
+    applyFlexGrowChanges(view as never, [stale], [3.1], {
+      scales: [0.87],
+      defaultAlignment: 'center',
+    });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it('keeps the document alignment over the stale one when nothing is pending', () => {
     const stale: RowImage = {
       ...multiImage(0, '![[a.webp|r90|left|310|100]]', 3.1),
       alignment: 'left',
@@ -178,13 +226,49 @@ describe('applyFlexGrowChanges', () => {
     };
 
     const moved = fakeView(['![[a.webp|r90|right|310|100]]']);
-    applyFlexGrowChanges(moved.view as never, [stale], [3.1], [0.52], 'center');
+    applyFlexGrowChanges(moved.view as never, [stale], [3.1], {
+      scales: [0.52],
+      fillDirty: new Set([0]),
+      defaultAlignment: 'center',
+    });
     expect(moved.dispatched[0].changes[0].insert).toBe('![[a.webp|r90|right|310|52]]');
+  });
 
-    // A line with no alignment slot is not a vote for "none": the group's own
-    // word still lands, as it does today.
-    const bare = fakeView(['![[a.webp|r90|310|100]]']);
-    applyFlexGrowChanges(bare.view as never, [stale], [3.1], [0.52], 'center');
-    expect(bare.dispatched[0].changes[0].insert).toBe('![[a.webp|r90|left|310|52]]');
+  it('lands the widget alignment when it carries a pending edit', () => {
+    // A line already holding an alignment word used to swallow the choice: the
+    // document's word was preferred unconditionally, so the menu write came out
+    // identical to the line and was dropped as a no-op.
+    const model: RowImage = {
+      ...multiImage(0, '![[a.webp|r90|left|310|100]]', 3.1),
+      alignment: 'left',
+      orientation: { turns: 1, mirror: false },
+    };
+
+    const { view, dispatched } = fakeView(['![[a.webp|r90|right|310|100]]']);
+    applyFlexGrowChanges(view as never, [model], [3.1], {
+      scales: [0.52],
+      fillDirty: new Set([0]),
+      alignDirty: new Set([0]),
+      defaultAlignment: 'center',
+    });
+    expect(dispatched[0].changes[0].insert).toBe('![[a.webp|r90|left|310|52]]');
+  });
+
+  it('writes the default alignment onto a line that carries no word', () => {
+    // The backfill's own edit: the widget put the setting's alignment on the
+    // model and marked it, so the write must not read the empty slot back.
+    const model: RowImage = {
+      ...multiImage(0, '![[a.webp|r90|310|100]]', 3.1),
+      alignment: 'center',
+      orientation: { turns: 1, mirror: false },
+    };
+    const { view, dispatched } = fakeView(['![[a.webp|r90|310|100]]']);
+    applyFlexGrowChanges(view as never, [model], [3.1], {
+      scales: [0.52],
+      fillDirty: new Set([0]),
+      alignDirty: new Set([0]),
+      defaultAlignment: 'center',
+    });
+    expect(dispatched[0].changes[0].insert).toBe('![[a.webp|r90|center|310|52]]');
   });
 });

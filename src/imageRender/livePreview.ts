@@ -7,18 +7,20 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import {
+  EditorState,
   RangeSetBuilder,
   StateField,
   StateEffect,
   Prec,
   Annotation,
 } from "@codemirror/state";
+import type { Transaction } from "@codemirror/state";
 import { editorLivePreviewField } from "obsidian";
 import { detectRowGroups } from "../imageParse/imageDetector";
 import type { RowGroup } from "../imageParse/imageDetector";
-import { write as writeRowImage, isAlignmentWord } from "../imageParse/rowParams";
+import { write as writeRowImage, mergeRewrite, singleDisplayChanged } from "../imageParse/rowParams";
 import type { RowImage, Alignment } from "../imageParse/rowParams";
-import { ImageRowWidget, ImageRowOptions, getSidebarWidths } from "./imageRowWidget";
+import { ImageRowWidget, ImageRowOptions, getSidebarWidths, lastRenderedRowHeight } from "./imageRowWidget";
 import { DragImageSettings } from "../settings";
 import { CLASSES } from "../constants";
 import { computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
@@ -238,22 +240,66 @@ export function normalizeRaw(raw: string): string {
   return stripEmbedParams(raw);
 }
 
+/**
+ * Whether two rows would draw the same thing — the image side of the widget
+ * reuse decision (`StaticImageRowWidget.eqInner`).  Extracted from the widget so
+ * the rule is testable without a CodeMirror view.
+ *
+ * Membership, alignment and orientation are each compared explicitly because
+ * `normalizeRaw` strips the whole param tail.  A single row's `|S|W` tail
+ * vanishes the same way, so its width needs a comparison of its own: an undo of
+ * a handle drag restores the pre-drag W in the document, and without this the
+ * widget would compare equal, CodeMirror would keep the old DOM, and the
+ * picture would stay at the dragged width while the note reverted.
+ */
+export function sameRowImages(a: RowImage[], b: RowImage[]): boolean {
+  if (a.length !== b.length) return false;
+  if (a.length === 1 && singleDisplayChanged(a[0].display, b[0].display)) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (normalizeRaw(a[i].raw) !== normalizeRaw(b[i].raw)) return false;
+    if (a[i].alignment !== b[i].alignment) return false;
+    // The orientation word is stripped by normalizeRaw with every other param,
+    // so a rotate/flip would otherwise reuse the live widget — whose stale model
+    // would then write its old orientation straight back over the new one.
+    const ao = a[i].orientation;
+    const bo = b[i].orientation;
+    if (ao.turns !== bo.turns || ao.mirror !== bo.mirror) return false;
+  }
+  return true;
+}
+
+/** What a flex/scale persist carries besides the values themselves. */
+export interface FlexPersistOptions {
+  /** The fill ratios the caller holds, read only for the indices `fillDirty`
+   *  claims; every other index takes its fill back from the document. */
+  scales?: (number | null)[];
+  defaultAlignment?: Alignment;
+  /** Indices whose fill / alignment slot carries a local edit that has not
+   *  reached the document yet.  Anything not named here follows the line. */
+  fillDirty?: ReadonlySet<number>;
+  alignDirty?: ReadonlySet<number>;
+}
+
 /** Write flex-grow values back to markdown as ![[file|width]].
  *  Extracted so it can be called both synchronously (legacy) and deferred
  *  via setTimeout (from destroy, where view.dispatch is illegal).
- *  Exported for the persist-decisions test (no-op detection is load-bearing). */
+ *  Exported for the persist-decisions test (no-op detection is load-bearing).
+ *
+ *  Returns the indices whose persist is now satisfied — the ones written and the
+ *  ones already matching — so the caller can drop their pending marks. A line
+ *  skipped as structurally stale is left out: its edit is still unwritten. */
 export function applyFlexGrowChanges(
   view: EditorView,
   images: RowImage[],
   grows: number[],
-  scales?: (number | null)[],
-  defaultAlignment?: "left" | "center" | "right"
-): void {
+  opts: FlexPersistOptions = {}
+): number[] {
   const changes: Array<{ from: number; to: number; insert: string }> = [];
+  const satisfied: number[] = [];
   for (let i = 0; i < grows.length && i < images.length; i++) {
     const img = images[i];
     if (img.display.kind !== "multi") continue;
-    const fill = scales ? scales[i] : img.display.fill;
+    const fill = opts.scales ? opts.scales[i] : img.display.fill;
 
     const line = img.line + 1; // 1-indexed
     if (line < 1 || line > view.state.doc.lines) continue;
@@ -264,27 +310,16 @@ export function applyFlexGrowChanges(
     // and resurrect the moved embed at its old position.
     if (!lineObj.text.includes(img.fileName)) continue;
 
-    // Base the rewrite on the document's own line, not on `img`. Only the share
-    // and fill slots are the caller's to set; every other slot (orientation,
-    // alignment) is re-read from the text as it stands now. `img` comes from the
-    // group the widget was built with, so a word-slot-only edit (rotate, flip,
-    // align) that already landed in the document but whose rebuild is still
-    // in flight would otherwise be stamped back to the pre-edit word by this
-    // write — the rotate would visibly revert ~one frame later.
-    const params = embedParamString(lineObj.text);
-    const tokens = params.split("|");
-    const alignOffset = isOrientationWord(tokens[0]) ? 1 : 0;
-    // Same rule as the parser's multi-alignment read: the word only occupies the
-    // slot when a `|` follows it, so a trailing lone word is not an alignment.
-    const docAlignment =
-      isAlignmentWord(tokens[alignOffset]) && tokens.length > alignOffset + 1
-        ? tokens[alignOffset]
-        : undefined;
-    const edited: RowImage = {
+    // Slot ownership for this rewrite, which mergeRewrite reads against the
+    // line as it stands. The share is always the caller's: the DOM's flexGrow
+    // is the live value and nothing else ever writes that code (a rotate moves
+    // only the trailing fill). The fill is the caller's only while the widget
+    // holds an unpersisted edit; otherwise the line wins, so a rotate that
+    // already landed keeps the fill it wrote instead of being reverted to the
+    // snapshot the widget was built with. Same for the alignment word.
+    const edited = mergeRewrite(lineObj.text, "multi", {
       ...img,
-      raw: lineObj.text,
-      orientation: parseOrientationWord(params) ?? IDENTITY_STATE,
-      alignment: docAlignment ?? img.alignment ?? defaultAlignment,
+      alignment: img.alignment ?? opts.defaultAlignment,
       display: {
         kind: "multi",
         // Rounded onto the persisted grid here, at the single funnel every
@@ -294,7 +329,13 @@ export function applyFlexGrowChanges(
         share: quantizeSizing(clampFlexGrow(grows[i])),
         fill: fill != null ? quantizeSizing(clampScale(fill)) : null,
       },
-    };
+    }, {
+      share: true,
+      fill: opts.fillDirty?.has(i) ?? false,
+      alignment: opts.alignDirty?.has(i) ?? false,
+    });
+    satisfied.push(i);
+
     const newLine = writeRowImage(edited);
     // Compare against the document, never against `img.raw`: a param-only write
     // does not rebuild the widget (`eqInner` strips the params before comparing),
@@ -306,7 +347,7 @@ export function applyFlexGrowChanges(
     changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
   }
 
-  if (changes.length === 0) return;
+  if (changes.length === 0) return satisfied;
 
   // Apply from bottom to top so earlier positions stay valid
   changes.sort((a, b) => b.from - a.from);
@@ -314,6 +355,7 @@ export function applyFlexGrowChanges(
     lines: changes.map((c) => c.insert),
   });
   view.dispatch({ changes });
+  return satisfied;
 }
 
 /** A RowImage's flex-grammar share, as the destroy/flush persist compare reads
@@ -327,6 +369,21 @@ function modelGrow(img: RowImage): number {
 /** A RowImage's live fill ratio (null = default), the multi-row scale analogue. */
 function modelFill(img: RowImage): number | null {
   return img.display.kind === "multi" ? img.display.fill : null;
+}
+
+/** A widget's persist options: the values its dirty-marked slots take, plus the
+ *  marks themselves so every other slot reads back from the document. */
+function dirtyPersistOptions(
+  inner: ImageRowWidget,
+  images: RowImage[],
+  defaultAlignment: Alignment
+): FlexPersistOptions {
+  return {
+    scales: images.map(modelFill),
+    defaultAlignment,
+    fillDirty: inner._fillDirtyImages,
+    alignDirty: inner._alignmentDirtyImages,
+  };
 }
 
 class StaticImageRowWidget extends WidgetType {
@@ -353,6 +410,28 @@ class StaticImageRowWidget extends WidgetType {
     return same;
   }
 
+  /**
+   * Height CodeMirror's height map models this block at until it is measured.
+   *
+   * The `WidgetType` default is -1, and `HeightMap.point` reads a negative
+   * estimate as "one line" (`oracle.lineHeight`), so a rebuilt row is modelled
+   * as a single text line for as long as the measurement takes.  Anything below
+   * it then sits at the wrong offset and moves once the real height lands —
+   * which is what a whole row leaving and coming back (cut → undo) looks like
+   * from the viewport's side.  Handing the map the height the row last rendered
+   * at keeps the model honest across the rebuild; measurement refines it as
+   * before.
+   */
+  get estimatedHeight(): number {
+    return (
+      lastRenderedRowHeight(
+        this.options.sourcePath,
+        this.group.lineStart,
+        this.group.images.map((img) => img.fileName)
+      ) ?? this.options.defaultRowHeight
+    );
+  }
+
   /** Diag only: name the field that refused reuse. Covers the discriminators a
    *  first rotation flips (raw params, orientation, display kind). */
   private eqReason(other: StaticImageRowWidget): string {
@@ -365,6 +444,9 @@ class StaticImageRowWidget extends WidgetType {
       if (a.images[i].alignment !== b.images[i].alignment) return `alignment[${i}]`;
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return `raw[${i}]`;
       if (a.images[i].display.kind !== b.images[i].display.kind) return `display[${i}]`;
+      if (singleDisplayChanged(a.images[i].display, b.images[i].display)) {
+        return `singleWidth[${i}]`;
+      }
       const ao = a.images[i].orientation;
       const bo = b.images[i].orientation;
       if (ao.turns !== bo.turns || ao.mirror !== bo.mirror) {
@@ -391,25 +473,9 @@ class StaticImageRowWidget extends WidgetType {
     if (this.options.enableDividers !== other.options.enableDividers) return false;
     if (this.options.singleImageSizeMode !== other.options.singleImageSizeMode) return false;
     if (this.options.singleImageWidth !== other.options.singleImageWidth) return false;
-    // Single-image manual flag (S) is stripped by normalizeRaw, so compare the
-    // typed display kind explicitly — flipping S=1→0 (override reset) or a
-    // manual↔follow transition must force a rebuild.  A single row's display is
-    // exactly {single-follow | single-manual}, so kind inequality is the manual
-    // flag inequality.
-    if (a.images.length === 1 && b.images.length === 1) {
-      if (a.images[0].display.kind !== b.images[0].display.kind) return false;
-    }
-    for (let i = 0; i < a.images.length; i++) {
-      if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return false;
-      if (a.images[i].alignment !== b.images[i].alignment) return false;
-      // The orientation word is stripped by normalizeRaw with every other
-      // param, so a rotate/flip would otherwise reuse the live widget — whose
-      // stale model would then write its old orientation straight back over the
-      // new one. Compare it explicitly to force the rebuild.
-      const ao = a.images[i].orientation;
-      const bo = b.images[i].orientation;
-      if (ao.turns !== bo.turns || ao.mirror !== bo.mirror) return false;
-    }
+    // Membership, alignment, orientation, and a single row's `|S|W` tail — the
+    // slots normalizeRaw strips.  See sameRowImages.
+    if (!sameRowImages(a.images, b.images)) return false;
     return true;
   }
 
@@ -477,6 +543,8 @@ class StaticImageRowWidget extends WidgetType {
       // picks up the correct values without a tab-switch dance.
       this.innerWidget.onPersist(() => {
         if (!this.editorView) return;
+        const inner = this.innerWidget;
+        if (!inner) return;
         const images = this.group.images;
         log.debug("SCROLL_DIAG persist fired", {
           lineStart: this.group.lineStart,
@@ -484,10 +552,10 @@ class StaticImageRowWidget extends WidgetType {
         });
         // Single-image rows persist as `![[file|W|S]]` (W=px width, S=0/1 flag).
         if (images.length === 1) {
-          this.persistSingleImage();
+          inner.clearDirty(this.persistSingleImage());
           return;
         }
-        const grows = this.innerWidget!.getCurrentFlexGrows().map((g) => clampFlexGrow(g));
+        const grows = inner.getCurrentFlexGrows().map((g) => clampFlexGrow(g));
         const scales = images.map((img) =>
           img.display.kind === "multi" && img.display.fill != null
             ? clampScale(img.display.fill)
@@ -498,7 +566,17 @@ class StaticImageRowWidget extends WidgetType {
           scales,
           imageCount: images.length,
         });
-        applyFlexGrowChanges(this.editorView, images, grows, scales, this.options.alignment);
+        // The marks these options carry are what lets a slot the widget has
+        // locally edited win over the line; dropping them here, once written,
+        // is what lets a later edit of the same slot land.
+        inner.clearDirty(
+          applyFlexGrowChanges(this.editorView, images, grows, {
+            scales,
+            defaultAlignment: this.options.alignment,
+            fillDirty: inner._fillDirtyImages,
+            alignDirty: inner._alignmentDirtyImages,
+          })
+        );
       });
 
       return el;
@@ -873,17 +951,21 @@ class StaticImageRowWidget extends WidgetType {
       const hasFlexChanges = grows.some((g, i) => {
         return Math.abs(g - modelGrow(images[i])) > 0.005;
       });
-      if (hasFlexChanges || this.innerWidget._scaleDirtyImages.size > 0) {
+      if (
+        hasFlexChanges ||
+        this.innerWidget._fillDirtyImages.size > 0 ||
+        this.innerWidget._alignmentDirtyImages.size > 0
+      ) {
         // Always include scales so they're preserved in markdown when
         // flexGrow changes (e.g. divider drag) without a scale change.
-        const scales = images.map(modelFill);
+        const opts = dirtyPersistOptions(this.innerWidget, images, this.options.alignment);
         // Try synchronous dispatch first; fall back to setTimeout if the
         // view is already in a state where dispatch is illegal.
         try {
-          applyFlexGrowChanges(view, images, grows, scales, this.options.alignment);
+          applyFlexGrowChanges(view, images, grows, opts);
         } catch {
           this.persistTimer = window.setTimeout(() => {
-            applyFlexGrowChanges(view, images, grows, scales, this.options.alignment);
+            applyFlexGrowChanges(view, images, grows, opts);
           }, 0);
         }
       }
@@ -892,64 +974,43 @@ class StaticImageRowWidget extends WidgetType {
     this.innerWidget = null;
   }
 
-  /** Synchronously persist pending flex-grow and scale changes.
-   *  Called before creating a new widget to avoid setTimeout races. */
-  flushPendingPersist(): void {
-    if (!this.editorView || !this.innerWidget || this.group.images.length <= 1) return;
-    const images = this.group.images;
-    const grows = this.innerWidget.getCurrentFlexGrows();
-    const hasFlexChanges = grows.some((g, i) => {
-      return Math.abs(g - modelGrow(images[i])) > 0.005;
-    });
-    if (!hasFlexChanges && this.innerWidget._scaleDirtyImages.size === 0) return;
-    const scales = images.map(modelFill);
-    try {
-      applyFlexGrowChanges(this.editorView, images, grows, scales, this.options.alignment);
-    } catch {
-      // View not ready for dispatch; persist will happen in destroy()
-    }
-  }
-
-  /** Write current flex-grow values back to markdown as ![[file|width]]. */
-  private persistFlexGrows(): void {
-    if (!this.editorView || !this.innerWidget) return;
-    applyFlexGrowChanges(
-      this.editorView,
-      this.group.images,
-      this.innerWidget.getCurrentFlexGrows(),
-      undefined,
-      this.options.alignment
-    );
-  }
-
   /**
    * Persist a single-image row as `![[file|W|S]]`.  The typed display decides
    * S: manual rows write `|1|W` from display.widthPx; follow rows write `|0|W`
    * with the pixel width the widget last materialised (getSingleWidthPx), since
    * a single-follow carries no width in the model.  Serialisation delegates to
    * rowParams.write() over the model, so no parallel single-line formatter stays.
-   */
-  private persistSingleImage(): void {
-    if (!this.editorView) return;
+   *
+   *  Returns the indices whose persist is satisfied, for the caller to clear. */
+  private persistSingleImage(): number[] {
+    if (!this.editorView) return [];
     const img = this.group.images[0];
-    if (!img) return;
+    if (!img) return [];
     const widthPx = img.display.kind === "single-manual"
       ? img.display.widthPx
       : (this.innerWidget?.getSingleWidthPx() ?? 1);
-    const manual = img.display.kind === "single-manual";
     const lineNum = img.line + 1; // 1-indexed
     const doc = this.editorView.state.doc;
-    if (lineNum < 1 || lineNum > doc.lines) return;
+    if (lineNum < 1 || lineNum > doc.lines) return [];
     const lineObj = doc.line(lineNum);
     // Anti-resurrection: skip if a structural move relocated this image and the
     // cached line no longer references it.
-    if (!lineObj.text.includes(img.fileName)) return;
-    const align = img.alignment ?? this.options.alignment;
-    const newText = writeRowImage(
-      { ...img, alignment: align },
-      manual ? {} : { followWidthPx: widthPx }
-    );
-    if (newText === lineObj.text) return;
+    if (!lineObj.text.includes(img.fileName)) return [];
+    // The orientation and the `S|W` tail both follow the line, so a rotate that
+    // already landed on this single row survives a later persist; only a local
+    // width edit (corner drag, return to setting-driven) may outrank it.  A
+    // follow row still takes this widget's measured width, since the model
+    // carries none and the serialiser is handed one either way.
+    const edited = mergeRewrite(lineObj.text, "single", {
+      ...img,
+      alignment: img.alignment ?? this.options.alignment,
+    }, {
+      alignment: this.innerWidget?._alignmentDirtyImages.has(0) ?? false,
+      sizing: this.innerWidget?._sizingDirtyImages.has(0) ?? false,
+    });
+    const manual = edited.display.kind === "single-manual";
+    const newText = writeRowImage(edited, manual ? {} : { followWidthPx: widthPx });
+    if (newText === lineObj.text) return [0];
     scrollDiag.note("追加 dispatch：persistSingleImage", {
       line: img.line,
       from: lineObj.text,
@@ -959,8 +1020,9 @@ class StaticImageRowWidget extends WidgetType {
       changes: { from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newText },
     });
     log.debug("Single-image persist", {
-      line: img.line, widthPx, sFlag: manual ? 1 : 0, alignment: align,
+      line: img.line, widthPx, sFlag: manual ? 1 : 0, alignment: edited.alignment,
     });
+    return [0];
   }
 }
 
@@ -1198,6 +1260,114 @@ export const layoutVersionField = StateField.define<number>({
   }
 });
 
+/**
+ * Position, inside the REWRITTEN document, of an image row that the given
+ * transaction just changed (or null when no changed range lands inside a row).
+ *
+ * Rows are whole-line block `replace` decorations, so a parameter write into a
+ * row overlaps that row's decoration range exactly: containment against the
+ * pre-transaction decoration set identifies the row. `fromB` is the change's
+ * start in the new document and therefore sits inside the row after the edit.
+ */
+export function rowChangePos(
+  tr: Transaction,
+  decos: DecorationSet | undefined
+): number | null {
+  if (!decos || decos.size === 0) return null;
+  let pos: number | null = null;
+  tr.changes.iterChangedRanges((fromA, toA, fromB) => {
+    if (pos !== null) return;
+    decos.between(fromA, toA, (decoFrom, decoTo) => {
+      if (decoFrom <= fromA && toA <= decoTo) {
+        pos = fromB;
+        return false;
+      }
+      return undefined;
+    });
+  });
+  return pos;
+}
+
+/**
+ * Where an undo/redo should leave the viewport.
+ *
+ * A changed range inside a row reveals that row's start — a rotation or an
+ * alignment rewrite touches one member line, and the row is what the user
+ * recognises.  A change outside every row falls back to its own start in the
+ * new document: undoing a cut re-inserts the image line where it used to be,
+ * and since that line is GONE in the pre-undo state no row decoration covers
+ * the change — without the fallback the reveal would be left to CodeMirror,
+ * which targets the caret restored from the history event (the pre-cut caret,
+ * since a right-click never moves it) and yanks the viewport ~20 lines up.
+ */
+export function undoRevealPos(
+  tr: Transaction,
+  decos: DecorationSet | undefined
+): number | null {
+  const rowPos = rowChangePos(tr, decos);
+  if (rowPos !== null) return rowPos;
+  let pos: number | null = null;
+  tr.changes.iterChangedRanges((_fromA, _toA, fromB) => {
+    if (pos === null) pos = fromB;
+  });
+  return pos;
+}
+
+/**
+ * Undo/redo reveals the caret position from BEFORE the undone change
+ * (`@codemirror/commands` history passes `scrollIntoView: true` together with
+ * `startSelection`), and our own edits are dispatched from gestures that never
+ * moved the caret — so Cmd+Z on an alignment/rotation/cut would yank the
+ * viewport back to a stale, unrelated caret.
+ *
+ * A `transactionFilter` cannot intercept this: the history transaction carries
+ * `filter: false`, so filters never see it. An extender does run, and a
+ * `scrollIntoView` effect added here overrides the transaction's own reveal
+ * request in `EditorView.update` (the effect loop runs after the
+ * `tr.scrollIntoView` check). Retarget the reveal via `undoRevealPos`;
+ * `y: "nearest"` leaves the viewport untouched when the target is already on
+ * screen.
+ */
+export function makeRowScrollOnUndo(field: StateField<DecorationSet>) {
+  return EditorState.transactionExtender.of((tr) => {
+    if (!tr.docChanged || !tr.scrollIntoView) return null;
+    if (!tr.isUserEvent("undo") && !tr.isUserEvent("redo")) return null;
+    const decos = tr.startState.field(field, false);
+    const pos = undoRevealPos(tr, decos);
+    // TEMP-DIAG（剪切撤销视口跳变取证）：把撤销/重做事务的落脚点摊开 ——
+    // 改动范围（新文档坐标）对照 CM6 会去揭示的选区（`selAfter`）以及我们
+    // 接管到哪一处。若两者不在一处，而视口落在 `selAfter`，那跳变就是揭示
+    // 目标的问题；若两者都在行上而视口仍动，则跳变来自块高重估（看帧记录
+    // 里的 docH）。诊断完即删。
+    if (scrollDiag.isActive()) {
+      const ranges: string[] = [];
+      tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+        if (ranges.length < 4) {
+          ranges.push(`A${fromA}-${toA}→B${fromB}-${toB}(删${toA - fromA}/增${toB - fromB})`);
+        }
+      });
+      const rowPos = rowChangePos(tr, decos);
+      scrollDiag.note("undo/redo 事务", {
+        kind: tr.isUserEvent("undo") ? "undo" : "redo",
+        scrollFlag: !!tr.scrollIntoView,
+        selBefore: tr.startState.selection.main.head,
+        selAfter: tr.newSelection.main.head,
+        ranges: ranges.join(" | "),
+        revealPos: pos,
+        revealSource:
+          pos === null
+            ? "none（不接管，交给 CM6）"
+            : rowPos !== null
+              ? "row"
+              : "change（行外改动兜底）",
+      });
+    }
+    return pos === null
+      ? null
+      : { effects: EditorView.scrollIntoView(pos, { y: "nearest" }) };
+  });
+}
+
 export function createLivePreviewPlugin(
   getOptions: () => ImageRowOptions,
   getSettings: () => DragImageSettings
@@ -1231,7 +1401,7 @@ export function createLivePreviewPlugin(
     provide: (f) => EditorView.decorations.from(f),
   });
 
-  return [layoutVersionField, Prec.highest(field)];
+  return [layoutVersionField, Prec.highest(field), makeRowScrollOnUndo(field)];
 }
 
 /** A resolved drag/drop target under the cursor. `findDropTarget` always

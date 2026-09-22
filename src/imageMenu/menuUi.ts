@@ -232,6 +232,15 @@ export class DomMenu implements MenuLike {
         // which is exactly the anchor showAt/showBeside set.
         this.rootEl.setCssStyles({ transformOrigin: 'top left' });
         this.rootEl.style.transform = `scale(${menuScale})`;
+        // The menu is a plain div appended to `document.body`, so a mousedown on
+        // a row would move focus out of the editor (Chromium blurs the focused
+        // element when the new target cannot take focus). Obsidian's CodeMirror
+        // drops every keydown whose target lies outside `.cm-content`
+        // (`eventBelongsToEditor`), so the Cmd+Z that follows a menu action
+        // would never reach the editor and undo would silently do nothing.
+        // Cancelling the default keeps focus AND the caret untouched; `click`
+        // still fires, so row actions are unaffected.
+        this.rootEl.addEventListener('mousedown', (e) => e.preventDefault());
     }
 
     addSeparator(): this {

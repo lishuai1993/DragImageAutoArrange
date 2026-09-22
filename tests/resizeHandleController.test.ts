@@ -71,6 +71,7 @@ function makeRow(turned: boolean): Harness {
   const calls: string[] = [];
   const host: ResizeHost = {
     getContainer: () => container,
+    getGroupLineStart: () => 0,
     getItemEls: () => [item],
     getImageEls: () => [img],
     getInterItemSpace: () => 0,
@@ -241,6 +242,7 @@ function makeThreeRow(
   const calls: string[] = [];
   const host: ResizeHost = {
     getContainer: () => container,
+    getGroupLineStart: () => 0,
     getItemEls: () => items,
     getImageEls: () => imgs,
     getInterItemSpace: () => 0,

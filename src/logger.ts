@@ -87,11 +87,13 @@ class Logger {
   private _flushTimer: number | null = null;
   private _flushing = false;
   private _fileOutputFilter: string[] | null = null;
-  /** Minimum severity emitted to either sink. Default DEBUG = emit everything,
-   *  i.e. identical to the pre-gate behavior. */
-  private _minLevel: LogLevel = "DEBUG";
-  /** Master switch for the log.txt sink (settings-driven). */
-  private _fileEnabled = true;
+  /** Minimum severity emitted to either sink. Default ERROR, so the gate starts
+   *  closed: the settings tab raises it, and a failed settings load leaves the
+   *  plugin quiet rather than verbose. */
+  private _minLevel: LogLevel = "ERROR";
+  /** Master switch for the log.txt sink. Default off, so a load that never gets
+   *  as far as applying the settings cannot leave the file sink open. */
+  private _fileEnabled = false;
 
   // ── Lifecycle ──
 

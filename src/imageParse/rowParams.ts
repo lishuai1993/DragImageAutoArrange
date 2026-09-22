@@ -16,7 +16,7 @@
 
 import { buildImageLineRe } from "../constants";
 import { sizingCode } from "../imageLayout/parameterValidator";
-import { stripEmbedParams } from "./embedRaw";
+import { embedParamString, stripEmbedParams } from "./embedRaw";
 import {
   IDENTITY_STATE,
   isOrientationWord,
@@ -126,16 +126,38 @@ function parseSingleDisplay(tokens: string[], offset: number): ImageDisplay {
   return { kind: "single-follow" };
 }
 
-function parseLine(
-  raw: string,
-  line: number,
-  kind: RowKind,
-  re: RegExp
-): RowImage | null {
-  const match = raw.match(re);
-  if (!match) return null;
-  const fileName = match[1];
-  const paramStr = match[2] ?? "";
+/**
+ * Whether two single-row display models disagree on what the row should draw.
+ *
+ * `kind` carries the manual flag S, and a manual row's `widthPx` is the width
+ * W.  This cannot be folded into `normalizeRaw`, which strips the whole
+ * `|`-tail: a W written by anyone other than the widget itself — an undo of a
+ * handle drag being the case that matters — would then leave the widget equal
+ * to itself, and the picture would keep the width the drag left behind while
+ * the document said otherwise.
+ *
+ * A follow row (S=0) stores no width in the model.  What it draws comes from
+ * the settings, so a document-side change to that row's serialised W is a
+ * cache refresh, not a re-layout, and must not force a rebuild.
+ */
+export function singleDisplayChanged(a: ImageDisplay, b: ImageDisplay): boolean {
+  if (a.kind !== b.kind) return true;
+  if (a.kind === "single-manual" && b.kind === "single-manual") {
+    return a.widthPx !== b.widthPx;
+  }
+  return false;
+}
+
+/**
+ * The typed slots of a `|`-joined param section.  Split out of `parseLine` so a
+ * writer that already knows which image a line holds can read that line's
+ * *current* slot values — the read a rewrite needs to prefer the document over
+ * a stale in-memory snapshot (see `mergeRewrite`).
+ */
+export function readParamSlots(
+  paramStr: string,
+  kind: RowKind
+): Pick<RowImage, "alignment" | "orientation" | "hasSizing" | "display"> {
   const tokens = splitTokens(paramStr);
 
   const orientation = parseOrientationWord(paramStr) ?? IDENTITY_STATE;
@@ -157,7 +179,18 @@ function parseLine(
       : tokens.length >= offset + 2 &&
         (tokens[offset] === "0" || tokens[offset] === "1");
 
-  return { line, raw, fileName, alignment, orientation, hasSizing, display };
+  return { alignment, orientation, hasSizing, display };
+}
+
+function parseLine(
+  raw: string,
+  line: number,
+  kind: RowKind,
+  re: RegExp
+): RowImage | null {
+  const match = raw.match(re);
+  if (!match) return null;
+  return { line, raw, fileName: match[1], ...readParamSlots(match[2] ?? "", kind) };
 }
 
 /**
@@ -250,4 +283,94 @@ export function write(img: RowImage, opts: RowImageOptions = {}): string {
       ? opts.followWidthPx
       : (storedFollowWidth(img.raw) ?? 1);
   return serializeSingle(img, widthPx, "0");
+}
+
+/**
+ * Rewrite a line so its alignment slot holds `alignment`, every other slot left
+ * where it stands.
+ *
+ * The slot order — orientation word, alignment word, then the numerics — is
+ * known only in this file (`slotOffset`), so a writer that re-inserts the word
+ * instead of calling this one has to re-derive it, and the obvious guess is
+ * wrong: the first `|` is the *orientation* slot.  Landing there pushes the
+ * rotate/flip word to slot two, where `parseOrientationWord` no longer sees it,
+ * and for a single row the `S|W` tail leaves the positions its parser reads, so
+ * a pure alignment edit costs the row its rotation and its width as well.
+ *
+ * An alignment word sitting in either of the two leading word slots is dropped
+ * wherever it is, so a line some other writer mis-slotted comes back repaired
+ * rather than doubled.
+ */
+export function setAlignment(raw: string, alignment: Alignment): string {
+  const tokens = splitTokens(embedParamString(raw));
+  const head = tokens.slice(0, 2).filter((t) => !isAlignmentWord(t));
+  head.splice(isOrientationWord(head[0]) ? 1 : 0, 0, alignment);
+  const params = head.concat(tokens.slice(2)).join("|");
+  return stripEmbedParams(raw).replace(/\]\]/, `|${params}]]`);
+}
+
+// ── Slot ownership on a rewrite ─────────────────────────────────────────
+
+/** Which slots a rewrite takes from the caller's model instead of from the line
+ *  as it stands.  A slot named here is one the renderer holds a local edit for
+ *  that has not reached the document yet; every slot left out follows the
+ *  document, so an edit that already landed — a rotate, or a Reading-Mode
+ *  alignment flush — is never stamped back to the value the widget was built
+ *  with. */
+export interface SlotOwner {
+  share?: boolean;
+  fill?: boolean;
+  alignment?: boolean;
+  orientation?: boolean;
+  /** The single row's `S|W` tail.  Named as one slot because the two tokens are
+   *  one quantity: S says whether the width is pinned and W is that width.  A
+   *  local edit is a corner-handle drag (S=1) or a return to setting-driven
+   *  (S=0); a rotate writes its own pin straight to the line. */
+  sizing?: boolean;
+}
+
+/** Merge a rewrite's slot values: `model` supplies the slots `owner` claims,
+ *  the line read from `raw` supplies the rest.  `raw` becomes the merged image's
+ *  own text, so the serialiser rebuilds on the line as it stands rather than on
+ *  the snapshot the widget was built with. */
+export function mergeRewrite(
+  raw: string,
+  kind: RowKind,
+  model: RowImage,
+  owner: SlotOwner = {}
+): RowImage {
+  const doc = readParamSlots(embedParamString(raw), kind);
+  return {
+    ...model,
+    raw,
+    orientation: owner.orientation ? model.orientation : doc.orientation,
+    alignment: owner.alignment ? model.alignment : doc.alignment,
+    display: mergeDisplay(kind, model.display, doc.display, owner),
+  };
+}
+
+/** The numeric slots.  A multi row's share and fill are each the caller's only
+ *  when `owner` claims them.
+ *
+ *  A single row's `S|W` is two slots' worth of positions but one quantity, and
+ *  the line outranks the snapshot for the same reason it does elsewhere: a turn
+ *  writes its own pin (`|1|turned width`) straight to the line, leaving the
+ *  widget — built before that edit — holding the width it last laid out.  Only
+ *  the tail's own local edits, the corner-handle drag and the return to
+ *  setting-driven, claim it.  A follow row's W stays the caller's either way:
+ *  the model carries no width there, so the serialiser supplies the one this
+ *  widget has just measured through `followWidthPx`. */
+function mergeDisplay(
+  kind: RowKind,
+  model: ImageDisplay,
+  doc: ImageDisplay,
+  owner: SlotOwner
+): ImageDisplay {
+  if (kind !== "multi") return owner.sizing ? model : doc;
+  if (model.kind !== "multi" || doc.kind !== "multi") return model;
+  return {
+    kind: "multi",
+    share: owner.share ? model.share : doc.share,
+    fill: owner.fill ? model.fill : doc.fill,
+  };
 }

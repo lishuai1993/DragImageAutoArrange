@@ -382,4 +382,37 @@ describe('Standalone quarter-turn centring', () => {
     expect(embed.style.getPropertyValue('display')).toBe('inline-block');
     expect(embed.style.getPropertyValue('align-items')).toBe('');
   });
+
+  it('keeps a turned picture centred when the alignment pass runs alone', () => {
+    // The click path: an alignment change re-runs applyStandaloneAlignment with
+    // no sizing pass after it, so the centring has to survive that write.  A
+    // bare inline-block here is what carried the picture half the box difference
+    // left and down — off its container and out of the block's hover ring.
+    const { embed, img } = buildStandalone('r90');
+    applyStandaloneAlignment(embed, 'center');
+    applyStandaloneSize(embed, img, 373, OPTIONS);
+    expect(embed.style.getPropertyValue('display')).toBe('inline-flex');
+
+    applyStandaloneAlignment(embed, 'right');
+
+    expect(embed.style.getPropertyValue('display')).toBe('inline-flex');
+    expect(embed.style.getPropertyPriority('display')).toBe('important');
+    expect(embed.style.getPropertyValue('justify-content')).toBe('center');
+    expect(embed.style.getPropertyValue('align-items')).toBe('center');
+    expect(img.style.getPropertyValue('flex-shrink')).toBe('0');
+  });
+
+  it('drops that centring when the alignment pass alone meets an upright embed', () => {
+    const { embed, img } = buildStandalone('r90');
+    applyStandaloneAlignment(embed, 'center');
+    applyStandaloneSize(embed, img, 373, OPTIONS);
+
+    embed.removeAttribute('data-diaa-orientation');
+    applyStandaloneAlignment(embed, 'center');
+
+    expect(embed.style.getPropertyValue('display')).toBe('inline-block');
+    expect(embed.style.getPropertyValue('justify-content')).toBe('');
+    expect(embed.style.getPropertyValue('align-items')).toBe('');
+    expect(img.style.getPropertyValue('flex-shrink')).toBe('');
+  });
 });

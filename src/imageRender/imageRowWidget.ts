@@ -98,6 +98,27 @@ const lastRenderedSizes = new Map<string, {
   atWidth: number;
 }>();
 
+/** The height this row last rendered at, or null when it was never rendered.
+ *
+ *  Read by `StaticImageRowWidget.estimatedHeight` to seed CodeMirror's height
+ *  map before the block is measured: the map has to model the row while it is
+ *  still an estimate, and the widget's default estimate is "one line", so a row
+ *  that leaves and comes back (cut → undo) would shift everything below it by
+ *  its real height until the measurement lands.  The preserved multi-image
+ *  sizes win over the rendered-sizes cache: they are what applyLayout restores
+ *  verbatim, and they survive a widget destroy. */
+export function lastRenderedRowHeight(
+  sourcePath: string,
+  lineStart: number,
+  fileNames: string[]
+): number | null {
+  const key = mkRowKey(sourcePath, lineStart, fileNames);
+  const preserved = parseFloat(preservedMultiImageSizes.get(key)?.containerStyleH ?? "");
+  const rendered = parseFloat(lastRenderedSizes.get(key)?.containerH ?? "");
+  const h = Number.isFinite(preserved) && preserved > 0 ? preserved : rendered;
+  return Number.isFinite(h) && h > 0 ? Math.round(h) : null;
+}
+
 /** Document-uniform editor content width from the most recent successful layout
  *  (all image rows share the same `.cm-line` content width).  Used ONLY to scale
  *  the cached pixel heights in build() when the editor width has changed since
@@ -257,8 +278,20 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   private modelBoxH = new Map<number, number>();
   private modelDrawn = new Map<number, number>();
   onLayoutChange: (() => void) | null = null;
-  /** Per-image indices whose scale ratios have been updated and need persistence. */
-  _scaleDirtyImages: Set<number> = new Set();
+  /** Indices whose fill has a local edit not yet in the document.  A persist
+   *  takes the fill from this widget for those indices and from the line for
+   *  every other one — which is what keeps a rotate that already landed from
+   *  being written back to the fill the widget was built with. */
+  _fillDirtyImages: Set<number> = new Set();
+  /** The same, for the alignment word.  Set by the context-menu callback, which
+   *  edits the model and then asks for a persist. */
+  _alignmentDirtyImages: Set<number> = new Set();
+  /** The single row's `S|W` tail, which only ever lives at index 0.  A corner
+   *  handle drag pins the width and a return to setting-driven unpins it; both
+   *  are local edits, so both are marked.  The width the layout rail measures is
+   *  deliberately NOT marked — it is derived, and claiming it would stamp this
+   *  widget's measurement over a turn that has already written its own. */
+  _sizingDirtyImages: Set<number> = new Set();
 
   private dividerController: DividerController;
   private resizeController: ResizeHandleController;
@@ -449,7 +482,18 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   setImageScale(index: number, scale: number): void {
     const img = this.group.images[index];
     if (img && img.display.kind === "multi") img.display.fill = quantizeSizing(clampScale(scale));
-    this._scaleDirtyImages.add(index);
+    this._fillDirtyImages.add(index);
+  }
+  /** Drop the pending marks a persist has just satisfied.  Only the indices the
+   *  write actually covered are cleared: a mark left behind would hand that slot
+   *  to this widget's stale value on the next write, and clear the way for it to
+   *  undo a later edit that lands in the document meanwhile. */
+  clearDirty(indices: readonly number[]): void {
+    for (const i of indices) {
+      this._fillDirtyImages.delete(i);
+      this._alignmentDirtyImages.delete(i);
+      this._sizingDirtyImages.delete(i);
+    }
   }
   /**
    * The equilibrium bar a resize drag shows: the divider on one side of `index`,
@@ -489,6 +533,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.display = { kind: "single-manual", widthPx: w };
     img.hasSizing = true;
     this.singleWidthPx = w;
+    this._sizingDirtyImages.add(0);
 
     // Immediate visual feedback.  CodeMirror's widget eq() compares single rows by
     // manual flag only, not widthPx, so a menu-driven resize used to stay frozen
@@ -511,6 +556,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     if (!this.isSingleRow()) return;
     const img = this.group.images[0];
     img.display = { kind: "single-follow" };
+    this._sizingDirtyImages.add(0);
 
     // Immediate visual feedback.  Mirror setSingleImageWidth: flipping the manual
     // flag alone used to freeze the image at its old manual width until a
@@ -1107,6 +1153,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
       image.alignment = newAlign;
       img.__diaa_alignment = newAlign;
+      // Mark before persisting: the line already carries an alignment word, so
+      // without the mark the write would defer to the document and quietly drop
+      // the choice the user just made.
+      this._alignmentDirtyImages.add(index);
       this.applyAlignmentToAll();
       this.persistCallback?.();
     };
@@ -1788,9 +1838,14 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       })) {
         for (let i = 0; i < this.group.images.length; i++) {
           this.group.images[i].hasSizing = true;
-          this._scaleDirtyImages.add(i);
+          this._fillDirtyImages.add(i);
           if (this.group.images[i].alignment == null) {
             this.group.images[i].alignment = this.options.alignment;
+            // The line has no alignment word, so the word this pass is putting
+            // on the model is a local edit: without the mark the persist would
+            // read "no word" back off the line and drop it, and the slot would
+            // stay empty on every render.
+            this._alignmentDirtyImages.add(i);
             if (this.imageEls[i]) this.imageEls[i].__diaa_alignment = this.options.alignment;
           }
         }
@@ -1906,6 +1961,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
       if (img.alignment == null) {
         img.alignment = this.options.alignment;
+        this._alignmentDirtyImages.add(i);
         if (this.imageEls[i]) this.imageEls[i].__diaa_alignment = this.options.alignment;
         changed = true;
       }
@@ -1939,6 +1995,9 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           const ir = this.itemEls[i].getBoundingClientRect();
           if (cr && ir && cr.width > 0 && ir.width > 0) {
             img.display.fill = quantizeSizing(clampScale(cr.width / ir.width));
+            // A measured fill is a local edit until it is written: the line has
+            // no fill code to read back, so the persist must take this value.
+            this._fillDirtyImages.add(i);
             changed = true;
           }
         }
@@ -2131,7 +2190,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       if (someMissing || this.group.images.some(img => this.fillOf(img) == null)) {
         for (let i = 0; i < n; i++) {
           this.group.images[i].hasSizing = true;
-          this._scaleDirtyImages.add(i);
+          this._fillDirtyImages.add(i);
         }
         // Compute scale ratios after layout settles.
         window.requestAnimationFrame(() => {
@@ -2585,11 +2644,13 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       leftImg.display.share = quantizeSizing(clampFlexGrow(left));
       leftImg.display.fill = 1;
       leftImg.hasSizing = true;
+      this._fillDirtyImages.add(leftIndex);
     }
     if (rightImg.display.kind === "multi") {
       rightImg.display.share = quantizeSizing(clampFlexGrow(right));
       rightImg.display.fill = 1;
       rightImg.hasSizing = true;
+      this._fillDirtyImages.add(leftIndex + 1);
     }
 
     // Hand the sizing to the row's own pass rather than pinning heights here.
@@ -2687,6 +2748,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
         // every rebuild, so leaving it behind would restore the blank.
         mi.display.fill = 1;
         mi.hasSizing = true;
+        this._fillDirtyImages.add(i);
       }
     }
 

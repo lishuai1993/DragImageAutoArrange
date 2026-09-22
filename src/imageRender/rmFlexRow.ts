@@ -9,9 +9,22 @@ const log = logger.channel("rmFlexRow");
 import { validateRowFlexGrows } from "../imageLayout/parameterValidator";
 import { stripObsidianClasses, hasObsidianAlignClass, neutralizeWrappers } from "./rowRenderer";
 import { storePendingAlignment } from "./rmAlignStore";
+// TEMP-DIAG: alignment/flash probes — delete with the probe module.
+import {
+  diagAlign, diagAlignFrames, diagBox, diagSizesRun,
+} from "../diagnostics/tmpAlignFlashProbe";
 import { attachDiaImageMarkers } from "./imageMarkers";
 import { IDENTITY_STATE, isIdentityOrientation, orientationWord, orientedSize, parseOrientationWord, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
 import { applyOrientationPreview, boxForScreenWidth, displayedImageSize, naturalAspect } from "../imageTransform/transformPreview";
+
+/**
+ * How many frames the sizing pass waits for a row to acquire a width. A row is
+ * built by a post-processor that may be running on a section Obsidian has not
+ * attached yet, and a detached row measures zero; the wait has to span that
+ * moment, while this bounds what a row that is discarded rather than attached
+ * costs.
+ */
+const MAX_ROW_WIDTH_RETRIES = 60;
 
 /**
  * The layout-box height our own sizing wrote onto an img, keyed by the element.
@@ -94,6 +107,47 @@ function applyEmbedOrientations(embeds: HTMLElement[]): void {
   }
 }
 
+/** Whether an embed carries an odd number of quarter turns — the case whose box
+ *  is painted on its side, one aspect taller than the rectangle the embed takes.
+ *  Read from the embed's own attribute, the word the Reading-Mode renderer put
+ *  there, so both the row path and a lone picture answer from one source. */
+function embedTurned(embed: HTMLElement): boolean {
+  const state = parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "");
+  return (state?.turns ?? 0) % 2 === 1;
+}
+
+/**
+ * Place an embed on its line: `inline-flex` centring for a quarter turn, a
+ * shrink-wrapped `inline-block` for an even orientation.  Both stay inline-level,
+ * so the host block's `text-align` still decides where either sits.
+ *
+ * A turn paints about the box's own centre, and the box is one aspect taller than
+ * the swapped rectangle the embed takes — pinned to the embed's top-left it would
+ * carry the picture half the difference left and down, leaving the drawn
+ * rectangle the right size but off the container.  Centring both axes lands the
+ * box centre on the embed centre, where the drawn rectangle coincides with the
+ * container.  The centring belongs to the turn, not to one pass: an alignment
+ * change rewrites the embed's placement without re-running the sizing pass, and
+ * writing a bare `inline-block` there would drop the picture out of its ring.
+ */
+function applyInlinePlacement(
+  embed: HTMLElement,
+  img: HTMLImageElement | null,
+  turned: boolean
+): void {
+  if (turned) {
+    setStyleImportant(embed, "display", "inline-flex");
+    setStyleImportant(embed, "justify-content", "center");
+    setStyleImportant(embed, "align-items", "center");
+    if (img) setStyleImportant(img, "flex-shrink", "0");
+    return;
+  }
+  setStyleImportant(embed, "display", "inline-block");
+  embed.style.removeProperty("justify-content");
+  embed.style.removeProperty("align-items");
+  img?.style.removeProperty("flex-shrink");
+}
+
 /**
  * Size a standalone image embed the way the LP widget sizes a single-image row
  * (`layoutSingleImage`): derive the width the picture should take on the page,
@@ -173,28 +227,11 @@ export function applyStandaloneSize(
     if (turned) {
       setStyleImportant(embed, "width", `${Math.max(1, Math.round(shown.width))}px`);
       setStyleImportant(embed, "height", `${Math.max(1, Math.round(shown.height))}px`);
-      // Centre the box in the embed.  A turn paints about the box's own centre,
-      // and the box is one aspect taller than the swapped rectangle the embed
-      // takes — pinned to the embed's top-left it would carry the picture half
-      // the difference left and down, leaving the drawn rectangle the right size
-      // but in the wrong place.  Centring both axes lands the box centre on the
-      // embed centre, where the drawn rectangle coincides with the container.
-      // inline-flex (not flex) keeps the embed inline-level, so the host block's
-      // text-align still places it.
-      setStyleImportant(embed, "display", "inline-flex");
-      setStyleImportant(embed, "justify-content", "center");
-      setStyleImportant(embed, "align-items", "center");
-      setStyleImportant(img, "flex-shrink", "0");
     } else {
       embed.style.removeProperty("width");
       embed.style.removeProperty("height");
-      // Undo a turn's centring: an even orientation is a shrink-wrapped
-      // inline-block again, positioned by the host block's text-align.
-      setStyleImportant(embed, "display", "inline-block");
-      embed.style.removeProperty("justify-content");
-      embed.style.removeProperty("align-items");
-      img.style.removeProperty("flex-shrink");
     }
+    applyInlinePlacement(embed, img, turned);
 
     // Replay the orientation: the note carries the turn as a word, and nothing
     // else in Reading Mode paints it.  The fit scale comes from the size the
@@ -261,6 +298,18 @@ export function getFileNameFromEmbed(embed: HTMLElement): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
+/** The 1-based source line an embed was rendered from, or null when it carries
+ *  none — an embed the post-processor never matched to a parsed row has no
+ *  line to name.  A Reading-Mode alignment edit is keyed by line, so a note
+ *  showing one attachment on several rows does not have the edit land on the
+ *  first of them. */
+export function embedLine1(embed: HTMLElement): number | null {
+  const attr = embed.getAttribute("data-diaa-line");
+  if (attr === null) return null;
+  const n = parseInt(attr, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export function isImageEmbed(el: HTMLElement): boolean {
   const src = el.getAttribute("src") || "";
   const alt = el.getAttribute("alt") || "";
@@ -303,7 +352,9 @@ export function isImageOnlyBlock(block: HTMLElement | null): boolean {
  */
 function markInlineEmbed(embed: HTMLElement): void {
   embed.addClass(CLASSES.rowInline);
-  setStyleImportant(embed, "display", "inline-block");
+  // The shrink-wrap runs on every alignment change, so it has to hand the turn
+  // its centring back rather than write a bare inline-block over it.
+  applyInlinePlacement(embed, embed.querySelector<HTMLImageElement>("img"), embedTurned(embed));
   // An inline-block sits on the block's baseline, which reserves the font's
   // descender below it — the gap the reader sees under a lone picture (and, on
   // hover, between the picture and the ring drawn on the hosting block).  Top
@@ -326,7 +377,15 @@ export function applyStandaloneAlignment(
   defaultAlignment: "left" | "center" | "right"
 ): void {
   const block = findBlockParent(embed);
-  if (!block || !isImageOnlyBlock(block)) return;
+  if (!block || !isImageOnlyBlock(block)) {
+    // TEMP-DIAG: the silent early-out is a candidate for "the alignment change
+    // did nothing" — record the verdict, not just the miss.
+    diagAlign("standalone-apply:skipped", embed, {
+      reason: !block ? "noBlockParent" : "notImageOnlyBlock",
+      block: block ? diagBox(block) : null,
+    });
+    return;
+  }
   const perImage = embed.getAttribute("data-diaa-alignment") as "left" | "center" | "right" | null;
   const alignment = perImage ?? defaultAlignment;
   const textAlign = alignment === "center" ? "center" : alignment === "right" ? "right" : "left";
@@ -344,6 +403,10 @@ export function applyStandaloneAlignment(
     // Pure image block: align the block itself (original behavior).
     block.style.setProperty("text-align", textAlign, "important");
     markInlineEmbed(embed);
+    // TEMP-DIAG: which branch ran, and what the block it aligned measures.
+    diagAlign("standalone-apply:pure", embed, {
+      perImage, defaultAlignment, alignment, textAlign, block: diagBox(block),
+    });
     return;
   }
 
@@ -383,6 +446,12 @@ export function applyStandaloneAlignment(
   // Clean up any <br> left dangling at the edges of the text block.
   while (block.lastElementChild?.tagName === "BR") block.lastElementChild.remove();
   while (block.firstElementChild?.tagName === "BR") block.firstElementChild.remove();
+
+  // TEMP-DIAG: the extracted-wrapper branch — the one shape that carries a
+  // `data-diaa-standalone` marker, and the one whose ring is drawn elsewhere.
+  diagAlign("standalone-apply:wrapper", embed, {
+    perImage, defaultAlignment, alignment, textAlign, textBefore, wrapper: diagBox(wrapper),
+  });
 }
 
 export function areAdjacentSiblings(a: HTMLElement | null, b: HTMLElement | null): boolean {
@@ -423,6 +492,28 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   const firstBlock = findBlockParent(embeds[0]);
   if (!firstBlock) return;
 
+  // Every member must be measurable before a row exists at all. A member whose
+  // embed carries no <img> — an unresolved link, or one Obsidian has not
+  // attached the image to yet — can never report a natural size, and the two
+  // counts the sizing pass walks fall out of step: `imgs` (built from members
+  // that have one) comes back short while the write loop runs `embeds.length`
+  // times, so the tail members are handed `undefined` flex and height, and the
+  // load gate further down waits for a load that no element can ever fire.
+  // Building nothing is the honest outcome: the embeds keep the rendering
+  // Obsidian gave them instead of being wrapped into an unsized row.
+  const unmeasurable = embeds.filter((e) => !e.querySelector("img"));
+  if (unmeasurable.length > 0) {
+    log.warn("RM wrapAsFlexRow skipped: member without <img>", {
+      embeds: embeds.length,
+      missing: unmeasurable.map((e) => ({
+        diaaLine: e.getAttribute("data-diaa-line"),
+        src: e.getAttribute("src") ?? "",
+        cls: e.className,
+      })),
+    });
+    return;
+  }
+
   // Detect whether the first embed's block also holds surrounding text — this
   // happens when a paragraph is "text\n![[img]]\n![[img]]" with no blank line,
   // so text + embeds render inside one <p>. In that case the text must stay in
@@ -460,6 +551,29 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       alignments.push(undefined);
     }
   }
+  // TEMP-DIAG: member census. `imgs` is the only array pushed conditionally, so
+  // a short `imgs` is the desync the write loop (driven by `embeds.length`)
+  // indexes past. Read-only: the four lengths are what the layout consumes.
+  log.debug("RM MEMBER CENSUS", {
+    embeds: embeds.length,
+    imgs: imgs.length,
+    metas: metas.length,
+    scales: scales.length,
+    members: embeds.map((e) => {
+      const im = e.querySelector<HTMLImageElement>("img");
+      return {
+        hasImg: !!im,
+        diaaLine: e.getAttribute("data-diaa-line"),
+        src: (im?.getAttribute("src") ?? e.getAttribute("src") ?? "").slice(-34),
+        alt: e.getAttribute("alt") ?? "",
+        cls: e.className,
+        kids: Array.from(e.children).map((c) => c.tagName),
+        natural: im ? `${im.naturalWidth}x${im.naturalHeight}` : "",
+        complete: im?.complete ?? false,
+      };
+    }),
+  });
+
   const hasScale = scales.some((s) => s != null);
 
   log.debug("RM wrapAsFlexRow entry", {
@@ -542,8 +656,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     // A quarter-turned member paints the box on its side, scaled down to fit
     // back inside it, so the embed takes the painted height and the box — a
     // different rectangle now — has to sit centred in it.
-    const turned = (parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "")
-      ?.turns ?? 0) % 2 === 1;
+    const turned = embedTurned(embed);
     setStyleImportant(embed, "align-items", turned ? "center" : "flex-start");
 
     log.debug("RM wrapAsFlexRow item-style", {
@@ -575,6 +688,17 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
 
       img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
       img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+        // TEMP-DIAG: the member's slot is a flex box, so this write moves the
+        // img's box *inside* the embed rather than a letterbox — record what
+        // that does to the embed, the row and the ring on both sides.
+        const diagExtra = {
+          memberIndex: i,
+          from: img.__diaa_alignment ?? null,
+          to: newAlign ?? null,
+          effective: newAlign ?? options.alignment,
+          sourcePath,
+        };
+        diagAlign("member-align:before", embed, diagExtra);
         if (newAlign) {
           embed.setAttribute("data-diaa-alignment", newAlign);
         } else {
@@ -585,10 +709,12 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         const { justifyContent: j2, objectPosition: o2 } = alignmentToCSS(align);
         embed.style.setProperty("justify-content", j2, "important");
         img.style.setProperty("object-position", o2, "important");
+        diagAlign("member-align:after", embed, { ...diagExtra, wroteJustify: j2, wroteObjectPos: o2 });
+        diagAlignFrames("member-align", embed, diagExtra);
         if (app && sourcePath) {
           const effectiveAlign = newAlign ?? options.alignment;
           const fn = getFileNameFromEmbed(embed);
-          if (fn) storePendingAlignment(sourcePath, fn, effectiveAlign);
+          if (fn) storePendingAlignment(sourcePath, fn, effectiveAlign, embedLine1(embed));
         }
       };
       // Read-only reset surface so RM renders the reset row greyed-out.
@@ -638,19 +764,51 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     neutralizeWrappers(img, row, embeds);
   }
 
+  let widthRetries = 0;
   const applySizes = () => {
     try {
+    // TEMP-DIAG: one line per pass, so a pass re-run after an alignment change
+    // can be told from the first build.
+    diagSizesRun(embeds, imgs);
     const containerWidth = row.getBoundingClientRect().width;
     if (containerWidth === 0) {
-      if (row.isConnected) window.requestAnimationFrame(() => applySizes());
+      // Arm the retry whether or not the row is connected yet: a post-processor
+      // runs on sections Obsidian has not attached, and the width only appears
+      // once it does. Waiting on `isConnected` instead is what let such a row
+      // sit unsized with nothing in the log to say so.
+      log.debug("RM applySizes early-out", {
+        reason: "containerWidth0",
+        connected: row.isConnected,
+        embeds: embeds.length,
+        imgs: imgs.length,
+        widthRetries,
+      });
+      if (widthRetries++ < MAX_ROW_WIDTH_RETRIES) {
+        window.requestAnimationFrame(() => applySizes());
+      } else {
+        log.warn("RM applySizes gave up: row never got a width", {
+          connected: row.isConnected,
+          embeds: embeds.length,
+          retries: widthRetries,
+        });
+      }
       return;
     }
+    widthRetries = 0;
     const currentMetas = imgs.map((img) => ({
       naturalWidth: img.naturalWidth || 0,
       naturalHeight: img.naturalHeight || 0,
     }));
     const allReady = currentMetas.every((m) => m.naturalWidth > 0);
     if (!allReady) {
+      // TEMP-DIAG: which members are unmeasurable right now.
+      log.debug("RM applySizes early-out", {
+        reason: "notAllReady",
+        connected: row.isConnected,
+        embeds: embeds.length,
+        imgs: imgs.length,
+        natural: currentMetas.map((m) => `${m.naturalWidth}x${m.naturalHeight}`),
+      });
       if (row.isConnected) window.requestAnimationFrame(() => applySizes());
       return;
     }
@@ -907,6 +1065,19 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       window.requestAnimationFrame(() => applySizes());
     }
   }
+  // TEMP-DIAG: the load gate. A member with no <img> counts as an unloaded one
+  // (it is pushed into `metas` as 0x0) but contributes no element to the loop
+  // above, so `remainingLoads` can never reach 0 and applySizes is never
+  // scheduled. `scheduled` is which of the two arming paths fired.
+  log.debug("RM load gate", {
+    embeds: embeds.length,
+    imgs: imgs.length,
+    metas: metas.length,
+    remainingLoads,
+    allLoaded,
+    connected: row.isConnected,
+    scheduled: allLoaded || remainingLoads === 0,
+  });
   } catch (e) {
     log.error("RM wrapAsFlexRow error", { error: String(e), stack: (e as Error)?.stack ?? "no stack" });
   }
@@ -954,7 +1125,26 @@ export function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOp
 
     window.setTimeout(() => {
       for (const o of observers) o.disconnect();
-      if (embeds.some((e) => e.querySelector("img"))) {
+      // TEMP-DIAG: which members the 5s bail-out gives up on, and how many
+      // observers had fired. Read-only.
+      log.debug("RM waitForImages TIMEOUT", {
+        embeds: embeds.length,
+        withImg: embeds.filter((e) => e.querySelector("img")).length,
+        readyCount,
+        missing: embeds
+          .filter((e) => !e.querySelector("img"))
+          .map((e) => ({
+            diaaLine: e.getAttribute("data-diaa-line"),
+            src: e.getAttribute("src") ?? "",
+            alt: e.getAttribute("alt") ?? "",
+            cls: e.className,
+            kids: Array.from(e.children).map((c) => c.tagName),
+          })),
+      });
+      // Same bar as the two fast paths above: a member that never produced an
+      // <img> cannot be measured, and wrapping the rest of the row around it is
+      // what stranded a member at 100 % beside an empty box.
+      if (embeds.every((e) => e.querySelector("img"))) {
         wrapAsFlexRow(embeds, options, app, sourcePath);
       }
       done();

@@ -1361,3 +1361,50 @@ describe('the ceiling a member hands a resize drag', () => {
     expect(widget.maxDrawnHeight(0)).toBe(0);
   });
 });
+
+describe('ImageRowWidget single-row sizing marks', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function singleRow(): ImageRowWidget {
+    const group = makeGroup([makeImage('a.png', 5, 1)]);
+    const widget = new ImageRowWidget(group, makeOptions('center'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 800);
+    simulateImagesLoaded(widget, el, [{ w: 500, h: 654 }]);
+    return widget;
+  }
+
+  it('marks the S|W tail when a corner drag pins the width', () => {
+    const widget = singleRow();
+    expect(widget._sizingDirtyImages.has(0)).toBe(false);
+
+    widget.setSingleImageWidth(320);
+    // Without this mark the persist would defer to the line's S|W and the drag
+    // would never reach the note.
+    expect(widget._sizingDirtyImages.has(0)).toBe(true);
+
+    // The mark is spent by the write it was made for.
+    widget.clearDirty([0]);
+    expect(widget._sizingDirtyImages.has(0)).toBe(false);
+  });
+
+  it('marks the tail when the row returns to setting-driven', () => {
+    const widget = singleRow();
+
+    widget.resetSingleManualWidth();
+
+    expect(widget._sizingDirtyImages.has(0)).toBe(true);
+  });
+
+  it('leaves the tail unmarked when only the layout measured a width', () => {
+    // The measured width is derived, not an edit: claiming it would stamp this
+    // widget's measurement over a turn that has already written its own.
+    const widget = singleRow();
+
+    expect(widget.getSingleWidthPx()).toBeGreaterThan(0);
+    expect(widget._sizingDirtyImages.size).toBe(0);
+  });
+});
