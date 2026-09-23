@@ -45,16 +45,6 @@ const WINDOW_MS = 1500;
 /** 采样帧数：足够看清 scrollTop 是在哪一帧被拉走的。 */
 const FRAMES = 12;
 
-/** ── 观测窗（TEMP-DIAG：任意手势后的长窗，含 mod+z 按键与逐帧采样）──────
- *  与旋转窗同一套探针，只把窗口拉长到几十秒，用来覆盖「手势 → 隔几秒再按
- *  Cmd+Z」的序列（剪切撤销的视口跳变取证）。 */
-const WATCH_MS = 30000;
-/** 帧预算：长窗按 60fps 估的上限，实际只记下面两个常量决定的行数。 */
-const WATCH_FRAMES = 1800;
-/** 前 1.5s 逐帧；之后每 20 帧取一帧 —— 30s 长窗也只写百余行。 */
-const DENSE_FRAMES = 90;
-const SPARSE_STEP = 20;
-
 let active = false;
 let seq = 0;
 /** 被旋转的 0-based 行号；用于定位 widget 块。 */
@@ -63,14 +53,7 @@ let view: EditorView | null = null;
 let closeTimer: number | null = null;
 let rafId = 0;
 let framesLeft = 0;
-let frameIndex = 0;
 let scrollSink: (() => void) | null = null;
-let keySink: ((ev: KeyboardEvent) => void) | null = null;
-
-/** 探针是否处于开窗状态。调用方据此避免构造无用的日志载荷。 */
-export function isActive(): boolean {
-  return active;
-}
 
 /** 在任何时机都可安全读取的字段：不触碰布局测量。 */
 function safeFields(v: EditorView): Record<string, unknown> {
@@ -148,14 +131,10 @@ function snapshot(tag: string, data?: Record<string, unknown>): void {
 function sampleFrames(depth: number): void {
   if (!active || !view || framesLeft <= 0) return;
   framesLeft--;
-  const i = frameIndex++;
   const v = view;
   rafId = window.requestAnimationFrame(() => {
     if (!active || view !== v) return;
-    // 短窗（旋转）逐帧记满；长窗只在前 1.5s 逐帧，之后抽样，免得刷爆日志。
-    if (depth <= DENSE_FRAMES || i < DENSE_FRAMES || i % SPARSE_STEP === 0) {
-      snapshot(`frame ${depth - framesLeft}`);
-    }
+    snapshot(`frame ${depth - framesLeft}`);
     sampleFrames(depth);
   });
 }
@@ -333,27 +312,6 @@ export function openRotationWindow(
   openWindow(v, line, lineText, WINDOW_MS, FRAMES);
 }
 
-/** 开一段长观测窗（TEMP-DIAG）。`line` 可传 -1（不指定观察块）。
- *
- *  与旋转窗的差别只有时长与采帧密度：窗口内持续逐帧/抽样记录 scrollTop、
- *  罩住 scrollDOM 的写入口、并记录 mod+z —— 「手势在前、Cmd+Z 在后隔几秒」
- *  这种序列只有长窗罩得住。 */
-export function openViewportWatch(v: EditorView | null, ms = WATCH_MS, line = -1): void {
-  openWindow(v, line, "", ms, WATCH_FRAMES);
-}
-
-/** 同上，但直接从 DOM 里的元素定位 EditorView（手柄、图片这类调用点手上
- *  只有元素）。定位失败按「没开窗」处理，绝不影响调用方。 */
-export function openViewportWatchFor(el: HTMLElement, ms = WATCH_MS, line = -1): void {
-  try {
-    const host =
-      el.closest<HTMLElement>(".cm-content") ?? el.closest<HTMLElement>(".cm-editor") ?? el;
-    openViewportWatch(EditorView.findFromDOM(host), ms, line);
-  } catch {
-    // 探针不介入业务：定位不到就当作没开窗。
-  }
-}
-
 function openWindow(
   v: EditorView | null,
   line: number,
@@ -375,19 +333,6 @@ function openWindow(
     installSpy(v.scrollDOM);
     scrollSink = () => snapshot("scroll event");
     v.scrollDOM.addEventListener("scroll", scrollSink, { passive: true });
-    // 按键本身不写视口，但它标出「Cmd+Z 是哪一刻到的」，与后续帧对照即知
-    // 视口是在事务那一帧动，还是隔了几帧才被测量顶走。
-    keySink = (ev: KeyboardEvent) => {
-      const t = ev.target instanceof Element ? ev.target : null;
-      note("keydown", {
-        key: ev.key,
-        mod: ev.metaKey || ev.ctrlKey,
-        shift: ev.shiftKey,
-        inEditor: !!t?.closest?.(".cm-content"),
-      });
-    };
-    document.addEventListener("keydown", keySink, true);
-    frameIndex = 0;
     framesLeft = frames;
     sampleFrames(frames);
     closeTimer = window.setTimeout(closeRotationWindow, ms);
@@ -417,14 +362,12 @@ export function closeRotationWindow(): void {
       rafId = 0;
     }
     if (scrollSink && view) view.scrollDOM.removeEventListener("scroll", scrollSink);
-    if (keySink) document.removeEventListener("keydown", keySink, true);
     uninstallSpy();
   } catch {
     // 同上。
     uninstallSpy();
   }
   scrollSink = null;
-  keySink = null;
   active = false;
   view = null;
   line0 = -1;

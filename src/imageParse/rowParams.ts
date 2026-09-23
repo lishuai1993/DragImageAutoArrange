@@ -149,6 +149,30 @@ export function singleDisplayChanged(a: ImageDisplay, b: ImageDisplay): boolean 
 }
 
 /**
+ * Whether two multi-row member display models disagree on what the member
+ * should draw — the two numeric slots `normalizeRaw` strips with the rest of
+ * the `|`-tail.
+ *
+ * An undo is the case that matters: a handle drag writes the member's fill
+ * (and, when the row re-shares, every member's share), so after the document
+ * reverts, a widget comparing only the surviving words would find itself equal
+ * to the newly parsed row and CodeMirror would keep the old DOM — the picture
+ * left at the dragged height while the note says otherwise.  The share is
+ * compared for the same reason a divider drag gives: it changes nothing but the
+ * shares, so a fill-only comparison would never notice its undo either.
+ *
+ * A null fill means the line carries no fill code yet (layout backfills it from
+ * rendered state on a later pass), not "the member draws nothing" — comparing
+ * against a measured value would then rebuild on every render, so that pair is
+ * left to the backfill instead of forcing a rebuild.
+ */
+export function multiDisplayChanged(a: ImageDisplay, b: ImageDisplay): boolean {
+  if (a.kind !== "multi" || b.kind !== "multi") return false;
+  if (a.fill != null && b.fill != null && a.fill !== b.fill) return true;
+  return a.share !== b.share;
+}
+
+/**
  * The typed slots of a `|`-joined param section.  Split out of `parseLine` so a
  * writer that already knows which image a line holds can read that line's
  * *current* slot values — the read a rewrite needs to prefer the document over

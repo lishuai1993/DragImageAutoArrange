@@ -63,7 +63,6 @@ describe('scrollDiag probe', () => {
   it('is a no-op before any window opens', () => {
     scrollDiag.note('outside window');
     expect(info).not.toHaveBeenCalled();
-    expect(scrollDiag.isActive()).toBe(false);
   });
 
   it('reports a missing EditorView instead of failing silently', () => {
@@ -75,7 +74,6 @@ describe('scrollDiag probe', () => {
   it('opens a window, records notes, and releases the scroll listener', () => {
     const { view, listeners } = fakeView();
     scrollDiag.openRotationWindow(view, 1, '![[a.png]]');
-    expect(scrollDiag.isActive()).toBe(true);
     expect(listeners.add).toBe(1);
     expect(info.mock.calls[0][0]).toContain('[ROT 000] open');
 
@@ -84,7 +82,6 @@ describe('scrollDiag probe', () => {
     expect(tags.some((t) => t.includes('eq=false'))).toBe(true);
 
     scrollDiag.closeRotationWindow();
-    expect(scrollDiag.isActive()).toBe(false);
     expect(listeners.remove).toBe(1);
     scrollDiag.note('after close');
     expect(info.mock.calls.map((c) => c[0]).some((t) => t.includes('after close'))).toBe(false);
@@ -93,9 +90,10 @@ describe('scrollDiag probe', () => {
   it('auto-closes after the window elapses', () => {
     const { view } = fakeView();
     scrollDiag.openRotationWindow(view, 1, '![[a.png]]');
-    expect(scrollDiag.isActive()).toBe(true);
     vi.advanceTimersByTime(1500);
-    expect(scrollDiag.isActive()).toBe(false);
+    // Closed: the same note that landed inside the window now goes nowhere.
+    scrollDiag.note('after auto-close');
+    expect(info.mock.calls.map((c) => c[0]).some((t) => t.includes('after auto-close'))).toBe(false);
   });
 
   it('tolerates a repeated close', () => {

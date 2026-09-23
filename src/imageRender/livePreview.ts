@@ -18,8 +18,13 @@ import type { Transaction } from "@codemirror/state";
 import { editorLivePreviewField } from "obsidian";
 import { detectRowGroups } from "../imageParse/imageDetector";
 import type { RowGroup } from "../imageParse/imageDetector";
-import { write as writeRowImage, mergeRewrite, singleDisplayChanged } from "../imageParse/rowParams";
-import type { RowImage, Alignment } from "../imageParse/rowParams";
+import {
+  write as writeRowImage,
+  mergeRewrite,
+  multiDisplayChanged,
+  singleDisplayChanged,
+} from "../imageParse/rowParams";
+import type { RowImage, Alignment, ImageDisplay } from "../imageParse/rowParams";
 import { ImageRowWidget, ImageRowOptions, getSidebarWidths, lastRenderedRowHeight } from "./imageRowWidget";
 import { DragImageSettings } from "../settings";
 import { CLASSES } from "../constants";
@@ -250,7 +255,8 @@ export function normalizeRaw(raw: string): string {
  * vanishes the same way, so its width needs a comparison of its own: an undo of
  * a handle drag restores the pre-drag W in the document, and without this the
  * widget would compare equal, CodeMirror would keep the old DOM, and the
- * picture would stay at the dragged width while the note reverted.
+ * picture would stay at the dragged width while the note reverted.  A multi
+ * row's `|W|F|` numerics vanish identically, hence `multiDisplayChanged`.
  */
 export function sameRowImages(a: RowImage[], b: RowImage[]): boolean {
   if (a.length !== b.length) return false;
@@ -258,6 +264,7 @@ export function sameRowImages(a: RowImage[], b: RowImage[]): boolean {
   for (let i = 0; i < a.length; i++) {
     if (normalizeRaw(a[i].raw) !== normalizeRaw(b[i].raw)) return false;
     if (a[i].alignment !== b[i].alignment) return false;
+    if (multiDisplayChanged(a[i].display, b[i].display)) return false;
     // The orientation word is stripped by normalizeRaw with every other param,
     // so a rotate/flip would otherwise reuse the live widget — whose stale model
     // would then write its old orientation straight back over the new one.
@@ -266,6 +273,12 @@ export function sameRowImages(a: RowImage[], b: RowImage[]): boolean {
     if (ao.turns !== bo.turns || ao.mirror !== bo.mirror) return false;
   }
   return true;
+}
+
+/** The two numeric slots of a member, as `eqReason` prints them. */
+function displaySlots(display: ImageDisplay): string {
+  if (display.kind !== "multi") return display.kind;
+  return `W${display.share}/F${display.fill ?? "-"}`;
 }
 
 /** What a flex/scale persist carries besides the values themselves. */
@@ -344,26 +357,19 @@ export function applyFlexGrowChanges(
     // no-op, and the note would silently keep the previous fill — which is what
     // Reading Mode, reading only the file, would keep showing.
     if (newLine === lineObj.text) continue;
-    changes.push({ from: lineObj.from, to: lineObj.from + lineObj.text.length, insert: newLine });
+    changes.push({
+      from: lineObj.from,
+      to: lineObj.from + lineObj.text.length,
+      insert: newLine,
+    });
   }
 
   if (changes.length === 0) return satisfied;
 
   // Apply from bottom to top so earlier positions stay valid
   changes.sort((a, b) => b.from - a.from);
-  scrollDiag.note("追加 dispatch：applyFlexGrowChanges", {
-    lines: changes.map((c) => c.insert),
-  });
   view.dispatch({ changes });
   return satisfied;
-}
-
-/** A RowImage's flex-grammar share, as the destroy/flush persist compare reads
- *  it.  Multi members carry their live share in display.share; single rows never
- *  persist through the flex-grow path (they write |S|W via persistSingleImage),
- *  so their grow is just the flex divisor 1. */
-function modelGrow(img: RowImage): number {
-  return img.display.kind === "multi" ? img.display.share : 1;
 }
 
 /** A RowImage's live fill ratio (null = default), the multi-row scale analogue. */
@@ -406,7 +412,9 @@ class StaticImageRowWidget extends WidgetType {
 
   eq(other: StaticImageRowWidget): boolean {
     const same = this.eqInner(other);
-    if (!same) scrollDiag.note("eq=false → setDOM（整块重建）", { reason: this.eqReason(other) });
+    if (!same) {
+      log.debug("StaticImageRowWidget reuse refused", { reason: this.eqReason(other) });
+    }
     return same;
   }
 
@@ -446,6 +454,9 @@ class StaticImageRowWidget extends WidgetType {
       if (a.images[i].display.kind !== b.images[i].display.kind) return `display[${i}]`;
       if (singleDisplayChanged(a.images[i].display, b.images[i].display)) {
         return `singleWidth[${i}]`;
+      }
+      if (multiDisplayChanged(a.images[i].display, b.images[i].display)) {
+        return `multiDisplay[${i}] ${displaySlots(a.images[i].display)}→${displaySlots(b.images[i].display)}`;
       }
       const ao = a.images[i].orientation;
       const bo = b.images[i].orientation;
@@ -555,6 +566,10 @@ class StaticImageRowWidget extends WidgetType {
           inner.clearDirty(this.persistSingleImage());
           return;
         }
+        // A gesture's landing (handle or divider drag) is on the DOM until
+        // here: take the shares into the model before they are written, so what
+        // the note records and what the widget believes agree.
+        inner.syncSharesFromDOM();
         const grows = inner.getCurrentFlexGrows().map((g) => clampFlexGrow(g));
         const scales = images.map((img) =>
           img.display.kind === "multi" && img.display.fill != null
@@ -943,22 +958,25 @@ class StaticImageRowWidget extends WidgetType {
       imageCount: this.group.images.length,
     });
     if (this.persistTimer) window.clearTimeout(this.persistTimer);
-    // Persist flex-grows and scale ratios for multi-image rows.
+    // Last chance for a slot the widget edited but never got to write: a fill
+    // measured for a freshly materialised member, an alignment word it added.
+    // Shares are not on this list — they reach the note at the release that
+    // ends the gesture, so by the time a widget is torn down they either are
+    // already written or were never a gesture's, and comparing the DOM against
+    // this widget's own model would only resurrect values an undo took away.
     if (this.editorView && this.innerWidget && this.group.images.length > 1) {
       const view = this.editorView;
       const images = this.group.images;
-      const grows = this.innerWidget.getCurrentFlexGrows();
-      const hasFlexChanges = grows.some((g, i) => {
-        return Math.abs(g - modelGrow(images[i])) > 0.005;
-      });
       if (
-        hasFlexChanges ||
         this.innerWidget._fillDirtyImages.size > 0 ||
         this.innerWidget._alignmentDirtyImages.size > 0
       ) {
+        const grows = this.innerWidget.getCurrentFlexGrows();
         // Always include scales so they're preserved in markdown when
         // flexGrow changes (e.g. divider drag) without a scale change.
-        const opts = dirtyPersistOptions(this.innerWidget, images, this.options.alignment);
+        const opts = dirtyPersistOptions(
+          this.innerWidget, images, this.options.alignment
+        );
         // Try synchronous dispatch first; fall back to setTimeout if the
         // view is already in a state where dispatch is illegal.
         try {
@@ -1334,34 +1352,6 @@ export function makeRowScrollOnUndo(field: StateField<DecorationSet>) {
     if (!tr.isUserEvent("undo") && !tr.isUserEvent("redo")) return null;
     const decos = tr.startState.field(field, false);
     const pos = undoRevealPos(tr, decos);
-    // TEMP-DIAG（剪切撤销视口跳变取证）：把撤销/重做事务的落脚点摊开 ——
-    // 改动范围（新文档坐标）对照 CM6 会去揭示的选区（`selAfter`）以及我们
-    // 接管到哪一处。若两者不在一处，而视口落在 `selAfter`，那跳变就是揭示
-    // 目标的问题；若两者都在行上而视口仍动，则跳变来自块高重估（看帧记录
-    // 里的 docH）。诊断完即删。
-    if (scrollDiag.isActive()) {
-      const ranges: string[] = [];
-      tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
-        if (ranges.length < 4) {
-          ranges.push(`A${fromA}-${toA}→B${fromB}-${toB}(删${toA - fromA}/增${toB - fromB})`);
-        }
-      });
-      const rowPos = rowChangePos(tr, decos);
-      scrollDiag.note("undo/redo 事务", {
-        kind: tr.isUserEvent("undo") ? "undo" : "redo",
-        scrollFlag: !!tr.scrollIntoView,
-        selBefore: tr.startState.selection.main.head,
-        selAfter: tr.newSelection.main.head,
-        ranges: ranges.join(" | "),
-        revealPos: pos,
-        revealSource:
-          pos === null
-            ? "none（不接管，交给 CM6）"
-            : rowPos !== null
-              ? "row"
-              : "change（行外改动兜底）",
-      });
-    }
     return pos === null
       ? null
       : { effects: EditorView.scrollIntoView(pos, { y: "nearest" }) };

@@ -381,15 +381,19 @@ function touchesProse(embed: HTMLElement): boolean {
  * on the block's baseline, which reserves the font's descender below it — the
  * gap the reader sees under a lone picture (and, on hover, between the picture
  * and the ring drawn on the hosting block); top alignment takes the box off the
- * baseline, so the line holds just the box.  Sharing a line with prose, that
- * same baseline is the whole point — it is what puts the picture's bottom on
- * the sentence's bottom, as Live Preview draws it.  Written either way rather
- * than left alone: a pass over the same element may be undoing an earlier one's
- * `!important` inline value.
+ * baseline, so the line holds just the box.  Sharing a line with prose, the
+ * baseline is a descender's worth too high: it lands the picture's bottom on the
+ * *words'* baseline and leaves the font's descent, plus the line-height's
+ * half-leading (6.1 px at a 16 px font on a 1.5 line), as empty line box beneath
+ * it — the picture reads as floating just above the line's bottom.  `text-bottom`
+ * puts its bottom on that descent instead, i.e. level with the bottom of the box
+ * the words themselves occupy.  Written either way rather than left alone: a pass
+ * over the same element may be undoing an earlier one's `!important` inline
+ * value.
  */
 function markInlineEmbed(
   embed: HTMLElement,
-  verticalAlign: "top" | "baseline"
+  verticalAlign: "top" | "text-bottom"
 ): void {
   embed.addClass(CLASSES.rowInline);
   // The shrink-wrap runs on every alignment change, so it has to hand the turn
@@ -451,7 +455,7 @@ export function applyStandaloneAlignment(
     // The embed sits inside a sentence, so there is no image-only line to align
     // — the shrink-wrap is all this can honestly do, and it is what keeps the
     // picture sized with the text rather than blown up to the block.
-    markInlineEmbed(embed, "baseline");
+    markInlineEmbed(embed, "text-bottom");
     diagAlign("standalone-apply:inline", embed, {
       perImage, defaultAlignment, alignment, textAlign, block: diagBox(block),
     });

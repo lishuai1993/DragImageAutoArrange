@@ -457,6 +457,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   emitDividerDrag(leftIndex: number, ratio: number): void {
     this.dividerDragCallback?.(leftIndex, ratio);
   }
+  /** The divider drag is over, its split is final and still only on the DOM:
+   *  press-to-release is one transaction, so this writes it — the same release
+   *  `emitResizeEnd` gives a handle drag. */
+  emitDividerDragEnd(): void {
+    this.persistCallback?.();
+  }
   getContainer(): HTMLElement | null {
     return this.container;
   }
@@ -606,6 +612,24 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
       return [this.getSingleWidthPx() / 100];
     }
     return this.itemEls.map((el) => parseFloat(el.style.flexGrow || "1"));
+  }
+
+  /** Read the live flex-grows back into the members' share slots.
+   *
+   *  A drag — handle or divider — puts the split on the DOM and nowhere else;
+   *  the layout passes only write the slots for a row still being materialised.
+   *  A persist is where that split stops being a gesture and becomes the note's
+   *  value, so it is the last moment at which the model can be brought in line:
+   *  leave it stale and the rebuild the write itself triggers compares a
+   *  pre-drag share against the written one and throws the row's DOM away on
+   *  every release. */
+  syncSharesFromDOM(): void {
+    for (let i = 0; i < this.itemEls.length && i < this.group.images.length; i++) {
+      const img = this.group.images[i];
+      if (img.display.kind !== "multi") continue;
+      const g = parseFloat(this.itemEls[i].style.flexGrow || String(img.display.share));
+      img.display.share = quantizeSizing(clampFlexGrow(g));
+    }
   }
 
   /** Update alignment in-place without recreating the widget. */

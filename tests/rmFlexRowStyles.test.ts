@@ -206,10 +206,12 @@ describe('Standalone embed shrink-wrap', () => {
     expect(block.style.getPropertyValue('text-align')).toBe('');
     expect(embed.style.getPropertyValue('display')).toBe('inline-block');
     expect(embed.classList.contains('diaa-row-inline')).toBe(true);
-    // Sharing the line with prose, the picture sits on the text's baseline —
-    // the same alignment Live Preview gives it. Top alignment is for a picture
-    // that has the line to itself, and would lift this one off the sentence.
-    expect(embed.style.getPropertyValue('vertical-align')).toBe('baseline');
+    // Sharing the line with prose, the picture's bottom goes on the text's own
+    // bottom edge. The baseline would be one descender too high: it leaves the
+    // font's descent plus the line's half-leading as empty line box under the
+    // picture. Top alignment is for a picture that has the line to itself, and
+    // would lift this one off the sentence.
+    expect(embed.style.getPropertyValue('vertical-align')).toBe('text-bottom');
     expect(embed.style.getPropertyPriority('vertical-align')).toBe('important');
     expect(Array.from(block.childNodes).map((n) => n.textContent)).toEqual([
       '前面的话', '', '后面的话',
@@ -246,7 +248,7 @@ describe('Standalone embed shrink-wrap', () => {
     expect(block.querySelector('[data-diaa-standalone]')).toBeNull();
     expect(block.style.getPropertyValue('text-align')).toBe('');
     expect(embed.classList.contains('diaa-row-inline')).toBe(true);
-    expect(embed.style.getPropertyValue('vertical-align')).toBe('baseline');
+    expect(embed.style.getPropertyValue('vertical-align')).toBe('text-bottom');
   });
 });
 

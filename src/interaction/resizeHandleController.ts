@@ -1,7 +1,6 @@
 import { CLASSES, RESIZE_HANDLE_SIZE } from "../constants";
 import { ImageMeta } from "../imageParse/imageDetector";
 import { logger } from "../logger";
-import * as scrollDiag from "../scrollSync/scrollDiag";
 const log = logger.channel("resize");
 
 /** Crop anchor for a zoomed image: centred on both axes, whatever the alignment
@@ -24,8 +23,6 @@ export interface HandleDef {
  */
 export interface ResizeHost {
   getContainer(): HTMLElement | null;
-  /** 0-based first line of the row the item belongs to (diagnostics window). */
-  getGroupLineStart(): number;
   getItemEls(): HTMLElement[];
   getImageEls(): HTMLImageElement[];
   /** Space one junction between adjacent items occupies, dividers included —
@@ -219,11 +216,6 @@ export class ResizeHandleController {
         atCeiling = false;
         item.classList.add(CLASSES.resizing);
         log.debug("resize-mousedown", { index, timestamp: Date.now(), relX: hd.relX, relY: hd.relY });
-        // TEMP-DIAG（拖拽缩放 → Cmd+Z 取证）：手柄拖拽落了盘就产生一次文档变更，
-        // 若紧随其后的撤销没被这条路径消化，画面会停在拖拽结果上而笔记已还原。
-        // 开一段长观测窗罩住随后的 Cmd+Z —— keydown、逐帧 scrollTop 与 widget 的
-        // eq/toDOM 判定都会落到日志里。诊断完即删。
-        scrollDiag.openViewportWatchFor(handle, 30000, this.host.getGroupLineStart());
         e.preventDefault();
         e.stopPropagation();
 

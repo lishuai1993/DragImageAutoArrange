@@ -36,6 +36,10 @@ export interface DividerHost {
   snapDividerToEquilibrium(leftIndex: number): void;
   recalculateRowHeight(): void;
   emitDividerDrag(leftIndex: number, ratio: number): void;
+  /** The drag is over and its shares are final: write them to the note.  The
+   *  mousemove only ever touched the DOM, so without this the gesture leaves no
+   *  document change behind — and then there is nothing for a Cmd+Z to undo. */
+  emitDividerDragEnd(leftIndex: number): void;
 }
 
 /**
@@ -125,6 +129,7 @@ export class DividerController {
 
     // Divider drag
     let dragging = false;
+    let moved = false;
     let startX = 0;
     let startLeftFlex = 0;
     let startRightFlex = 0;
@@ -134,6 +139,7 @@ export class DividerController {
     divider.onmousedown = (e) => {
       try {
       dragging = true;
+      moved = false;
       startX = e.clientX;
       const itemEls = this.host.getItemEls();
       const leftItem = itemEls[leftIndex];
@@ -154,6 +160,7 @@ export class DividerController {
         if (!dragging) return;
         const dx = ev.clientX - startX;
         if (Math.abs(dx) < 3) return;
+        moved = true;
 
         const itemEls = this.host.getItemEls();
         const leftItem = itemEls[leftIndex];
@@ -218,6 +225,10 @@ export class DividerController {
         document.removeEventListener("mouseup", currentOnUp!);
         currentOnMove = null;
         currentOnUp = null;
+        // Press-to-release is one transaction, the same as a handle drag's
+        // emitResizeEnd.  A press that never moved wrote nothing to the DOM, so
+        // there is no change to record and the note is left alone.
+        if (moved) this.host.emitDividerDragEnd(leftIndex);
         } catch (e) {
           log.error("ImageRowWidget divider mouseup error", { error: String(e) });
         }

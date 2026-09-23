@@ -9,9 +9,14 @@
  * DOM and the picture stayed at 345 while the note read 523.  From the outside
  * it looks like the undo did nothing.
  *
- * The boundary matters as much as the fix: a multi row's share codes are
- * applied by the widget's own update path, and a follow row's serialised width
- * is a render cache, so neither may start forcing a full rebuild here.
+ * The boundary matters as much as the fix.  A follow row's serialised width is a
+ * render cache — what it draws comes from the settings, so it may not start
+ * forcing a rebuild.  A multi member's two numerics must: nothing else applies
+ * them.  The widget's update path looks like it syncs shares onto the live DOM,
+ * but CodeMirror only calls it for a widget that was *not* reused, so a row that
+ * compared equal keeps the split the gesture left behind.  That is this defect
+ * one level down — a divider drag's undo, or a handle drag's fill, survives the
+ * same way.
  */
 import { describe, it, expect, vi } from 'vitest';
 
@@ -87,11 +92,35 @@ describe('sameRowImages', () => {
     expect(sameRowImages(a, b)).toBe(true);
   });
 
-  it('allows reuse when a multi row\'s share codes change', () => {
-    // Shares are synced onto the live DOM by updateDOM, not by a rebuild.
-    const a = multi('![[a.png|120|50]]', '![[b.png|80|50]]');
-    const b = multi('![[a.png|150|50]]', '![[b.png|50|50]]');
+  it('refuses reuse when an undo restores a member\'s fill', () => {
+    // The handle drag's landing, undone: the document goes back to 77 while the
+    // picture still stands at 52.  Nothing but this comparison can move it back.
+    const before = multi('![[a.png|436|52]]', '![[b.png|300|100]]');
+    const after = multi('![[a.png|436|77]]', '![[b.png|300|100]]');
+    expect(sameRowImages(before, after)).toBe(false);
+  });
+
+  it('refuses reuse when a divider drag\'s shares are undone', () => {
+    // A divider drag writes nothing but the shares, so a fill-only comparison
+    // would never notice its undo and the split would survive the Cmd+Z.
+    const before = multi('![[a.png|120|50]]', '![[b.png|80|50]]');
+    const after = multi('![[a.png|150|50]]', '![[b.png|50|50]]');
+    expect(sameRowImages(before, after)).toBe(false);
+  });
+
+  it('allows reuse when a multi row\'s numbers are untouched', () => {
+    const a = multi('![[a.png|120|64]]', '![[b.png|80|100]]');
+    const b = multi('![[a.png|120|64]]', '![[b.png|80|100]]');
     expect(sameRowImages(a, b)).toBe(true);
+  });
+
+  it('allows reuse while a member still has no fill code', () => {
+    // A missing fill is a line the layout has not backfilled yet, not a member
+    // that draws nothing — rebuilding on it would rebuild on every render.
+    const a = multi('![[a.png|120]]', '![[b.png|80]]');
+    const b = multi('![[a.png|120|50]]', '![[b.png|80|50]]');
+    expect(sameRowImages(a, b)).toBe(true);
+    expect(sameRowImages(b, a)).toBe(true);
   });
 
   it('refuses reuse when the member count changes', () => {

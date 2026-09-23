@@ -12,7 +12,6 @@ import { planImageLinkRemoval, removeImageLinkOccurrences } from './noteLinks';
 import { viewOfElement, writeQuietly } from './quietWrite';
 import { confirmDelete } from './imageFile';
 import type { ImageMenuFacade } from './imageMenuHost';
-import * as scrollDiag from '../scrollSync/scrollDiag';
 
 const log = logger.channel('cutImage');
 
@@ -251,26 +250,10 @@ async function removeReferenceFromNote(
   const planned = planImageLinkRemoval(facade.app, before, imgFile, noteFile, opts);
   const change = minimalTextChange(before, planned.next);
   if (change) {
-    // TEMP-DIAG（剪切撤销视口跳变取证）：开一段长观测窗，罩住 scrollDOM 的
-    // 程序性写入口并逐帧采 scrollTop/文档高，覆盖随后的 Cmd+Z。同时把剪切
-    // 前的选区记下来 —— history 撤销时回填的就是它，若视口落在这一处，跳变
-    // 就是「揭示旧光标」。诊断完即删。
-    if (view) {
-      scrollDiag.openViewportWatch(view, 30000, line ?? -1);
-      scrollDiag.note('cut 前选区（history 撤销时回填的旧光标）', {
-        head: view.state.selection.main.head,
-        line,
-        changeFrom: change.from,
-        changeTo: change.to,
-      });
-    }
     writeQuietly(view, editor, change);
     if (line !== null) {
       editor.setCursor(editor.offsetToPos(Math.max(0, lineStartOffset(before, line) - 1)));
     }
-    // TEMP-DIAG：剪切结束后光标落在哪 —— 下一次撤销回填的若正是这里，视口
-    // 就该原地不动。
-    if (view) scrollDiag.note('cut 后选区', { head: view.state.selection.main.head });
   }
   return { found: planned.found, removed: planned.removed };
 }

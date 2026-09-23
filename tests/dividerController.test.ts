@@ -33,6 +33,8 @@ const METAS: ImageMeta[] = [LEFT, RIGHT];
 
 interface Harness {
   items: HTMLElement[];
+  /** How many times the drag's shares were written to the note. */
+  releases: number[];
   /** Drag by `dx` px; `snapped` is the colour while the drag is still held. */
   drag(dx: number): { snapped: boolean; divider: HTMLElement };
 }
@@ -48,6 +50,7 @@ function makeRow(
     item.style.flexGrow = String(g);
     return item;
   });
+  const releases: number[] = [];
   const host: DividerHost = {
     getItemEls: () => items,
     getLoadedMeta: (i) => METAS[i],
@@ -61,9 +64,11 @@ function makeRow(
     snapDividerToEquilibrium: () => undefined,
     recalculateRowHeight: () => undefined,
     emitDividerDrag: () => undefined,
+    emitDividerDragEnd: (leftIndex) => releases.push(leftIndex),
   };
   return {
     items,
+    releases,
     drag(dx: number) {
       const divider = new DividerController(host).build(0);
       divider.dispatchEvent(new MouseEvent('mousedown', { clientX: 500, clientY: 100 }));
@@ -171,6 +176,7 @@ describe('divider drag snap', () => {
       snapDividerToEquilibrium: () => undefined,
       recalculateRowHeight: () => undefined,
       emitDividerDrag: () => undefined,
+      emitDividerDragEnd: () => undefined,
     }).build(0);
     divider.classList.add(CLASSES.dividerSnap);
     divider.dispatchEvent(new MouseEvent('mousedown', { clientX: 500, clientY: 100 }));
@@ -179,5 +185,23 @@ describe('divider drag snap', () => {
     // A stale colour from an earlier drag must not survive a move.
     expect(divider.classList.contains(CLASSES.dividerSnap)).toBe(false);
     document.dispatchEvent(new MouseEvent('mouseup'));
+  });
+});
+
+describe('divider drag persist', () => {
+  it('writes the shares once the drag is released', () => {
+    // The move only touches the DOM, so without this the gesture leaves no
+    // document change behind — and then there is nothing for a Cmd+Z to undo.
+    const h = makeRow([1.34, 0.72], [0.64, 1]);
+    h.drag(-20);
+
+    expect(h.releases).toEqual([0]);
+  });
+
+  it('writes nothing when the drag never left the divider', () => {
+    const h = makeRow([1.34, 0.72], [0.64, 1]);
+    h.drag(1);
+
+    expect(h.releases).toEqual([]);
   });
 });
