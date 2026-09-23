@@ -122,7 +122,10 @@ function controlSpec(row: ControlRow): SettingControl {
  * The plugin's settings tab, rendered two ways from one row table
  * (see ./settingsSpecs):
  *
- *  - `display()` — the imperative path for Obsidian below 1.13.
+ *  - `display()` — the imperative path for Obsidian below 1.13. A one-line
+ *    forwarder to `renderPage()`, which holds the work: redrawing after a
+ *    language change goes straight there rather than through this deprecated
+ *    name.
  *  - `getSettingDefinitions()` — the declarative path for 1.13 and later, which
  *    is what puts the rows into Obsidian's settings search. Obsidian skips
  *    `display()` entirely once it returns a non-empty array, so the two paths
@@ -154,7 +157,21 @@ export class DragImageSettingTab extends PluginSettingTab {
 
   // ── Imperative path (Obsidian < 1.13) ────────────────────────────────
 
+  /**
+   * The framework's entry point below 1.13, and the only one there is: an older
+   * Obsidian draws this tab by calling this method, so it has to exist.
+   *
+   * It is a forwarder rather than the page itself, because a language change has
+   * to draw the page again and the call for that must not go through a member
+   * the framework has since deprecated (1.13+ has `update()` instead). Below
+   * 1.13 there is no `super.display()` work to preserve, so calling the page
+   * directly is the same redraw — minus the hop through the deprecated name.
+   */
   display(): void {
+    this.renderPage();
+  }
+
+  private renderPage(): void {
     this.disconnectReflow();
     const { containerEl } = this;
     containerEl.empty();
@@ -315,7 +332,7 @@ export class DragImageSettingTab extends PluginSettingTab {
         // Nothing else has to be told: the context menu and the notices build
         // their copy when they open.
         if (requireApiVersion("1.13.0")) this.update();
-        else this.display();
+        else this.renderPage();
         break;
       }
       case "logLevel":
