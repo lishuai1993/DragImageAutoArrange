@@ -11,6 +11,7 @@ Automatically arrange consecutive image embeds into side-by-side rows — like F
 - **Corner handles** — drag a handle on an image's corner to change its size. In a multi-image row, dragging outward stops once the image exactly fills its cell, and near full width it snaps silently to full: past that point neither the image nor the row height moves, and the note is not written.
 - **Alignment** — align an image left, center, or right within its row.
 - **Rotate / flip** — rotate by 90° / 180° and flip horizontally or vertically. The orientation is stored as a parameter on the note line (a readable word such as `r90` / `fv`), so the image file itself is never re-encoded and each change is a single undoable edit. Reset returns the image to its original orientation.
+- **Undo** — every operation on a single- or multi-image row is written back to the note as an editor transaction, so `cmd+z` reverts it: resize, divider drag, drag reorder, cross-row moves, alignment, and rotate / flip, with the picture returning alongside the note. One gesture leaves one undo entry.
 - **Right-click menu** — one unified menu for alignment, rotation, resizing, copy, cut, and file operations. Copy and cut put the bitmap on the clipboard together with the image's in-vault reference: pasting inside this vault lands as a `![[…]]` link instead of minting a duplicate attachment, while pasting into another vault or app yields the image itself — PNG and JPEG files go over byte-for-byte, lossy formats are re-encoded as JPEG. Cut additionally removes that one reference, and deletes the local file only when nothing else in the vault points at it. The whole menu has a master switch in the settings tab: turn it off and images go back to Obsidian and to any other image plugin, with the command that turns it back on copied to your clipboard.
 - **Reading Mode support** — rows render in Reading Mode too, including each image's rotate/flip orientation; editing operations are greyed out.
 - **Interface language** — the settings tab and the image right-click menu switch between Chinese and English from one control at the top of the settings tab; English is the default. Command names are registered in both languages, so the command palette finds them whichever one you use.
@@ -90,6 +91,7 @@ MIT — see [LICENSE](LICENSE).
 - **角点手柄**：拖拽图像角点手柄即可改变图像大小。在多图行中，向外拖到图片恰好铺满本格即止，接近满格时会静默吸到满格；越过该点后图片与行高都不再变化，笔记也不会被写入。
 - **对齐**：可将图片在所在行内左对齐、居中或右对齐。
 - **旋转 / 翻转**：支持 90° / 180° 旋转与水平、垂直翻转。朝向以行参数的形式写回笔记（可读词，如 `r90` / `fv`），原图文件自始至终不被重编码，每次操作都是一步可撤销的编辑；重置后回到原始朝向。
+- **撤销**：单图行与多图行上的操作都以编辑器事务写回笔记，`cmd+z` 即可回退 —— 缩放、拖拽分隔条、行内排序、跨行拖拽、对齐、旋转 / 翻转都可撤销，画面随笔记一同还原；一次手势只留一条撤销记录。
 - **右键菜单**：对齐、旋转、缩放、复制、剪切与文件操作收敛在同一个菜单中。复制与剪切会把位图写入剪贴板，并一并带上该图在库内的引用：在本库粘贴落成 `![[…]]` 链接，而不是另存出一份重复附件；粘到其它仓库或 App 则落成图像本身 —— png / jpg 原样写入，webp、avif 等有损格式转码为 JPEG。剪切还会移除该处引用，并且仅当全库再无其他引用时才删除本地文件。整个菜单在设置页有总开关：关闭后图片交还 Obsidian 与其他图片插件处理，同时把重新开启的命令复制到剪贴板。
 - **阅读模式支持**：多图行在阅读模式下同样渲染，旋转 / 翻转朝向一并呈现，编辑类操作置灰。
 - **界面语言**：设置页最上方一个切换控件即可在中文与 English 之间切换设置页与图片右键菜单的语言，默认英文。命令名中英并排注册，命令面板在哪种语言下都能搜到。
