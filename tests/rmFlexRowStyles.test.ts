@@ -484,3 +484,60 @@ describe('Standalone quarter-turn centring', () => {
     expect(img.style.getPropertyValue('flex-shrink')).toBe('');
   });
 });
+
+/**
+ * A picture sharing its source line with prose is Obsidian's in *both* modes:
+ * LP hosts no row for a line that carries words, so Reading Mode must not size
+ * it either.  Sizing it here is what made one note draw two different widths a
+ * mode switch apart — the picture jumping to the size setting while the
+ * sentence around it re-laid out — because nothing on the LP side ever makes
+ * that jump.
+ */
+describe('Reading-Mode standalone size vs prose', () => {
+  beforeEach(inSizedRow);
+
+  function buildParagraph(inProse: boolean) {
+    const view = document.body.createDiv({ cls: 'markdown-preview-view' });
+    const block = view.createEl('p');
+    if (inProse) block.appendChild(document.createTextNode('前面的话'));
+    const embed = block.createDiv({ cls: 'internal-embed' });
+    const img = embed.createEl('img');
+    Object.defineProperty(img, 'naturalWidth', { value: 1000, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: 635, configurable: true });
+    if (inProse) block.appendChild(document.createTextNode('后面的话'));
+    return { embed, img };
+  }
+
+  it('writes no size but still closes the box on the picture', () => {
+    const { embed, img } = buildParagraph(true);
+
+    applyStandaloneSize(embed, img, null, OPTIONS);
+
+    // Nothing sized: no box, no object-fit, no embed height — the picture keeps
+    // the rendering Obsidian gave it, which is what Live Preview shows too.
+    expect(img.style.getPropertyValue('height')).toBe('');
+    expect(img.style.getPropertyValue('width')).toBe('');
+    expect(img.style.getPropertyValue('object-fit')).toBe('');
+    expect(embed.style.getPropertyValue('width')).toBe('');
+    expect(embed.style.getPropertyValue('height')).toBe('');
+    // The one write that stays: an inline picture sits on the sentence's
+    // baseline, which leaves the font's descent as empty box inside the embed.
+    // The inline path aligns the embed (text-bottom), so that descent would show
+    // as a gap under the picture.  A block box hangs from no baseline, so the
+    // embed closes on the picture and the bottom edges line up.
+    expect(img.style.getPropertyValue('display')).toBe('block');
+    expect(img.style.getPropertyPriority('display')).toBe('important');
+  });
+
+  it('sizes the very same picture once it has the line to itself', () => {
+    const { embed, img } = buildParagraph(false);
+
+    applyStandaloneSize(embed, img, 373, OPTIONS);
+
+    // The control: the prose is the whole verdict, not a blanket bail-out.  The
+    // box follows from the manual width and the picture's own aspect.
+    expect(img.style.getPropertyValue('height')).toBe('237px');
+    expect(img.style.getPropertyPriority('height')).toBe('important');
+    expect(img.style.getPropertyValue('width')).toBe('auto');
+  });
+});

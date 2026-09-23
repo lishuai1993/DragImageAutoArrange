@@ -161,7 +161,9 @@ function applyInlinePlacement(
  * renders, it never writes the note.
  *
  * `manualWidthPx` is a `single-manual` row's `|1|W`; null means the row follows
- * the size setting, exactly as the LP path reads the `S` flag.
+ * the size setting, exactly as the LP path reads the `S` flag.  A picture that
+ * shares its line with prose is not a row on either side, so it is left alone
+ * altogether — see the guard below.
  */
 export function applyStandaloneSize(
   embed: HTMLElement,
@@ -169,6 +171,31 @@ export function applyStandaloneSize(
   manualWidthPx: number | null,
   options: ImageRowOptions
 ): void {
+  // A picture inside a sentence has no size for this pass to own.  LP builds no
+  // row for a line carrying prose either, so it is Obsidian that draws that
+  // picture in both modes — sizing it on this side alone would show the same
+  // note two different widths a mode switch apart, the picture jumping to the
+  // size setting while the sentence it sits in is re-laid out around it.  What
+  // this shape needs is `applyStandaloneAlignment`'s inline path, which keeps
+  // the embed in its sentence and shrink-wraps it.
+  if (touchesProse(embed)) {
+    // The picture keeps Obsidian's size, but its box still has to be the
+    // picture's own.  Left inline, it sits on the sentence's baseline and the
+    // font's descent stays as empty line box under it *inside the embed* — 6 px
+    // at a 16 px font — and the inline path aligns the embed, not the picture,
+    // so that descent shows up as a gap under it: the bottom edge floats one
+    // descender above the words'.  A block box hangs from no baseline, so the
+    // embed closes on the picture and `text-bottom` lands its bottom edge on the
+    // text's.  Nothing else is written: the width stays Obsidian's, and a
+    // replaced element's `auto` width is its own in either display, so this
+    // cannot move the picture sideways.
+    setStyleImportant(img, "display", "block");
+    log.debug("RM standalone size skipped: shares its line with prose", {
+      fileName: getFileNameFromEmbed(embed),
+    });
+    return;
+  }
+
   let pendingFrames = 0;
 
   const layout = (): void => {
