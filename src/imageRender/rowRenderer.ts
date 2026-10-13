@@ -6,6 +6,7 @@
 
 import { CLASSES } from "../constants";
 import { setStyleImportant } from "../utils";
+import { mediaNaturalSize, type MediaElement } from "../imageMedia/mediaElement";
 
 /** Obsidian alignment classes that override our flex layout and must be stripped. */
 export const OBSIDIAN_ALIGN_CLASSES = [
@@ -105,12 +106,13 @@ export function applyDropIndicator(el: HTMLElement, state: DropIndicatorState | 
  * If the image has no natural dimensions yet, a no-op cleanup is returned.
  */
 export function createDragGhost(
-  img: HTMLImageElement | null | undefined,
+  img: MediaElement | null | undefined,
   e: DragEvent,
   ghostWidth: number
 ): () => void {
   const noop = () => {};
-  if (!img || img.naturalWidth <= 0 || !e.dataTransfer) return noop;
+  const { w: nw, h: nh } = mediaNaturalSize(img);
+  if (!img || nw <= 0 || !e.dataTransfer) return noop;
 
   // Hide the browser's default semi-transparent ghost with a transparent 1x1 pixel.
   const pixel = createEl("canvas");
@@ -123,7 +125,7 @@ export function createDragGhost(
 
   // Custom fully-opaque ghost, initially at cursor (DPR-scaled for sharpness).
   const w = ghostWidth;
-  const h = (img.naturalHeight / img.naturalWidth) * w;
+  const h = (nh / nw) * w;
   const dpr = window.devicePixelRatio || 1;
   const ghost = createEl("canvas");
   ghost.width = w * dpr;

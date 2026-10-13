@@ -16,6 +16,7 @@ import {
 import { attachDiaImageMarkers } from "./imageMarkers";
 import { IDENTITY_STATE, isIdentityOrientation, orientationWord, orientedSize, parseOrientationWord, quarterTurnFitScale, type OrientationState } from "../imageTransform/orientation";
 import { applyOrientationPreview, boxForScreenWidth, displayedImageSize, naturalAspect } from "../imageTransform/transformPreview";
+import { mediaLoaded, mediaNaturalSize, onMediaReady, queryAllMedia, queryMedia, type MediaElement } from "../imageMedia/mediaElement";
 
 /**
  * How many frames the sizing pass waits for a row to acquire a width. A row is
@@ -33,10 +34,10 @@ const MAX_ROW_WIDTH_RETRIES = 60;
  * the embed it sits in, and putting the embed's height back would erase the box
  * the turn is measured against.
  */
-const sizedImgBoxH = new WeakMap<HTMLImageElement, number>();
+const sizedImgBoxH = new WeakMap<MediaElement, number>();
 
 /** Write an img's layout-box height and remember it for the guard. */
-function setImgBoxHeight(img: HTMLImageElement, boxH: number): void {
+function setImgBoxHeight(img: MediaElement, boxH: number): void {
   sizedImgBoxH.set(img, boxH);
   setStyleImportant(img, "height", `${boxH}px`);
 }
@@ -47,13 +48,13 @@ function setImgBoxHeight(img: HTMLImageElement, boxH: number): void {
  * puts back the height the sizing wrote.  It also runs on our *own* writes — a
  * matching value is what makes that a no-op instead of a fight.
  */
-function guardImgBox(img: HTMLImageElement): void {
+function guardImgBox(img: MediaElement): void {
   const guard = new MutationObserver((mutations, obs) => {
     for (const m of mutations) {
       if (m.type !== "attributes") continue;
       const attr = m.attributeName;
       if (attr !== "class" && attr !== "style") continue;
-      const target = m.target as HTMLImageElement;
+      const target = m.target as MediaElement;
       const itemEl = target.closest<HTMLElement>(".internal-embed");
       if (!itemEl) continue;
       const knownBoxH = sizedImgBoxH.get(target);
@@ -101,7 +102,7 @@ function applyEmbedOrientations(embeds: HTMLElement[]): void {
   for (const embed of embeds) {
     const state = parseOrientationWord(embed.getAttribute("data-diaa-orientation") ?? "");
     if (!state || isIdentityOrientation(state)) continue;
-    for (const img of Array.from(embed.querySelectorAll<HTMLImageElement>("img"))) {
+    for (const img of queryAllMedia(embed)) {
       applyOrientationPreview(img, state, { scale: quarterTurnFitScale(naturalAspect(img)) });
     }
   }
@@ -132,7 +133,7 @@ function embedTurned(embed: HTMLElement): boolean {
  */
 function applyInlinePlacement(
   embed: HTMLElement,
-  img: HTMLImageElement | null,
+  img: MediaElement | null,
   turned: boolean
 ): void {
   if (turned) {
@@ -167,7 +168,7 @@ function applyInlinePlacement(
  */
 export function applyStandaloneSize(
   embed: HTMLElement,
-  img: HTMLImageElement,
+  img: MediaElement,
   manualWidthPx: number | null,
   options: ImageRowOptions
 ): void {
@@ -199,8 +200,7 @@ export function applyStandaloneSize(
   let pendingFrames = 0;
 
   const layout = (): void => {
-    const nw = img.naturalWidth;
-    const nh = img.naturalHeight;
+    const { w: nw, h: nh } = mediaNaturalSize(img);
     if (nw <= 0 || nh <= 0) return;
 
     const host = embed.parentElement;
@@ -286,7 +286,7 @@ export function applyStandaloneSize(
   };
 
   layout();
-  if (!img.complete) img.addEventListener("load", layout, { once: true });
+  if (!mediaLoaded(img)) onMediaReady(img, layout);
 
   // A lone image gets the same policing a row's members get: Obsidian writes
   // its own inline styles and alignment classes onto embed images, and either
@@ -318,9 +318,9 @@ export function applyStandaloneSize(
 
 /** Extract the filename from an .internal-embed by reading the <img> src attribute. */
 export function getFileNameFromEmbed(embed: HTMLElement): string {
-  const img = embed.querySelector<HTMLImageElement>("img");
-  if (!img) return "";
-  const src = img.src || img.getAttribute("src") || "";
+  const media = queryMedia(embed);
+  if (!media) return "";
+  const src = media.src || media.getAttribute("src") || "";
   const match = src.match(/\/([^/?]+\.\w+)(?:\?|$)/);
   return match ? decodeURIComponent(match[1]) : "";
 }
@@ -337,12 +337,13 @@ export function embedLine1(embed: HTMLElement): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export function isImageEmbed(el: HTMLElement): boolean {
+export function isImageEmbed(el: HTMLElement, extensions: string): boolean {
   const src = el.getAttribute("src") || "";
   const alt = el.getAttribute("alt") || "";
-  const re = /\.(png|jpg|jpeg|gif|webp|svg|bmp|avif)$/i;
+  const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");
+  const re = new RegExp(`\\.(?:${extList})$`, "i");
   if (re.test(src) || re.test(alt)) return true;
-  if (el.querySelector("img")) return true;
+  if (queryMedia(el)) return true;
   return false;
 }
 
@@ -425,7 +426,7 @@ function markInlineEmbed(
   embed.addClass(CLASSES.rowInline);
   // The shrink-wrap runs on every alignment change, so it has to hand the turn
   // its centring back rather than write a bare inline-block over it.
-  applyInlinePlacement(embed, embed.querySelector<HTMLImageElement>("img"), embedTurned(embed));
+  applyInlinePlacement(embed, queryMedia(embed), embedTurned(embed));
   setStyleImportant(embed, "vertical-align", verticalAlign);
   const cs = getComputedStyle(embed);
   log.debug("RM markInlineEmbed", {
@@ -580,7 +581,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   // load gate further down waits for a load that no element can ever fire.
   // Building nothing is the honest outcome: the embeds keep the rendering
   // Obsidian gave them instead of being wrapped into an unsized row.
-  const unmeasurable = embeds.filter((e) => !e.querySelector("img"));
+  const unmeasurable = embeds.filter((e) => !queryMedia(e));
   if (unmeasurable.length > 0) {
     log.warn("RM wrapAsFlexRow skipped: member without <img>", {
       embeds: embeds.length,
@@ -604,21 +605,22 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   textProbe.querySelectorAll(".internal-embed").forEach((e) => e.remove());
   const blockHasText = (textProbe.textContent ?? "").trim().length > 0;
 
-  const imgs: HTMLImageElement[] = [];
+  const imgs: MediaElement[] = [];
   const metas: ImageMeta[] = [];
   const parsedFlexGrows: Array<number | null> = [];
   const scales: Array<number | null> = [];
   const alignments: Array<"left" | "center" | "right" | undefined> = [];
   for (const embed of embeds) {
-    const img = embed.querySelector<HTMLImageElement>("img");
+    const img = queryMedia(embed);
     const scaleAttr = embed.getAttribute("data-diaa-scale");
     const fgAttr = embed.getAttribute("data-diaa-flexgrow");
     const alignAttr = embed.getAttribute("data-diaa-alignment") as "left" | "center" | "right" | null;
     if (img) {
       imgs.push(img);
+      const { w, h } = mediaNaturalSize(img);
       metas.push({
-        naturalWidth: img.naturalWidth || 0,
-        naturalHeight: img.naturalHeight || 0,
+        naturalWidth: w || 0,
+        naturalHeight: h || 0,
       });
       parsedFlexGrows.push(fgAttr ? parseFloat(fgAttr) : null);
       scales.push(scaleAttr ? parseFloat(scaleAttr) : null);
@@ -639,7 +641,8 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
     metas: metas.length,
     scales: scales.length,
     members: embeds.map((e) => {
-      const im = e.querySelector<HTMLImageElement>("img");
+      const im = queryMedia(e);
+      const nat = mediaNaturalSize(im);
       return {
         hasImg: !!im,
         diaaLine: e.getAttribute("data-diaa-line"),
@@ -647,8 +650,8 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         alt: e.getAttribute("alt") ?? "",
         cls: e.className,
         kids: Array.from(e.children).map((c) => c.tagName),
-        natural: im ? `${im.naturalWidth}x${im.naturalHeight}` : "",
-        complete: im?.complete ?? false,
+        natural: im ? `${nat.w}x${nat.h}` : "",
+        complete: mediaLoaded(im),
       };
     }),
   });
@@ -700,8 +703,8 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   ].join(";");
 
   let rowH = options.defaultRowHeight;
-  const firstImg = embeds[0].querySelector<HTMLImageElement>("img");
-  if (firstImg?.naturalWidth) {
+  const firstImg = queryMedia(embeds[0]);
+  if (mediaNaturalSize(firstImg).w) {
     rowH = Math.min(options.defaultRowHeight * 3, Math.max(50, rowH));
   }
   // The starting height is the row's floor until the sizing pass lands.  Below
@@ -748,7 +751,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       height: embed.style.height,
     });
 
-    const embedImgs = Array.from(embed.querySelectorAll<HTMLImageElement>("img"));
+    const embedImgs = queryAllMedia(embed);
     for (const img of embedImgs) {
       stripObsidianClasses(img);
       img.style.setProperty("object-position", oi, "important");
@@ -874,10 +877,10 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       return;
     }
     widthRetries = 0;
-    const currentMetas = imgs.map((img) => ({
-      naturalWidth: img.naturalWidth || 0,
-      naturalHeight: img.naturalHeight || 0,
-    }));
+    const currentMetas = imgs.map((img) => {
+      const { w, h } = mediaNaturalSize(img);
+      return { naturalWidth: w || 0, naturalHeight: h || 0 };
+    });
     const allReady = currentMetas.every((m) => m.naturalWidth > 0);
     if (!allReady) {
       // TEMP-DIAG: which members are unmeasurable right now.
@@ -934,7 +937,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       row.style.removeProperty("height");
       for (const embed of embeds) {
         embed.style.removeProperty("height");
-        for (const img of Array.from(embed.querySelectorAll<HTMLImageElement>("img"))) {
+        for (const img of queryAllMedia(embed)) {
           setStyleImportant(img, "width", "100%");
           setStyleImportant(img, "height", "auto");
         }
@@ -955,7 +958,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         // the turned picture centred in a taller cell with a gap under the row.
         embeds[i].style.setProperty("flex", `${finalGrows[i]} 1 0%`, "important");
         embeds[i].style.setProperty("height", `${heights[i]}px`, "important");
-        const embedImg = embeds[i].querySelector<HTMLImageElement>("img");
+        const embedImg = queryMedia(embeds[i]);
         if (embedImg) {
           stripObsidianClasses(embedImg);
           setImgBoxHeight(embedImg, boxes[i]);
@@ -993,7 +996,7 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
         const drawn = drawnOf(j);
         embeds[j].style.setProperty("flex", `${finalGrows[j]} 1 0%`, "important");
         embeds[j].style.setProperty("height", `${drawn}px`, "important");
-        const embedImg = embeds[j].querySelector<HTMLImageElement>("img");
+        const embedImg = queryMedia(embeds[j]);
         if (embedImg) {
           stripObsidianClasses(embedImg);
           setImgBoxHeight(embedImg, rowHeightPx);
@@ -1011,14 +1014,15 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
       try {
         const rowRect = row.getBoundingClientRect();
         const items = embeds.map((embed, i) => {
-          const img = embed.querySelector<HTMLImageElement>("img");
+          const img = queryMedia(embed);
+          const nat = mediaNaturalSize(img);
           return {
             i,
             itemSetH: embed.style.height || "",
             itemRectH: Math.round(embed.getBoundingClientRect().height),
             imgSetH: img?.style.height || "",
             imgRectH: img ? Math.round(img.getBoundingClientRect().height) : 0,
-            imgNatural: img ? `${img.naturalWidth}x${img.naturalHeight}` : "",
+            imgNatural: img ? `${nat.w}x${nat.h}` : "",
             imgObjectFit: img ? getComputedStyle(img).objectFit : "",
           };
         });
@@ -1127,17 +1131,17 @@ export function wrapAsFlexRow(embeds: HTMLElement[], options: ImageRowOptions, a
   let remainingLoads = metas.filter((m) => m.naturalWidth === 0).length;
   if (remainingLoads > 0) {
     for (const img of imgs) {
-      if (img.naturalWidth > 0) continue;
+      if (mediaNaturalSize(img).w > 0) continue;
       const onLoad = () => {
         remainingLoads--;
         if (remainingLoads <= 0) {
           window.requestAnimationFrame(() => applySizes());
         }
       };
-      if (img.complete) {
+      if (mediaLoaded(img)) {
         onLoad();
       } else {
-        img.addEventListener("load", onLoad, { once: true });
+        onMediaReady(img, onLoad);
       }
     }
     if (remainingLoads === 0) {
@@ -1173,21 +1177,21 @@ export function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOp
       resolve();
     };
 
-    if (embeds.every((e) => e.querySelector("img"))) {
+    if (embeds.every((e) => queryMedia(e))) {
       wrapAsFlexRow(embeds, options, app, sourcePath);
       done();
       return;
     }
 
-    let readyCount = embeds.filter((e) => e.querySelector("img")).length;
+    let readyCount = embeds.filter((e) => queryMedia(e)).length;
     const totalNeeded = embeds.length;
     const observers: MutationObserver[] = [];
 
     for (const embed of embeds) {
-      if (embed.querySelector("img")) continue;
+      if (queryMedia(embed)) continue;
 
       const obs = new MutationObserver((_mutations, observer) => {
-        if (embed.querySelector("img")) {
+        if (queryMedia(embed)) {
           readyCount++;
           observer.disconnect();
           if (readyCount >= totalNeeded) {
@@ -1208,10 +1212,10 @@ export function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOp
       // observers had fired. Read-only.
       log.debug("RM waitForImages TIMEOUT", {
         embeds: embeds.length,
-        withImg: embeds.filter((e) => e.querySelector("img")).length,
+        withImg: embeds.filter((e) => queryMedia(e)).length,
         readyCount,
         missing: embeds
-          .filter((e) => !e.querySelector("img"))
+          .filter((e) => !queryMedia(e))
           .map((e) => ({
             diaaLine: e.getAttribute("data-diaa-line"),
             src: e.getAttribute("src") ?? "",
@@ -1220,10 +1224,10 @@ export function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOp
             kids: Array.from(e.children).map((c) => c.tagName),
           })),
       });
-      // Same bar as the two fast paths above: a member that never produced an
-      // <img> cannot be measured, and wrapping the rest of the row around it is
-      // what stranded a member at 100 % beside an empty box.
-      if (embeds.every((e) => e.querySelector("img"))) {
+      // Same bar as the two fast paths above: a member that never produced a
+      // media element cannot be measured, and wrapping the rest of the row
+      // around it is what stranded a member at 100 % beside an empty box.
+      if (embeds.every((e) => queryMedia(e))) {
         wrapAsFlexRow(embeds, options, app, sourcePath);
       }
       done();
@@ -1236,7 +1240,7 @@ export function waitForImagesThenWrap(embeds: HTMLElement[], options: ImageRowOp
 let dragSrcEl: HTMLElement | null = null;
 let dragPlaceholders: HTMLElement[] = [];
 
-export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLElement[]): void {
+export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLElement[], extensions: string): void {
   let draggableCount = 0;
   for (const embed of embeds) {
     const block = findBlockParent(embed);
@@ -1249,7 +1253,7 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
 
     block.setAttribute("draggable", "true");
     block.classList.add("diaa-draggable");
-    for (const img of Array.from(block.querySelectorAll("img"))) {
+    for (const img of queryAllMedia(block)) {
       img.setAttribute("draggable", "false");
     }
     draggableCount++;
@@ -1322,7 +1326,8 @@ export function makeImagesDraggable(app: App, sourcePath: string, embeds: HTMLEl
         sourcePath,
         dragSrcEl,
         block,
-        e.clientX < block.getBoundingClientRect().left + block.getBoundingClientRect().width / 2
+        e.clientX < block.getBoundingClientRect().left + block.getBoundingClientRect().width / 2,
+        extensions
       );
     });
   }
@@ -1337,8 +1342,9 @@ export function removeAllDropIndicators(): void {
   dragPlaceholders = [];
 }
 
-function isImageEmbedLine(line: string): boolean {
-  const re = /^\s*!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|webp|svg|bmp|avif))(?:\|\d+)?\]\]\s*$/i;
+function isImageEmbedLine(line: string, extensions: string): boolean {
+  const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");
+  const re = new RegExp(`^\\s*!\\[\\[([^\\]]+\\.(?:${extList}))(?:\\|\\d+)?\\]\\]\\s*$`, "i");
   return re.test(line);
 }
 
@@ -1347,7 +1353,8 @@ async function handleImageDrop(
   sourcePath: string,
   srcBlock: HTMLElement,
   dstBlock: HTMLElement,
-  insertBefore: boolean
+  insertBefore: boolean,
+  extensions: string
 ): Promise<void> {
   const srcEmbed = srcBlock.querySelector<HTMLElement>(".internal-embed.image-embed");
   const dstEmbed = dstBlock.querySelector<HTMLElement>(".internal-embed.image-embed");
@@ -1368,7 +1375,7 @@ async function handleImageDrop(
 
     const imageLineNumbers: number[] = [];
     for (let i = 0; i < lines.length; i++) {
-      if (isImageEmbedLine(lines[i])) {
+      if (isImageEmbedLine(lines[i], extensions)) {
         imageLineNumbers.push(i);
       }
     }

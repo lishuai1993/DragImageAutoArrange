@@ -3,6 +3,7 @@ import { computeDividerXPositions, findClosestDividerIndex } from "../imageLayou
 import { logger } from "../logger";
 const log = logger.channel("dragReorder");
 import { createDragGhost } from "../imageRender/rowRenderer";
+import type { MediaElement } from "../imageMedia/mediaElement";
 
 /**
  * Narrow host interface the DragReorderController needs from ImageRowWidget.
@@ -11,7 +12,7 @@ import { createDragGhost } from "../imageRender/rowRenderer";
 export interface DragReorderHost {
   getContainer(): HTMLElement | null;
   getItemEls(): HTMLElement[];
-  getImageEls(): HTMLImageElement[];
+  getImageEls(): MediaElement[];
   getDividerEls(): HTMLElement[];
   getEdgeLeft(): HTMLElement | null;
   getEdgeRight(): HTMLElement | null;

@@ -12,6 +12,7 @@ import { planImageLinkRemoval, removeImageLinkOccurrences } from './noteLinks';
 import { viewOfElement, writeQuietly } from './quietWrite';
 import { confirmDelete } from './imageFile';
 import type { ImageMenuFacade } from './imageMenuHost';
+import type { MediaElement } from '../imageMedia/mediaElement';
 
 const log = logger.channel('cutImage');
 
@@ -152,7 +153,7 @@ export function sourceLineFromMarkers(
 
 /** 0-based source line of the clicked image, or null when it carries no DIAA
  *  anchor (an image Obsidian rendered outside any row). */
-export function resolveClickedSourceLine(img: HTMLImageElement): number | null {
+export function resolveClickedSourceLine(img: MediaElement): number | null {
   const lineHost = img.closest?.<HTMLElement>('[data-diaa-line]');
   const rowHost = img.closest?.<HTMLElement>('[data-line-start]');
   return sourceLineFromMarkers(
@@ -273,7 +274,7 @@ interface ReferenceOutcome {
  */
 async function removeOneReference(
   facade: ImageMenuFacade,
-  img: HTMLImageElement,
+  img: MediaElement,
   imgFile: TFile,
   noteFile: TFile,
   editor: Editor | null
@@ -319,13 +320,13 @@ async function removeOneReference(
  */
 export async function cutImage(
   facade: ImageMenuFacade,
-  img: HTMLImageElement,
+  img: MediaElement,
   imgFile: TFile,
   noteFile: TFile,
   editor: Editor | null
 ): Promise<void> {
   try {
-    await copyImageToClipboard(img, {
+    await copyImageToClipboard(img as HTMLImageElement, {
       reference: `![[${imgFile.path}]]`,
       vaultSource: { app: facade.app, file: imgFile },
     });
@@ -367,7 +368,7 @@ export async function cutImage(
  */
 export async function deleteImageReference(
   facade: ImageMenuFacade,
-  img: HTMLImageElement,
+  img: MediaElement,
   imgFile: TFile,
   noteFile: TFile,
   editor: Editor | null

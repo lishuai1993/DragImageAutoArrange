@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS = {
   enableResize: true,
   enableDividers: true,
   imageExtensions: "png,jpg,jpeg,gif,webp,svg,bmp,avif",
+  videoExtensions: "mp4,webm,m4v,mov",
   topBarSensitivity: 12,
   ghostImageWidth: 120,
   dragOpacity: 60,
@@ -95,4 +96,33 @@ export function buildImageLineRe(extensions: string): RegExp {
 export function buildImageEmbedRe(extensions: string): RegExp {
   const extList = extensions.split(",").map(s => s.trim()).filter(Boolean).join("|");
   return new RegExp(`!\\[\\[([^\\]|]+\\.(?:${extList}))(?:\\|([^\\]]*))?\\]\\]`, "gi");
+}
+
+/** The default video extensions DIAA hosts as video members. */
+export const VIDEO_EXTENSIONS_DEFAULT = "mp4,webm,m4v,mov";
+
+/** The combined image + video extension list a detection regex should match.
+ *  Deduplicated and trimmed, so the same helper drives `buildImageLineRe` /
+ *  `buildImageEmbedRe` / `detectRowGroups` from two settings rather than each
+ *  call site hand-merging the strings. */
+export function combinedMediaExtensions(
+  imageExtensions: string,
+  videoExtensions: string
+): string {
+  const parts = [...imageExtensions.split(","), ...videoExtensions.split(",")]
+    .map(s => s.trim())
+    .filter(Boolean);
+  return Array.from(new Set(parts)).join(",");
+}
+
+/** Whether a file name is a video, judged by its extension against the list. */
+export function isVideo(fileName: string, videoExtensions: string): boolean {
+  const dot = fileName.lastIndexOf(".");
+  if (dot < 0) return false;
+  const ext = fileName.slice(dot + 1).toLowerCase();
+  return videoExtensions
+    .split(",")
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(ext);
 }

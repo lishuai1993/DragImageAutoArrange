@@ -27,7 +27,7 @@ import {
 import type { RowImage, Alignment, ImageDisplay } from "../imageParse/rowParams";
 import { ImageRowWidget, ImageRowOptions, getSidebarWidths, lastRenderedRowHeight } from "./imageRowWidget";
 import { DragImageSettings } from "../settings";
-import { CLASSES } from "../constants";
+import { CLASSES, combinedMediaExtensions } from "../constants";
 import { computeFlexGrowsFromWidths } from "../imageLayout/layoutEngine";
 import { logger } from "../logger";
 const log = logger.channel("livePreview");
@@ -36,6 +36,7 @@ import { stripEmbedParams, parseEmbedParams, embedParamString, stripSizingKeepOr
 import { IDENTITY_STATE, isOrientationWord, parseOrientationWord } from "../imageTransform/orientation";
 import * as scrollDiag from "../scrollSync/scrollDiag";
 import { createDragGhost, applyDropIndicator } from "./rowRenderer";
+import { queryMedia } from "../imageMedia/mediaElement";
 
 /**
  * Parse the file path from an obsidian://open URI and search ALL document lines
@@ -263,7 +264,6 @@ export function sameRowImages(a: RowImage[], b: RowImage[]): boolean {
   if (a.length === 1 && singleDisplayChanged(a[0].display, b[0].display)) return false;
   for (let i = 0; i < a.length; i++) {
     if (normalizeRaw(a[i].raw) !== normalizeRaw(b[i].raw)) return false;
-    if (a[i].alignment !== b[i].alignment) return false;
     if (multiDisplayChanged(a[i].display, b[i].display)) return false;
     // The orientation word is stripped by normalizeRaw with every other param,
     // so a rotate/flip would otherwise reuse the live widget — whose stale model
@@ -413,7 +413,14 @@ class StaticImageRowWidget extends WidgetType {
   eq(other: StaticImageRowWidget): boolean {
     const same = this.eqInner(other);
     if (!same) {
-      log.debug("StaticImageRowWidget reuse refused", { reason: this.eqReason(other) });
+      // 探针：对齐变更重建的 old/new 实际值。reason 只报字段名，这里把比较瞬间
+      // 两边的 alignment 数组和行号一起打出，用来闭合「为何只有 center 方向判不等」。
+      log.debug("StaticImageRowWidget reuse refused", {
+        lineStart: this.group.lineStart,
+        reason: this.eqReason(other),
+        alignmentOld: this.group.images.map((i) => i.alignment),
+        alignmentNew: other.group.images.map((i) => i.alignment),
+      });
     }
     return same;
   }
@@ -449,7 +456,6 @@ class StaticImageRowWidget extends WidgetType {
     if (a.lineStart !== b.lineStart) return "lineStart";
     if (a.lineEnd !== b.lineEnd) return "lineEnd";
     for (let i = 0; i < a.images.length; i++) {
-      if (a.images[i].alignment !== b.images[i].alignment) return `alignment[${i}]`;
       if (normalizeRaw(a.images[i].raw) !== normalizeRaw(b.images[i].raw)) return `raw[${i}]`;
       if (a.images[i].display.kind !== b.images[i].display.kind) return `display[${i}]`;
       if (singleDisplayChanged(a.images[i].display, b.images[i].display)) {
@@ -1168,7 +1174,7 @@ function buildDecorations(
     const groups = detectRowGroups(
       doc,
       settings.maxImagesPerRow,
-      settings.imageExtensions
+      combinedMediaExtensions(settings.imageExtensions, settings.videoExtensions)
     );
     // detectRowGroups types every row up front: multi members parse |W|S and
     // single rows parse their own |S|W grammar, so no post-hoc remap pass needed.
@@ -1591,7 +1597,7 @@ export function createStandaloneDropPlugin(
           embed.addEventListener("dragend", restoreOpacity, { once: true });
 
           // Custom fully-opaque ghost that follows cursor via dragover
-          const img = embed.querySelector("img");
+          const img = queryMedia(embed);
           const cleanupGhost = createDragGhost(img, e, getSettings().ghostImageWidth);
           embed.addEventListener("dragend", cleanupGhost, { once: true });
 
@@ -1680,7 +1686,11 @@ export function createStandaloneDropPlugin(
             // Identity transition (multi member → single): strip the dragged line
             // and any source-row leftover that just became single to bare, now.
             const sdSettings = getSettings();
-            convertOrphanedMultiSinglesToBare(this.view, sdSettings.maxImagesPerRow, sdSettings.imageExtensions);
+            convertOrphanedMultiSinglesToBare(
+              this.view,
+              sdSettings.maxImagesPerRow,
+              combinedMediaExtensions(sdSettings.imageExtensions, sdSettings.videoExtensions)
+            );
             return;
           }
 

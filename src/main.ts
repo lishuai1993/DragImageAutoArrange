@@ -30,9 +30,11 @@ import {
   TOGGLE_CONTEXT_MENU_NAMES,
 } from "./imageMenu/contextMenuToggle";
 import { findMarkdownViewForElement } from "./imageMenu/imageSource";
+import type { MediaElement } from "./imageMedia/mediaElement";
 import { installReferencePaste } from "./imageMenu/referencePaste";
 import { logger } from "./logger";
 import { setLanguage } from "./i18n/language";
+import { combinedMediaExtensions } from "./constants";
 const log = logger.channel("main");
 
 /** The plugin's own slice of `data.json`. Other modules (the image-menu host)
@@ -57,6 +59,7 @@ export default class DragImageAutoArrangePlugin
     enableResize: true,
     enableDividers: true,
     imageExtensions: "png,jpg,jpeg,gif,webp,svg,bmp,avif",
+    videoExtensions: "mp4,webm,m4v,mov",
     topBarSensitivity: 12,
     ghostImageWidth: 120,
     dragOpacity: 60,
@@ -114,9 +117,9 @@ export default class DragImageAutoArrangePlugin
       const target = e.target as HTMLElement;
       if (!target?.tagName) return;
 
-      const img = (target.tagName === "IMG" ? target : target.closest?.("img")) as
-        | HTMLImageElement
-        | null;
+      const img = (target.tagName === "IMG" || target.tagName === "VIDEO"
+        ? target
+        : target.closest?.("img, video")) as MediaElement | null;
       if (!img || !this.imageMenu) return;
 
       // Master switch: with the menu off, DIAA claims nothing at all — the
@@ -375,7 +378,7 @@ export default class DragImageAutoArrangePlugin
         resetSingleImageManualFlags(
           cm,
           this.settings.maxImagesPerRow,
-          this.settings.imageExtensions
+          combinedMediaExtensions(this.settings.imageExtensions, this.settings.videoExtensions)
         );
       }
       if (leaf.view instanceof MarkdownView && leaf.view.previewMode) {
@@ -392,7 +395,7 @@ export default class DragImageAutoArrangePlugin
         resetImageAlignmentFlags(
           cm,
           this.settings.maxImagesPerRow,
-          this.settings.imageExtensions,
+          combinedMediaExtensions(this.settings.imageExtensions, this.settings.videoExtensions),
           this.settings.alignment
         );
       }
@@ -418,6 +421,7 @@ export default class DragImageAutoArrangePlugin
       alignment: this.settings.alignment,
       maxImagesPerRow: this.settings.maxImagesPerRow,
       imageExtensions: this.settings.imageExtensions,
+      videoExtensions: this.settings.videoExtensions,
       singleImageSizeMode: this.settings.singleImageSizeMode,
       singleImageWidth: this.settings.singleImageWidth,
       getResourcePath: (fileName: string) => {

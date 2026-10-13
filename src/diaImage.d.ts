@@ -8,7 +8,7 @@
 import type { Alignment, SingleImageSizeMode } from "./constants";
 
 declare global {
-  interface HTMLImageElement {
+  interface HTMLElement {
     /** Current alignment of this image within its row. */
     __diaa_alignment?: Alignment;
     /** Apply an alignment change (undefined clears it). */

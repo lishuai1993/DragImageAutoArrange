@@ -16,6 +16,7 @@ export interface ImageRowOptions {
   alignment: "left" | "center" | "right";
   maxImagesPerRow: number;
   imageExtensions: string;
+  videoExtensions: string;
   singleImageSizeMode: SingleImageSizeMode;
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;

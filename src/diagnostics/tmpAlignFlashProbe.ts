@@ -170,7 +170,7 @@ let _sizesRuns = 0;
 
 /** One line per sizing pass.  A pass re-run after an alignment change (frame
  *  counter 2+) with the same member set is what a post-edit re-layout is. */
-export function diagSizesRun(embeds: HTMLElement[], imgs: HTMLImageElement[]): void {
+export function diagSizesRun(embeds: HTMLElement[], imgs: HTMLElement[]): void {
   if (!probesEnabled()) return;
   log.debug("RM SIZES RUN", {
     run: ++_sizesRuns,

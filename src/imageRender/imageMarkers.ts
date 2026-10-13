@@ -8,6 +8,7 @@
  */
 
 import type { SingleImageSizeMode } from "../constants";
+import type { MediaElement } from "../imageMedia/mediaElement";
 
 /** What the size setting currently resolves to, for the reset-width row's label.
  *  `mode` decides what the row reads as: fixed names the width, natural names
@@ -38,7 +39,7 @@ export interface DiaImageMarkerOptions {
 }
 
 export function attachDiaImageMarkers(
-    img: HTMLImageElement,
+    img: MediaElement,
     opts: DiaImageMarkerOptions
 ): void {
     img.__diaa_manualSingle = () => opts.manualSingle();

@@ -27,6 +27,7 @@ import {
 } from './imageFile';
 import { deleteImageReference } from './cutImage';
 import type { ImageMenuFacade } from './imageMenuHost';
+import { mediaNaturalSize, type MediaElement } from '../imageMedia/mediaElement';
 
 const log = logger.channel('menuBuilder');
 
@@ -92,12 +93,11 @@ export function addInfoMenuItem(menu: MenuLike, title: string, icon: string | nu
  */
 export function addDimensionsMenuItem(
     menu: MenuLike,
-    img: HTMLImageElement,
+    img: MediaElement,
     name: string,
     icon: string
 ): void {
-    const naturalWidth = img.naturalWidth || 0;
-    const naturalHeight = img.naturalHeight || 0;
+    const { w: naturalWidth, h: naturalHeight } = mediaNaturalSize(img);
 
     addInfoMenuItem(menu, imageInfoTitle(name, img, naturalWidth), icon);
     if (naturalWidth > 0 && naturalHeight > 0) {
@@ -105,7 +105,7 @@ export function addDimensionsMenuItem(
     }
 }
 
-function imageInfoTitle(name: string, img: HTMLImageElement, naturalWidth: number): string {
+function imageInfoTitle(name: string, img: MediaElement, naturalWidth: number): string {
     const renderedWidth = Math.round(img.getBoundingClientRect().width);
     if (naturalWidth > 0 && renderedWidth > 0) {
         return `${name} @ ${Math.round((renderedWidth / naturalWidth) * 100)}%`;
@@ -116,7 +116,7 @@ function imageInfoTitle(name: string, img: HTMLImageElement, naturalWidth: numbe
 export interface FileOperationContext {
     app: App;
     facade: ImageMenuFacade;
-    img: HTMLImageElement;
+    img: MediaElement;
     /** The vault file behind the image; null for a remote image with no file. */
     imgFile: TFile | null;
     /** Note the image was clicked in; null when it could not be resolved. */

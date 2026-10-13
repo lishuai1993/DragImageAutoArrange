@@ -14,6 +14,7 @@
 
 import { TFile, type App, type TAbstractFile } from 'obsidian';
 import { logger } from '../logger';
+import type { MediaElement } from '../imageMedia/mediaElement';
 
 const log = logger.channel('imageFile');
 
@@ -51,7 +52,7 @@ function vaultRelativePath(src: string): string | null {
  */
 export function resolveImageFile(
     app: App,
-    img: HTMLImageElement,
+    img: MediaElement,
     sourcePath: string
 ): TFile | null {
     const src = img.currentSrc || img.src || '';

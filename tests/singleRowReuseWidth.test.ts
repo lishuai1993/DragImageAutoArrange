@@ -130,10 +130,14 @@ describe('sameRowImages', () => {
     expect(sameRowImages(a, single('![[a.png|120]]'))).toBe(false);
   });
 
-  it('still refuses reuse for an alignment or orientation change', () => {
+  it('reuses on an alignment change but refuses on an orientation change', () => {
+    // Alignment is CSS-only: it is applied to the live widget and persisted to
+    // the markdown, so forcing a rebuild here only tears down and re-decodes the
+    // media (the video flicker).  Orientation, in contrast, changes what the
+    // widget draws and must rebuild.
     const aligned = single('![[a.png|left|1|523]]');
     const realigned = single('![[a.png|right|1|523]]');
-    expect(sameRowImages(aligned, realigned)).toBe(false);
+    expect(sameRowImages(aligned, realigned)).toBe(true);
 
     const upright = single('![[a.png|orig|1|523]]');
     const turned = single('![[a.png|r90|1|523]]');

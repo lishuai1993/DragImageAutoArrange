@@ -7,6 +7,7 @@
  */
 
 import { MarkdownView, type App } from 'obsidian';
+import type { MediaElement } from '../imageMedia/mediaElement';
 
 /**
  * The markdown view whose DOM contains `el`, or null when the element lives on
@@ -23,12 +24,12 @@ export function findMarkdownViewForElement(app: App, el: Element): MarkdownView 
 }
 
 /** Candidate sources of an image, most-authoritative first. */
-function sources(img: HTMLImageElement): string[] {
+function sources(img: MediaElement): string[] {
     return [img.currentSrc, img.src, img.getAttribute('src') ?? ''].filter(Boolean);
 }
 
 /** The best http(s) URL for this image, or '' when it is not a remote image. */
-export function getBestHttpImageSource(img: HTMLImageElement): string {
+export function getBestHttpImageSource(img: MediaElement): string {
     for (const candidate of sources(img)) {
         if (/^https?:\/\//i.test(candidate)) return candidate;
     }
@@ -36,7 +37,7 @@ export function getBestHttpImageSource(img: HTMLImageElement): string {
 }
 
 /** True when the image is loaded from an external http(s) URL. */
-export function isRemoteImage(img: HTMLImageElement): boolean {
+export function isRemoteImage(img: MediaElement): boolean {
     return getBestHttpImageSource(img) !== '';
 }
 
@@ -60,7 +61,7 @@ export function remoteImageName(url: string): string {
  * True for vector sources — by extension, or an inline `data:image/svg+xml` URI.
  * SVG is excluded from the bitmap-only actions (copy/cut of the pixels).
  */
-export function isSvgSource(img: HTMLImageElement): boolean {
+export function isSvgSource(img: MediaElement): boolean {
     for (const candidate of sources(img)) {
         if (/^data:image\/svg\+xml/i.test(candidate)) return true;
         if (/\.svg($|[?#])/i.test(candidate)) return true;

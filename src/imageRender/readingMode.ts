@@ -1,5 +1,5 @@
 import { App, TFile, MarkdownPostProcessorContext } from "obsidian";
-import { CLASSES, buildImageLineRe } from "../constants";
+import { CLASSES, buildImageLineRe, combinedMediaExtensions } from "../constants";
 import { ImageRowOptions } from "../types";
 import { detectRowGroups } from "../imageParse/imageDetector";
 import type { RowImage } from "../imageParse/rowParams";
@@ -35,6 +35,7 @@ import {
   areEmbedsConsecutive,
   waitForImagesThenWrap, makeImagesDraggable,
 } from "./rmFlexRow";
+import { queryMedia } from "../imageMedia/mediaElement";
 
 /**
  * The persistent per-section guard: a block holding one of our wrappers has
@@ -248,8 +249,14 @@ export function createReadingModeProcessor(
       (e) => !e.closest("[data-diaa-group]")
     );
 
-    // Filter to image embeds by file extension
-    const imageEmbeds = freshEmbeds.filter(isImageEmbed);
+    const options = getOptions();
+    const mediaExtensions = combinedMediaExtensions(
+      options.imageExtensions,
+      options.videoExtensions
+    );
+
+    // Filter to image/video embeds by file extension
+    const imageEmbeds = freshEmbeds.filter((e) => isImageEmbed(e, mediaExtensions));
 
     log.debug("ReadingMode processor invoked", {
       sourcePath: ctx.sourcePath,
@@ -261,8 +268,6 @@ export function createReadingModeProcessor(
     if (imageEmbeds.length === 0) { return; }
 
     suppressRowFlash();
-
-    const options = getOptions();
 
     // Group consecutive image embeds (buildEmbedGroups returns only groups ≥2).
     const groups = buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
@@ -276,7 +281,7 @@ export function createReadingModeProcessor(
       if (file instanceof TFile) {
         await new Promise(r => window.setTimeout(r, 0));
         const content = await app.vault.cachedRead(file);
-        const re = buildImageLineRe(options.imageExtensions);
+        const re = buildImageLineRe(mediaExtensions);
         // Register the configured image-line regex so scrollAnchor's capture /
         // classification / diagnostics all honor the user's imageExtensions
         // identically (single source of truth — see setImageLineRe).
@@ -286,7 +291,7 @@ export function createReadingModeProcessor(
         // flatten to one RowImage per source image line, in source order — the
         // exact membership a per-line embed-regex scan would produce, but
         // under the unified single/multi display model.
-        const rows = detectRowGroups(content, options.maxImagesPerRow, options.imageExtensions);
+        const rows = detectRowGroups(content, options.maxImagesPerRow, mediaExtensions);
         for (const group of rows) parsedImages.push(...group.images);
         setImageRowIndex(ctx.sourcePath, buildImageRowIndex(lines, re));
         log.debug("ReadingMode parsed markdown", {
@@ -469,7 +474,7 @@ export function createReadingModeProcessor(
       const embed = imageEmbeds[i];
       if (!groupedEmbeds.has(embed)) {
         applyStandaloneAlignment(embed, options.alignment);
-        const img = embed.querySelector<HTMLImageElement>("img");
+        const img = queryMedia(embed);
         if (img) {
           img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
           img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
@@ -555,7 +560,7 @@ export function createReadingModeProcessor(
     }
 
     // --- Step 3: Make ALL image items draggable for merge/reorder ---
-    makeImagesDraggable(app, ctx.sourcePath, imageEmbeds);
+    makeImagesDraggable(app, ctx.sourcePath, imageEmbeds, mediaExtensions);
 
     driveViewportTransition(app, "post-processor");
 

@@ -36,7 +36,7 @@ export type ToggleKey =
 
 export type DropdownKey = "alignment";
 
-export type TextKey = "imageExtensions";
+export type TextKey = "imageExtensions" | "videoExtensions";
 
 /** A row's copy, in both languages. Pairs rather than plain strings because this
  *  table is built once at import and has to be re-readable in either language;
@@ -253,6 +253,15 @@ export const SETTINGS_SECTIONS: SectionSpec[] = [
         desc: {
           zh: "要识别的图片扩展名，逗号分隔（例如 PNG,JPG,GIF,webp）。",
           en: "Comma-separated list of image file extensions to detect (e.g., PNG,JPG,GIF,webp).",
+        },
+      },
+      {
+        kind: "text",
+        key: "videoExtensions",
+        name: { zh: "视频扩展名", en: "Video extensions" },
+        desc: {
+          zh: "要识别为视频并参与并排的扩展名，逗号分隔（例如 mp4,webm,m4v,mov）。视频带原生控制条。",
+          en: "Comma-separated list of video file extensions to lay out side by side (e.g., mp4,webm,m4v,mov). Videos keep their native controls.",
         },
       },
     ],

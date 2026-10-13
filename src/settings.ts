@@ -10,7 +10,7 @@ import {
   type SettingDefinition,
   type SettingDefinitionItem,
 } from "obsidian";
-import { DEFAULT_SETTINGS } from "./constants";
+import { DEFAULT_SETTINGS, combinedMediaExtensions } from "./constants";
 import {
   imageMenuSectionDefinitions,
   renderImageMenuSettings,
@@ -48,6 +48,7 @@ export interface DragImageSettings {
   enableResize: boolean;
   enableDividers: boolean;
   imageExtensions: string;
+  videoExtensions: string;
   topBarSensitivity: number;
   ghostImageWidth: number;
   dragOpacity: number;
@@ -236,7 +237,7 @@ export class DragImageSettingTab extends PluginSettingTab {
           text
             .setValue(this.plugin.settings[row.key])
             .onChange((value) =>
-              void this.assign(row.key, value || DEFAULT_SETTINGS.imageExtensions)
+              void this.assign(row.key, value || DEFAULT_SETTINGS[row.key])
             )
         );
         break;
@@ -308,7 +309,7 @@ export class DragImageSettingTab extends PluginSettingTab {
       case "dropdown":
         return this.assign(row.key, asAlignment(value));
       case "text":
-        return this.assign(row.key, asString(value) || DEFAULT_SETTINGS.imageExtensions);
+        return this.assign(row.key, asString(value) || DEFAULT_SETTINGS[row.key]);
       default:
         return undefined;
     }
@@ -597,7 +598,10 @@ export class DragImageSettingTab extends PluginSettingTab {
   /** Read per run, so a settings change reaches the next pass without a rebuild. */
   private maintenanceBridge(): MaintenanceBridge {
     return {
-      extensions: this.plugin.settings.imageExtensions,
+      extensions: combinedMediaExtensions(
+        this.plugin.settings.imageExtensions,
+        this.plugin.settings.videoExtensions
+      ),
       alignment: this.plugin.settings.alignment,
       maxImagesPerRow: this.plugin.settings.maxImagesPerRow,
     };

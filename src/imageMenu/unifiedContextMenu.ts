@@ -60,6 +60,7 @@ import { fillForTurn } from '../imageLayout/layoutEngine';
 import { clampScale, sizingCode } from '../imageLayout/parameterValidator';
 import type { EditorView } from '@codemirror/view';
 import * as scrollDiag from '../scrollSync/scrollDiag';
+import { isMediaVideo, mediaNaturalSize, type MediaElement } from '../imageMedia/mediaElement';
 
 type AlignValue = 'left' | 'center' | 'right';
 
@@ -81,6 +82,8 @@ interface ImageCapabilities {
     remote: boolean;
     /** Vector source — excluded from the bitmap-only rows. */
     svg: boolean;
+    /** Video source — excluded from the bitmap-only rows (copy/cut). */
+    video: boolean;
     readingMode: boolean;
     /** The remote image's own URL ('' for a vault image). */
     url: string;
@@ -90,7 +93,7 @@ interface ImageCapabilities {
 let buildSeq = 0;
 
 /** Current per-image alignment + the DIAA callback that persists it. */
-function diaaAlignment(img: HTMLImageElement): {
+function diaaAlignment(img: MediaElement): {
     alignment: AlignValue | undefined;
     onAlign?: (a: AlignValue | undefined) => void;
 } {
@@ -100,14 +103,14 @@ function diaaAlignment(img: HTMLImageElement): {
 }
 
 /** True when this image is the sole member of a manually-sized single row. */
-function diaIsManualSingle(img: HTMLImageElement): boolean {
+function diaIsManualSingle(img: MediaElement): boolean {
     const fn = img.__diaa_manualSingle;
     return typeof fn === 'function' ? Boolean(fn()) : false;
 }
 
 /** What the size setting resolves to, or null when the renderer attached no
  *  such marker (an image DIAA never laid out). */
-function diaResetTarget(img: HTMLImageElement): SingleResetTarget | null {
+function diaResetTarget(img: MediaElement): SingleResetTarget | null {
     const fn = img.__diaa_resetTarget;
     return typeof fn === 'function' ? fn() : null;
 }
@@ -138,7 +141,7 @@ function addSeparatorIfNeeded(menu: DomMenu): void {
  * image, so DIAA's own persist path is untouched. An image with no such callback
  * renders the row greyed, keeping its position in the stack.
  */
-function addAlignSubmenu(menu: DomMenu, img: HTMLImageElement): void {
+function addAlignSubmenu(menu: DomMenu, img: MediaElement): void {
     const { alignment, onAlign } = diaaAlignment(img);
 
     const parentRow = createMenuRowEl(MENU_TEXT.alignImage, 'align-left', true);
@@ -202,7 +205,7 @@ function addCopyImage(menu: DomMenu, run: () => Promise<void>, disabled: boolean
 function addCutImageItem(
     menu: DomMenu,
     facade: ImageMenuFacade,
-    img: HTMLImageElement,
+    img: MediaElement,
     target: { imgFile: TFile; noteFile: TFile; editor: Editor | null } | null,
     disabled: boolean
 ): void {
@@ -296,7 +299,7 @@ function addCopyUrl(menu: DomMenu, url: string, disabled: boolean): void {
  */
 function addResetToSettingWidthItem(
     menu: DomMenu,
-    img: HTMLImageElement,
+    img: MediaElement,
     disabled: boolean
 ): void {
     addMenuItem(
@@ -332,7 +335,7 @@ interface TransformTarget {
     state: OrientationState;
     /** The element that was right-clicked: the renderer hangs its live width
      *  off it, which a frame-changing turn has to move. */
-    img: HTMLImageElement;
+    img: MediaElement;
     /** The line's text before the write — the diag probe's pre-write snapshot. */
     lineText: string;
     /** CodeMirror view behind the editor: the scroll-jump probe reads it, and
@@ -359,7 +362,7 @@ function embedTargets(file: TFile): string[] {
  * embed of this file; anything ambiguous is refused rather than guessed at.
  */
 function resolveTransformTarget(
-    img: HTMLImageElement,
+    img: MediaElement,
     imgFile: TFile | null,
     editor: Editor | null
 ): TransformTarget | null {
@@ -401,7 +404,7 @@ function pinnedSizing(
 ): OrientationSizing | undefined {
     const screenWidth = target.img.__diaa_screenWidth?.() ?? null;
     if (screenWidth === null) return undefined;
-    const { naturalWidth, naturalHeight } = target.img;
+    const { w: naturalWidth, h: naturalHeight } = mediaNaturalSize(target.img);
     if (!(naturalWidth > 0 && naturalHeight > 0)) return undefined;
     const moved = pinScreenWidthForTurn(
         screenWidth,
@@ -430,7 +433,7 @@ function memberFillOverride(
 ): number | undefined {
     const fill = target.img.__diaa_memberFill?.() ?? null;
     if (fill === null) return undefined;
-    const { naturalWidth, naturalHeight } = target.img;
+    const { w: naturalWidth, h: naturalHeight } = mediaNaturalSize(target.img);
     if (!(naturalWidth > 0 && naturalHeight > 0)) return undefined;
     const moved = fillForTurn({ naturalWidth, naturalHeight }, fill, target.state, next);
     // Rewriting the same code would only churn the line.
@@ -512,7 +515,7 @@ function addTransformGroup(menu: DomMenu, target: TransformTarget | null, disabl
  */
 export async function openUnifiedImageMenu(
     event: MouseEvent,
-    img: HTMLImageElement,
+    img: MediaElement,
     { app, facade }: UnifiedMenuContext
 ): Promise<void> {
     const seq = ++buildSeq;
@@ -531,6 +534,7 @@ export async function openUnifiedImageMenu(
         : null;
     const noteFile = activeFile;
     const svg = isSvgSource(img) || imgFile?.extension.toLowerCase() === 'svg';
+    const video = isMediaVideo(img);
 
     const cap: ImageCapabilities = {
         imgFile,
@@ -539,6 +543,7 @@ export async function openUnifiedImageMenu(
         managed: Boolean(img.__diaa_onAlign),
         remote,
         svg,
+        video,
         readingMode,
         url,
     };
@@ -563,17 +568,17 @@ export async function openUnifiedImageMenu(
         facade,
         img,
         target,
-        svg || !cutMenuItemEnabled(cap.managed, readingMode)
+        svg || video || !cutMenuItemEnabled(cap.managed, readingMode)
     );
     addCopyImage(
         menu,
         remote
             ? () => copyRemoteImageToClipboard(url, url)
-            : () => copyImageToClipboard(img, {
+            : () => copyImageToClipboard(img as HTMLImageElement, {
                 reference: imgFile ? `![[${imgFile.path}]]` : undefined,
                 vaultSource: imgFile ? { app, file: imgFile } : undefined,
             }),
-        svg
+        svg || video
     );
     // Same slot either way: a vault image offers its paths, a remote one its URL.
     if (remote) {

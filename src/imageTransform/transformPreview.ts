@@ -32,6 +32,7 @@
 
 import type { OrientationState } from './orientation';
 import { orientationToCss, orientedSize } from './orientation';
+import { mediaNaturalSize, type MediaElement } from '../imageMedia/mediaElement';
 
 /** Size the `object-fit: contain` drawing occupies in a box, i.e. the content
  *  before any transform.  `aspect` is the image's natural width/height; a
@@ -47,11 +48,10 @@ export function containedContent(
         : { width: boxWidth, height: boxWidth / a }; // box narrower than the content: width limited
 }
 
-/** The image's natural aspect, falling back to the box's own when the bitmap
- *  has not reported a size. */
-export function naturalAspect(img: HTMLImageElement): number {
-    const nw = img.naturalWidth;
-    const nh = img.naturalHeight;
+/** The media element's natural aspect, falling back to the box's own when the
+ *  bitmap has not reported a size. */
+export function naturalAspect(img: MediaElement): number {
+    const { w: nw, h: nh } = mediaNaturalSize(img);
     if (nw > 0 && nh > 0) return nw / nh;
     return img.clientHeight > 0 ? img.clientWidth / img.clientHeight : 1;
 }
@@ -67,7 +67,7 @@ export function naturalAspect(img: HTMLImageElement): number {
  * decimals the CSS transform carries, so the drawn size predicted from this
  * matches the size the browser paints.
  */
-function measuredQuarterTurnScale(img: HTMLImageElement): number {
+function measuredQuarterTurnScale(img: MediaElement): number {
     const bw = img.clientWidth;
     const bh = img.clientHeight;
     if (bw <= 0 || bh <= 0) return 1;
@@ -90,7 +90,7 @@ export interface PreviewOptions {
 }
 
 export function applyOrientationPreview(
-    img: HTMLImageElement,
+    img: MediaElement,
     state: OrientationState,
     opts?: PreviewOptions
 ): void {

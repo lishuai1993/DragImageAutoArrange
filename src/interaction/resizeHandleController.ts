@@ -2,6 +2,7 @@ import { CLASSES, RESIZE_HANDLE_SIZE } from "../constants";
 import { ImageMeta } from "../imageParse/imageDetector";
 import { logger } from "../logger";
 const log = logger.channel("resize");
+import type { MediaElement } from "../imageMedia/mediaElement";
 
 /** Crop anchor for a zoomed image: centred on both axes, whatever the alignment
  *  setting says.  It has to be claimed inline with `!important` — the alignment
@@ -24,7 +25,7 @@ export interface HandleDef {
 export interface ResizeHost {
   getContainer(): HTMLElement | null;
   getItemEls(): HTMLElement[];
-  getImageEls(): HTMLImageElement[];
+  getImageEls(): MediaElement[];
   /** Space one junction between adjacent items occupies, dividers included —
    *  the row width left to the items.  Not the CSS `gap`. */
   getInterItemSpace(): number;

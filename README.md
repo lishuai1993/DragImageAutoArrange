@@ -72,6 +72,12 @@ npm test        # unit tests
 
 Releases are built and published by the workflow in `.github/workflows/release.yml`, which runs on any pushed tag and attaches `main.js`, `manifest.json`, and `styles.css` to the created Release.
 
+## Changelog
+
+1. Added: video media support.
+   1.1 Videos (mp4, webm, mov, and others) join image rows for drag, resize, rotate, align, and undo.
+   1.2 Aligning a single-video row no longer shifts the viewport, and aligning one image in a multi-image row no longer flickers.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -151,6 +157,12 @@ npm test        # 单元测试
 ```
 
 发布由 `.github/workflows/release.yml` 中的工作流完成：推送任意 Tag 即触发构建，并把 `main.js`、`manifest.json`、`styles.css` 作为附件上传到新建的 Release。
+
+## 更新日志
+
+1. 新增：支持视频媒体。
+   1.1 视频（mp4、webm、mov 等）可像图片一样成行、拖拽、缩放、旋转、对齐与撤销。
+   1.2 单视频行切换对齐不再引起视口跳动，多图行内单图对齐不再闪烁。
 
 ## 许可
 

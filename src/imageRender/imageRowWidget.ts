@@ -1,4 +1,5 @@
-import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode, computeInterItemSpace } from "../constants";
+import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode, computeInterItemSpace, isVideo } from "../constants";
+import { isMediaVideo, mediaLoaded, mediaNaturalSize, type MediaElement } from "../imageMedia/mediaElement";
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
 import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
 import { DIVIDER_MIN_GROW, computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeScaleBasedHeightsContinuous, computeSingleImageWidth, computePairEquilibrium, computePairHeights, drawnHeightCoefficient } from "../imageLayout/layoutEngine";
@@ -136,6 +137,7 @@ export interface ImageRowOptions {
   ghostImageWidth: number;
   dragOpacity: number;
   alignment: "left" | "center" | "right";
+  videoExtensions: string;
   singleImageSizeMode: SingleImageSizeMode;
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
@@ -163,6 +165,7 @@ export function sanitizeOptions(options: ImageRowOptions): ImageRowOptions {
     ghostImageWidth: num(o.ghostImageWidth, DEFAULT_SETTINGS.ghostImageWidth),
     dragOpacity: num(o.dragOpacity, DEFAULT_SETTINGS.dragOpacity),
     alignment: align === "left" || align === "center" || align === "right" ? align : "left",
+    videoExtensions: typeof o.videoExtensions === "string" ? o.videoExtensions : DEFAULT_SETTINGS.videoExtensions,
     singleImageSizeMode: sizeMode === "natural" || sizeMode === "fixed" ? sizeMode : "natural",
     singleImageWidth: Math.max(
       SINGLE_IMAGE_MIN_WIDTH,
@@ -229,7 +232,7 @@ export type MergeExternalCallback = (insertAtIndex: number, dataTransfer: string
  */
 export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost {
   container: HTMLElement | null = null;
-  private imageEls: HTMLImageElement[] = [];
+  private imageEls: MediaElement[] = [];
   private itemEls: HTMLElement[] = [];
   private dividerEls: HTMLElement[] = [];
   /** The divider a resize drag has lit as its equilibrium bar, so the next side
@@ -466,7 +469,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
   getContainer(): HTMLElement | null {
     return this.container;
   }
-  getImageEls(): HTMLImageElement[] {
+  getImageEls(): MediaElement[] {
     return this.imageEls;
   }
   /** The space one junction between two of this row's items occupies in px:
@@ -736,7 +739,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     const img = this.imageEls[index];
     const meta = this.loadedMetas.get(index);
     if (!img || !meta) return false;
-    if (!img.complete || meta.naturalWidth <= 0 || meta.naturalHeight <= 0) return false;
+    if (!mediaLoaded(img) || meta.naturalWidth <= 0 || meta.naturalHeight <= 0) return false;
     const layoutW = this.lastLayoutWidthPx;
     const nowW = this.containerWidthPx();
     if (layoutW <= 0 || nowW <= 0 || Math.abs(nowW - layoutW) > 1) return false;
@@ -1116,10 +1119,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     item.setCssStyles({ height: "100%" });
     item.dataset.index = String(index);
 
-    const img = createEl("img");
+    const isVid = isVideo(image.fileName, this.options.videoExtensions);
+    const img: MediaElement = isVid ? createEl("video") : createEl("img");
     img.className = CLASSES.imageInner;
-    img.alt = image.fileName;
-    // Prevent Obsidian from wrapping this img in its resizable-image wrapper,
+    // Prevent Obsidian from wrapping this media in its resizable-image wrapper,
     // which causes DOM mutations on hover that produce visual flashing.
     img.contentEditable = "false";
     img.setCssStyles({ display: "block" });
@@ -1127,43 +1130,58 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     img.setCssStyles({ height: "100%" });
     img.setCssStyles({ objectFit: "contain" });
     img.style.setProperty("object-position", this.getObjectPosition(index), "important");
+    if (isMediaVideo(img)) {
+      img.controls = true;
+      img.setAttribute("playsinline", "");
+      img.preload = "metadata";
+    } else {
+      img.alt = image.fileName;
+    }
     log.debug("buildImageItem object-position", {
       index,
       file: image.fileName,
+      tag: img.tagName,
       settingsAlignment: this.options.alignment,
       writtenObjectPosition: img.style.objectPosition,
     });
     img.dataset.index = String(index);
 
-    // Set onload BEFORE src so cached images don't fire synchronously
-    // before the handler is registered.
-    const handleLoad = () => {
-      const nw = img.naturalWidth;
-      const nh = img.naturalHeight;
-      log.debug("ImageRowWidget img onload", { index, file: image.fileName, naturalWidth: nw, naturalHeight: nh, complete: img.complete });
+    // Set the load handler BEFORE src so a cached image (or an already-buffered
+    // video) doesn't fire synchronously before the handler is registered.
+    const handleLoaded = () => {
+      const { w: nw, h: nh } = mediaNaturalSize(img);
+      log.debug("ImageRowWidget media loaded", { index, file: image.fileName, tag: img.tagName, naturalWidth: nw, naturalHeight: nh });
       this.loadedMetas.set(index, { naturalWidth: nw, naturalHeight: nh });
       this.applyLayout();
       window.requestAnimationFrame(() => this.updateHandlePositions(index));
     };
 
-    img.onload = handleLoad;
-
-    img.onerror = () => {
-      log.warn("Image load failed in widget", { fileName: image.fileName, index, src: img.src.substring(0, 80) });
+    const handleError = () => {
+      log.warn("Media load failed in widget", { fileName: image.fileName, index, tag: img.tagName, src: img.src.substring(0, 80) });
       this.loadedMetas.set(index, { naturalWidth: 400, naturalHeight: 300 });
       img.setCssStyles({ backgroundColor: "#f0f0f0" });
-      img.alt = `[Not found: ${image.fileName}]`;
+      if (!isMediaVideo(img)) img.alt = `[Not found: ${image.fileName}]`;
       this.applyLayout();
     };
 
+    if (isMediaVideo(img)) {
+      img.addEventListener("loadedmetadata", handleLoaded);
+      img.addEventListener("error", handleError);
+    } else {
+      img.onload = handleLoaded;
+      img.onerror = handleError;
+    }
+
     img.src = this.options.getResourcePath(image.fileName);
 
-    // Guard: if the image was already cached and the browser didn't fire
-    // onload despite being set before src (Electron/Chromium edge case),
-    // handle it here.
-    if (img.complete && img.naturalWidth > 0) {
+    // Guard: if the media was already loaded and the browser didn't fire the
+    // event despite being set before src (Electron/Chromium edge case), handle
+    // it here.
+    if (isMediaVideo(img)) {
+      if (img.readyState >= 1 && img.videoWidth > 0) handleLoaded();
+    } else if (img.complete && img.naturalWidth > 0) {
       log.debug("ImageRowWidget img already complete", { index, file: image.fileName, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
-      handleLoad();
+      handleLoaded();
     }
 
     item.appendChild(img);
@@ -1719,6 +1737,21 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
 
     const allLoaded = metas.every((m) => m.naturalWidth > 0);
     log.debug("ImageRowWidget applyLayout", { allLoaded, hasSizing: this.group.images.some((img) => img.hasSizing), metaCount: metas.filter(m => m.naturalWidth > 0).length, totalImages: this.group.images.length });
+
+    // 阶梯/合并定位：allLoaded 为假时排版被整体跳过（视频 natural size 要等
+    // loadedmetadata 异步到位），逐成员记下谁还没加载——这是「新视频落入行后未
+    // 等高」根因的直接证据。
+    if (!allLoaded) {
+      log.debug("ImageRowWidget applyLayout pending media", {
+        media: this.group.images.map((img, i) => ({
+          i,
+          file: img.fileName,
+          tag: this.imageEls[i]?.tagName,
+          naturalW: metas[i]?.naturalWidth ?? 0,
+          naturalH: metas[i]?.naturalHeight ?? 0,
+        })),
+      });
+    }
 
     if (allLoaded) {
       // ── Restore preserved multi-image dimensions first (before any
@@ -2343,7 +2376,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     {
       const key = mkRowKey(this.options.sourcePath, this.group.lineStart, this.group.images.map(i => i.fileName));
       lastRenderedSizes.set(key, {
-        containerH: this.container.style.height,
+        containerH: this.isSingleRow() ? `${this.rowHeight}px` : this.container.style.height,
         itemHs: this.itemEls.map(el => el.style.height),
         itemWs: this.itemEls.map(el => el.style.width),
         imgHs: this.imageEls.map(el => el.style.height),
@@ -2376,7 +2409,7 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           objectFit: computed.objectFit,
           objectPosition: computed.objectPosition,
         },
-        natural: { w: img.naturalWidth, h: img.naturalHeight },
+        natural: mediaNaturalSize(img),
         fill: this.group.images[i] ? this.fillOf(this.group.images[i]) : null,
       };
     });
@@ -2683,6 +2716,21 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     // the gap between the two — and the row ends up the height every other pass
     // already agrees on.
     this.recalculateRowHeight();
+
+    // 分隔线双击定位：recalculate 之后、persist（会触发 rebuild 失效 itemEls）
+    // 之前，记 pair 两侧的实际绘制高度与最终 share/fill——区分「求解错了」还是
+    // 「求解对了但绘制/持久化被覆盖」。
+    log.debug("BALANCE snapDividerToEquilibrium painted pair", {
+      leftIndex,
+      leftCellH: this.itemEls[leftIndex]?.style.height ?? null,
+      rightCellH: this.itemEls[leftIndex + 1]?.style.height ?? null,
+      leftBoxH: this.imageEls[leftIndex]?.style.height ?? null,
+      rightBoxH: this.imageEls[leftIndex + 1]?.style.height ?? null,
+      leftShare: leftImg.display.kind === "multi" ? leftImg.display.share : null,
+      rightShare: rightImg.display.kind === "multi" ? rightImg.display.share : null,
+      leftFill: leftImg.display.kind === "multi" ? leftImg.display.fill : null,
+      rightFill: rightImg.display.kind === "multi" ? rightImg.display.fill : null,
+    });
 
     // Persist to markdown — triggers widget rebuild, but preserved sizes
     // (still intact) restore per-image heights for unaffected images.
