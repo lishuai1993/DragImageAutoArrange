@@ -273,10 +273,12 @@
    inline styles by src/imageRender/mobileStack.ts, so nothing here needs
    `!important`. */
 
-/* Reading Mode stacks the matched images as blocks.  Live Preview overrides
-   this below and keeps the embed inline-level. */
-.diaa-mobile-row .internal-embed,
-.diaa-mobile-embed {
+/* Reading Mode stacks the matched images as blocks.  Scoped to the reading
+   view so these weights still outrank the theme's paragraph and embed rules;
+   Live Preview overrides the display value below and keeps the embed
+   inline-level. */
+.markdown-preview-view .diaa-mobile-row .internal-embed,
+.markdown-preview-view .diaa-mobile-embed {
   display: block;
   padding: 0;
   margin: 0;
@@ -289,13 +291,16 @@
 .cm-line.diaa-mobile-row .diaa-mobile-embed {
   display: inline-flex;
   vertical-align: top;
+  padding: 0;
+  margin: 0;
 }
 
 /* A paragraph carrying a matched image drops the reading-view paragraph
    spacing, so blank source lines between images add no gap here.  Live
    Preview keeps them: unmarked lines are never touched. */
-.diaa-mobile-row:not(.cm-line) {
+.markdown-preview-view .diaa-mobile-row:not(.cm-line) {
   margin-block: 0;
+  padding-block: 0;
 }
 
 .diaa-mobile-row .internal-embed img,
