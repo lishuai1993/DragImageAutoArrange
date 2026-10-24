@@ -6,5 +6,5 @@
   "description": "Auto-arrange consecutive images into side-by-side rows with drag-to-reorder, resize handles, and draggable dividers, similar to Feishu documents.",
   "author": "lishuai",
   "authorUrl": "https://github.com/lishuai1993",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }

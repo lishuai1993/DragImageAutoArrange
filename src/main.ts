@@ -1,4 +1,4 @@
-import { Plugin, MarkdownView, type Editor, type MarkdownFileInfo } from "obsidian";
+import { Plugin, MarkdownView, Platform, type Editor, type MarkdownFileInfo } from "obsidian";
 import { activeMarkdownView } from "./utils";
 import { editorCmOf } from "./obsidianInternals";
 import {
@@ -115,6 +115,9 @@ export default class DragImageAutoArrangePlugin
     // pick up a rebuilt main.js without restarting Obsidian) would stack a
     // second capture handler and open the image menu twice per right-click.
     this.registerDomEvent(window, "contextmenu", (e) => {
+      // A long press dispatches `contextmenu` on touch devices; the desktop
+      // menu is not part of the mobile presentation, so claim nothing there.
+      if (Platform.isMobile) return;
       const target = e.target as HTMLElement;
       if (!target?.tagName) return;
 
@@ -159,7 +162,9 @@ export default class DragImageAutoArrangePlugin
     // toggling it in settings applies without a plugin reload.
     this.register(
       installReadingModeImageDoubleClickZoom(
-        () => this.settings.enableReadingModeDoubleClickZoom
+        // The module suppresses every Reading-Mode click to turn the gesture
+        // into a double click; on touch that swallows the native tap.
+        () => !Platform.isMobile && this.settings.enableReadingModeDoubleClickZoom
       )
     );
 
@@ -270,13 +275,16 @@ export default class DragImageAutoArrangePlugin
     );
     log.info("Live Preview extension registered");
 
-    // Standalone line drop handler (flex row → standalone)
-    this.registerEditorExtension(
-      createStandaloneDropPlugin(
-        () => this.settings
-      )
-    );
-    log.info("Standalone drop plugin registered");
+    // Standalone line drop handler (flex row → standalone). Touch has no HTML5
+    // drag, and the stacked layout has no row to drop into, so it stays off.
+    if (!Platform.isMobile) {
+      this.registerEditorExtension(
+        createStandaloneDropPlugin(
+          () => this.settings
+        )
+      );
+      log.info("Standalone drop plugin registered");
+    }
 
     // Commands: rescan image groups. One per language, registered side by side
     // rather than renamed on a language switch — a command name is also what a
@@ -442,6 +450,7 @@ export default class DragImageAutoArrangePlugin
         return url;
       },
       sourcePath,
+      mobileStack: Platform.isMobile,
     };
   }
 

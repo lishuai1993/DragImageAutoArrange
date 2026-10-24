@@ -22,9 +22,50 @@ vi.mock('@codemirror/view', () => ({
   EditorView: {},
 }));
 
-import { normalizeRaw, applyFlexGrowChanges } from '../src/imageRender/livePreview';
+import { normalizeRaw, applyFlexGrowChanges, mobileLineMarks } from '../src/imageRender/livePreview';
 import { IDENTITY_STATE } from '../src/imageTransform/orientation';
+import { detectRowGroups } from '../src/imageParse/imageDetector';
 import type { RowImage } from '../src/imageParse/rowParams';
+
+// ── mobileLineMarks ──
+function docOf(lines: string[]) {
+  let off = 0;
+  const starts = lines.map((l) => { const s = off; off += l.length + 1; return s; });
+  return {
+    lines: lines.length,
+    line: (n: number) => ({ from: starts[n - 1] }),
+  };
+}
+
+describe('mobileLineMarks', () => {
+  it('marks every source line of a multi row', () => {
+    const lines = [
+      '![[a.png|orig|center|120|80]]',
+      '![[b.png|orig|center|120|80]]',
+      '![[c.png|orig|center|120|80]]',
+    ];
+    const groups = detectRowGroups(lines.join('\n'), 10, 'png');
+    const marks = mobileLineMarks(groups, docOf(lines));
+    expect(marks.map((m) => m.from)).toEqual([0, 30, 60]);
+    expect(marks.every((m) => m.orientation === null)).toBe(true);
+  });
+
+  it('carries a non-identity orientation and omits the identity one', () => {
+    const lines = [
+      '![[a.png|r90|center|120|80]]',
+      '![[b.png|orig|center|120|80]]',
+    ];
+    const groups = detectRowGroups(lines.join('\n'), 10, 'png');
+    const marks = mobileLineMarks(groups, docOf(lines));
+    expect(marks.map((m) => m.orientation)).toEqual(['r90', null]);
+  });
+
+  it('marks a single-image row too', () => {
+    const lines = ['![[a.png|orig|1|400]]'];
+    const groups = detectRowGroups(lines.join('\n'), 10, 'png');
+    expect(mobileLineMarks(groups, docOf(lines))).toEqual([{ from: 0, orientation: null }]);
+  });
+});
 
 // ── normalizeRaw ──
 describe('normalizeRaw', () => {

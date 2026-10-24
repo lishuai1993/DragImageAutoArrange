@@ -24,6 +24,12 @@ export const CLASSES = {
   contents: `${CSS_PREFIX}-contents`,
   /** The bullet list the switch-off notice renders inside its notice element. */
   noticeList: `${CSS_PREFIX}-notice-list`,
+  /** Mobile: a source line holding a DIAA row image, rendered one per line. */
+  mobileRow: `${CSS_PREFIX}-mobile-row`,
+  /** Mobile: an embed presented stacked at the page width. */
+  mobileEmbed: `${CSS_PREFIX}-mobile-embed`,
+  /** Mobile: an embed whose orientation is a quarter turn (centred in its box). */
+  mobileTurned: `${CSS_PREFIX}-mobile-turned`,
 } as const;
 
 export type Alignment = "left" | "center" | "right";

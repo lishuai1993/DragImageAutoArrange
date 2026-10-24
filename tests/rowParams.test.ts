@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { read, write, mergeRewrite } from "../src/imageParse/rowParams";
+import { isSingleFormSizing, read, write, mergeRewrite } from "../src/imageParse/rowParams";
 
 const EXTS = "png,jpg,webp";
 
@@ -112,6 +112,29 @@ describe("read single-row", () => {
     const [r] = read("![[a.webp|left]]", "single", EXTS);
     expect(r.alignment).toBe("left");
     expect(r.display).toEqual({ kind: "single-follow" });
+  });
+});
+
+// ── grammar crossing: single-form tail in a multi group ─────────────────
+describe("isSingleFormSizing", () => {
+  it("recognises the single row's S|W tail, with and without words", () => {
+    expect(isSingleFormSizing("![[a.png|0|480]]")).toBe(true);
+    expect(isSingleFormSizing("![[a.png|1|320]]")).toBe(true);
+    expect(isSingleFormSizing("![[a.png|orig|center|0|480]]")).toBe(true);
+    expect(isSingleFormSizing("![[a.png|r90|left|1|320]]")).toBe(true);
+  });
+
+  it("leaves multi-form, bare and word-only lines alone", () => {
+    expect(isSingleFormSizing("![[a.png|120|80]]")).toBe(false);
+    expect(isSingleFormSizing("![[a.png|orig|center|120|80]]")).toBe(false);
+    expect(isSingleFormSizing("![[a.png|100]]")).toBe(false);
+    expect(isSingleFormSizing("![[a.png]]")).toBe(false);
+    expect(isSingleFormSizing("![[a.png|orig|center]]")).toBe(false);
+  });
+
+  it("does not read an alignment word as the first slot", () => {
+    // `left` sits in the alignment slot; the first numeric is 120, not a flag.
+    expect(isSingleFormSizing("![[a.png|left|120]]")).toBe(false);
   });
 });
 

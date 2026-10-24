@@ -21,6 +21,9 @@ export interface ImageRowOptions {
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
   sourcePath: string;
+  /** Mobile: render every row image on its own line, fitted to the page width.
+   *  Set from `Platform.isMobile`; desktop leaves it false. */
+  mobileStack?: boolean;
 }
 
 export interface MultiImageSizeData {

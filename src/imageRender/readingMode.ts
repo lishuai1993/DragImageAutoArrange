@@ -32,10 +32,11 @@ import { buildImageRowIndex, toLine1 } from "../anchor/viewportAnchor";
 import {
   getFileNameFromEmbed, embedLine1, isImageEmbed,
   applyStandaloneAlignment, applyStandaloneSize,
-  areEmbedsConsecutive,
+  areEmbedsConsecutive, touchesProse,
   waitForImagesThenWrap, makeImagesDraggable,
 } from "./rmFlexRow";
 import { queryMedia } from "../imageMedia/mediaElement";
+import { layoutMobileEmbed } from "./mobileStack";
 
 /**
  * The persistent per-section guard: a block holding one of our wrappers has
@@ -49,7 +50,9 @@ import { queryMedia } from "../imageMedia/mediaElement";
  * that looser question, asks it separately (`holdsDiaaPicture`).
  */
 function isRenderedBlock(el: HTMLElement): boolean {
-  return el.querySelector("[data-diaa-group], [data-diaa-standalone]") !== null;
+  return el.querySelector(
+    `[data-diaa-group], [data-diaa-standalone], .${CLASSES.mobileEmbed}`
+  ) !== null;
 }
 
 // In-flight guard, not a completion mark.  This handler awaits vault I/O and
@@ -250,6 +253,7 @@ export function createReadingModeProcessor(
     );
 
     const options = getOptions();
+    const mobileStack = options.mobileStack === true;
     const mediaExtensions = combinedMediaExtensions(
       options.imageExtensions,
       options.videoExtensions
@@ -267,10 +271,16 @@ export function createReadingModeProcessor(
 
     if (imageEmbeds.length === 0) { return; }
 
-    suppressRowFlash();
+    // Mobile lays the images out natively, so there is no custom flash to
+    // suppress: hiding the section while the async parse runs would only make
+    // the native picture disappear for longer.
+    if (!mobileStack) suppressRowFlash();
 
     // Group consecutive image embeds (buildEmbedGroups returns only groups ≥2).
-    const groups = buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
+    // Mobile never groups: every image stands on its own line.
+    const groups = mobileStack
+      ? []
+      : buildEmbedGroups(imageEmbeds, options.maxImagesPerRow);
 
     const groupedEmbeds = new Set<HTMLElement>(groups.flat());
 
@@ -469,70 +479,86 @@ export function createReadingModeProcessor(
       usedFallback,
     });
 
-    // Apply alignment to standalone single images
-    for (let i = 0; i < imageEmbeds.length; i++) {
-      const embed = imageEmbeds[i];
-      if (!groupedEmbeds.has(embed)) {
-        applyStandaloneAlignment(embed, options.alignment);
-        const img = queryMedia(embed);
-        if (img) {
-          img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
-          img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
-            // TEMP-DIAG: what the user had, what they picked, and the geometry
-            // on both sides of the write — plus the frames that follow it.
-            const diagExtra = {
-              from: img.__diaa_alignment ?? null,
-              to: newAlign ?? null,
-              effective: newAlign ?? options.alignment,
-              sizeMode: options.singleImageSizeMode,
-              sourcePath: ctx.sourcePath,
+    if (mobileStack) {
+      // Mobile: mark the embeds that live on a DIAA image line and hand each to
+      // the stacked layout.  The match is the authority on which embeds are row
+      // images; `touchesProse` keeps a prose embed the filename fallback
+      // happened to pair with a row from being pulled out of its sentence.
+      for (let i = 0; i < imageEmbeds.length; i++) {
+        const parsed = matches[i];
+        if (!parsed) continue;
+        const embed = imageEmbeds[i];
+        if (touchesProse(embed)) continue;
+        embed.parentElement?.classList.add(CLASSES.mobileRow);
+        embed.classList.add(CLASSES.mobileEmbed);
+        layoutMobileEmbed(embed);
+      }
+    } else {
+      // Apply alignment to standalone single images
+      for (let i = 0; i < imageEmbeds.length; i++) {
+        const embed = imageEmbeds[i];
+        if (!groupedEmbeds.has(embed)) {
+          applyStandaloneAlignment(embed, options.alignment);
+          const img = queryMedia(embed);
+          if (img) {
+            img.__diaa_alignment = (embed.getAttribute("data-diaa-alignment") || undefined) as "left" | "center" | "right" | undefined;
+            img.__diaa_onAlign = (newAlign: "left" | "center" | "right" | undefined) => {
+              // TEMP-DIAG: what the user had, what they picked, and the geometry
+              // on both sides of the write — plus the frames that follow it.
+              const diagExtra = {
+                from: img.__diaa_alignment ?? null,
+                to: newAlign ?? null,
+                effective: newAlign ?? options.alignment,
+                sizeMode: options.singleImageSizeMode,
+                sourcePath: ctx.sourcePath,
+              };
+              diagAlign("standalone-align:before", embed, diagExtra);
+              if (newAlign) {
+                embed.setAttribute("data-diaa-alignment", newAlign);
+              } else {
+                embed.removeAttribute("data-diaa-alignment");
+              }
+              img.__diaa_alignment = newAlign;
+              applyStandaloneAlignment(embed, options.alignment);
+              diagAlign("standalone-align:after", embed, diagExtra);
+              diagAlignFrames("standalone-align", embed, diagExtra);
+              if (app && ctx.sourcePath) {
+                const effectiveAlign = newAlign ?? options.alignment;
+                const fn = getFileNameFromEmbed(embed);
+                if (fn) storePendingAlignment(ctx.sourcePath, fn, effectiveAlign, embedLine1(embed));
+              }
             };
-            diagAlign("standalone-align:before", embed, diagExtra);
-            if (newAlign) {
-              embed.setAttribute("data-diaa-alignment", newAlign);
-            } else {
-              embed.removeAttribute("data-diaa-alignment");
-            }
-            img.__diaa_alignment = newAlign;
-            applyStandaloneAlignment(embed, options.alignment);
-            diagAlign("standalone-align:after", embed, diagExtra);
-            diagAlignFrames("standalone-align", embed, diagExtra);
-            if (app && ctx.sourcePath) {
-              const effectiveAlign = newAlign ?? options.alignment;
-              const fn = getFileNameFromEmbed(embed);
-              if (fn) storePendingAlignment(ctx.sourcePath, fn, effectiveAlign, embedLine1(embed));
-            }
-          };
-          // Read-only reset surface so RM renders the reset row greyed-out.
-          // manualSingle comes straight from the typed parse (matches[i] is the
-          // RowImage this embed matched), not from re-reading a data-diaa-scale
-          // attr — single rows carry no scale slot under the unified model.
-          const parsed = matches[i];
-          attachDiaImageMarkers(img, {
-            manualSingle: () =>
-              parsed != null && parsed.display.kind === "single-manual",
-            resetTarget: () => ({
-              mode: options.singleImageSizeMode,
-              width: options.singleImageWidth,
-            }),
-            resetSingleManual: null,
-            // Reading Mode persists nothing, so a rotation here cannot pin the
-            // row's width — it stays a read-only surface.
-            screenWidth: null,
-            memberFill: null,
-          });
-          // A standalone row carries its size in `|S|W`, and the S flag decides
-          // which frame the width is read from — the manual pixel width, or the
-          // size setting.  The sizing path also replays the orientation (it has
-          // to: the fit scale follows from the drawn size).
-          applyStandaloneSize(
-            embed,
-            img,
-            parsed != null && parsed.display.kind === "single-manual"
-              ? parsed.display.widthPx
-              : null,
-            options
-          );
+            // Read-only reset surface so RM renders the reset row greyed-out.
+            // manualSingle comes straight from the typed parse (matches[i] is the
+            // RowImage this embed matched), not from re-reading a data-diaa-scale
+            // attr — single rows carry no scale slot under the unified model.
+            const parsed = matches[i];
+            attachDiaImageMarkers(img, {
+              manualSingle: () =>
+                parsed != null && parsed.display.kind === "single-manual",
+              resetTarget: () => ({
+                mode: options.singleImageSizeMode,
+                width: options.singleImageWidth,
+              }),
+              resetSingleManual: null,
+              // Reading Mode persists nothing, so a rotation here cannot pin the
+              // row's width — it stays a read-only surface.
+              screenWidth: null,
+              memberFill: null,
+            });
+            // A standalone row carries its size in `|S|W`, and the S flag decides
+            // which frame the width is read from — the manual pixel width, or the
+            // size setting.  The sizing path also replays the orientation (it has
+            // to: the fit scale follows from the drawn size).
+            applyStandaloneSize(
+              embed,
+              img,
+              parsed != null && parsed.display.kind === "single-manual"
+                ? parsed.display.widthPx
+                : null,
+              options
+            );
+          }
         }
       }
     }
@@ -560,7 +586,10 @@ export function createReadingModeProcessor(
     }
 
     // --- Step 3: Make ALL image items draggable for merge/reorder ---
-    makeImagesDraggable(app, ctx.sourcePath, imageEmbeds, mediaExtensions);
+    // Mobile is a touch surface with no row model: nothing to merge or reorder.
+    if (!mobileStack) {
+      makeImagesDraggable(app, ctx.sourcePath, imageEmbeds, mediaExtensions);
+    }
 
     driveViewportTransition(app, "post-processor");
 

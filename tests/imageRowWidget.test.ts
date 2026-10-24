@@ -1408,3 +1408,86 @@ describe('ImageRowWidget single-row sizing marks', () => {
     expect(widget._sizingDirtyImages.size).toBe(0);
   });
 });
+
+describe('ImageRowWidget cross-grammar merge equilibrium', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** A member line that still carries the single row's `|S|W` tail — what the
+   *  line reads like after the blank line between two single rows is deleted. */
+  function crossedImage(fileName: string, line: number, s: '0' | '1', w: number): RowImage {
+    return {
+      line,
+      raw: `![[${fileName}|orig|center|${s}|${w}]]`,
+      fileName,
+      alignment: 'center',
+      orientation: IDENTITY,
+      hasSizing: true,
+      display: { kind: 'multi', share: s === '0' ? 0 : 0.01, fill: w / 100 },
+    };
+  }
+
+  function layOut(group: RowGroup, dims: Array<{ w: number; h: number }>): HTMLElement {
+    const widget = new ImageRowWidget(group, makeOptions('left'));
+    const el = widget.build();
+    document.body.appendChild(el);
+    patchBoundingRect(el, 800);
+    simulateImagesLoaded(widget, el, dims);
+    return el;
+  }
+
+  it('re-derives a pair of crossed singles at equal drawn heights', () => {
+    const group = makeGroup([
+      crossedImage('a.png', 5, '0', 480),
+      crossedImage('b.png', 7, '1', 320),
+    ]);
+
+    layOut(group, [{ w: 400, h: 400 }, { w: 800, h: 400 }]);
+
+    // Equal drawn heights ask for weights in proportion to the aspects (1 : 2),
+    // normalised to the row's two units and landed on the persisted grid.
+    expect(group.images[0].display).toMatchObject({ kind: 'multi', share: 0.67 });
+    expect(group.images[1].display).toMatchObject({ kind: 'multi', share: 1.33 });
+    expect(group.images[0].hasSizing).toBe(true);
+    expect(group.images[1].hasSizing).toBe(true);
+  });
+
+  it("retires the single row's alignment word, which described the old row", () => {
+    const group = makeGroup([
+      crossedImage('a.png', 5, '0', 480),
+      crossedImage('b.png', 7, '1', 320),
+    ]);
+
+    layOut(group, [{ w: 400, h: 400 }, { w: 800, h: 400 }]);
+
+    expect(group.images[0].alignment).toBeUndefined();
+    expect(group.images[1].alignment).toBeUndefined();
+  });
+
+  it('rebalances the whole row when a single joins a well-formed member', () => {
+    const group = makeGroup([
+      makeImage('a.png', 5, 1, true),
+      crossedImage('b.png', 6, '0', 480),
+    ]);
+
+    layOut(group, [{ w: 400, h: 400 }, { w: 800, h: 400 }]);
+
+    // The old split is discarded rather than kept for the newcomer to be
+    // squeezed into: the row is solved again from the two aspects.
+    expect(group.images[0].display).toMatchObject({ kind: 'multi', share: 0.67 });
+    expect(group.images[1].display).toMatchObject({ kind: 'multi', share: 1.33 });
+  });
+
+  it('leaves a well-formed multi row exactly as the document states', () => {
+    const group = makeGroup([
+      makeImage('a.png', 5, 1, true),
+      makeImage('b.png', 6, 2, true),
+    ]);
+
+    layOut(group, [{ w: 400, h: 400 }, { w: 800, h: 400 }]);
+
+    expect(group.images[0].display).toMatchObject({ kind: 'multi', share: 1 });
+    expect(group.images[1].display).toMatchObject({ kind: 'multi', share: 2 });
+  });
+});

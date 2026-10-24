@@ -102,6 +102,26 @@ export function slotOffset(tokens: string[]): number {
   return offset;
 }
 
+/** Whether an embed line's numeric tail is the single row's `|S|W` shape rather
+ *  than a multi member's `|share|fill|`.
+ *
+ *  A multi member's share is persisted in hundredths and clamped to at least
+ *  0.1, so a first numeric of 0 or 1 can only be the single row's S flag — which
+ *  is what makes the two grammars distinguishable at all.  Bare and word-only
+ *  lines carry no sizing and belong to neither, so they are never single-form.
+ *
+ *  Both sides of the row-kind transition need this: a paste that joins a row
+ *  and a deleted blank line between images leave a single row's tail sitting in
+ *  a multi group, where the same numbers read as a near-zero share and an
+ *  out-of-range fill. */
+export function isSingleFormSizing(raw: string): boolean {
+  const tokens = splitTokens(embedParamString(raw));
+  const offset = slotOffset(tokens);
+  if (tokens.length < offset + 2) return false;
+  const first = parseInt(tokens[offset], 10);
+  return first === 0 || first === 1;
+}
+
 function parseMultiDisplay(paramStr: string): ImageDisplay {
   // First numeric = share code (flexGrow × 100); last |numeric = fill code.
   // One numeric (or none) must not double-assign — fill stays null so layout

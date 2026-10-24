@@ -33,7 +33,7 @@ import { findMarkdownViewForElement } from "../imageMenu/imageSource";
 import { writeQuietly } from "../imageMenu/quietWrite";
 import { parseEmbedParams, stripSizingKeepOrientation } from "../imageParse/embedRaw";
 import { detectRowGroups } from "../imageParse/imageDetector";
-import { slotOffset } from "../imageParse/rowParams";
+import { isSingleFormSizing, slotOffset } from "../imageParse/rowParams";
 import { editorCmOf } from "../obsidianInternals";
 
 const log = logger.channel("pasteNormalize");
@@ -129,22 +129,6 @@ export function isolateEmbedAtCaret(
   out.push(indentOf(line) + embed.text);
   if (splitAfter) out.push(after.trimStart());
   return out;
-}
-
-/** Whether the params are the multi-row `|W|S` shape rather than the single
- *  row's `|S|W`. Bare lines and word-only lines (`|orig|left`) carry no sizing
- *  and belong to neither, so they are never a mismatch.
- *
- *  A multi member's share is persisted in hundredths and clamped to at least
- *  0.1, so a first numeric of 0 or 1 can only be the single row's S flag —
- *  which is what makes the two grammars distinguishable at all. */
-function isSingleFormSizing(raw: string): boolean {
-  const parts = parseEmbedParams(raw);
-  if (!parts) return false;
-  const offset = slotOffset(parts);
-  if (parts.length < offset + 2) return false;
-  const first = parseInt(parts[offset], 10);
-  return first === 0 || first === 1;
 }
 
 /** Whether a single row carries sizing that is not its clean `|S|W`. */

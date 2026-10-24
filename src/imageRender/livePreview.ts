@@ -33,10 +33,17 @@ import { logger } from "../logger";
 const log = logger.channel("livePreview");
 import { clampFlexGrow, clampScale, quantizeSizing } from "../imageLayout/parameterValidator";
 import { stripEmbedParams, parseEmbedParams, embedParamString, stripSizingKeepOrientation } from "../imageParse/embedRaw";
-import { IDENTITY_STATE, isOrientationWord, parseOrientationWord } from "../imageTransform/orientation";
+import {
+  IDENTITY_STATE,
+  isIdentityOrientation,
+  isOrientationWord,
+  orientationWord,
+  parseOrientationWord,
+} from "../imageTransform/orientation";
 import * as scrollDiag from "../scrollSync/scrollDiag";
 import { createDragGhost, applyDropIndicator } from "./rowRenderer";
 import { queryMedia } from "../imageMedia/mediaElement";
+import { createMobileStackPlugin } from "./mobileStack";
 
 /**
  * Parse the file path from an obsidian://open URI and search ALL document lines
@@ -1146,6 +1153,39 @@ export function resetImageAlignmentFlags(
 
 // ── State field for decorations ─────────────────────────────────
 
+export interface MobileLineMark {
+  from: number;
+  /** Orientation word to publish on the line, or null for identity. */
+  orientation: string | null;
+}
+
+/**
+ * The lines a mobile Live Preview marks as DIAA row images.  Pure so the
+ * line-exclusive arithmetic stays under test: a group records its 0-based
+ * start and exclusive 0-based end, while `doc.line()` is 1-based.
+ */
+export function mobileLineMarks(
+  groups: RowGroup[],
+  doc: { lines: number; line(n: number): { from: number } }
+): MobileLineMark[] {
+  const marks: MobileLineMark[] = [];
+  for (const group of groups) {
+    const first = group.lineStart + 1;
+    const last = Math.min(group.lineEnd, doc.lines);
+    for (let n = first; n <= last; n++) {
+      const image = group.images[n - first];
+      marks.push({
+        from: doc.line(n).from,
+        orientation:
+          image && !isIdentityOrientation(image.orientation)
+            ? orientationWord(image.orientation)
+            : null,
+      });
+    }
+  }
+  return marks;
+}
+
 function buildDecorations(
   state: EditorView["state"],
   getOptions: () => ImageRowOptions,
@@ -1191,6 +1231,29 @@ function buildDecorations(
         raws: g.images.map(i => i.raw),
       })),
     });
+
+    // Mobile: every row image renders natively on its own line, fitted to the
+    // page width.  A line decoration marks the row (and carries the persisted
+    // rotate/flip word); `createMobileStackPlugin` sizes the picture once the
+    // line is in the DOM.  No widget, so no drag/resize/divider state exists.
+    if (options.mobileStack) {
+      const mobile = new RangeSetBuilder<Decoration>();
+      const marks = mobileLineMarks(groups, state.doc);
+      for (const mark of marks) {
+        mobile.add(
+          mark.from,
+          mark.from,
+          Decoration.line({
+            class: CLASSES.mobileRow,
+            attributes: mark.orientation
+              ? { "data-diaa-orientation": mark.orientation }
+              : undefined,
+          })
+        );
+      }
+      log.debug("LivePreview mobile line marks", { count: marks.length });
+      return mobile.finish();
+    }
 
     const builder = new RangeSetBuilder<Decoration>();
     let decorationAdded = false;
@@ -1403,7 +1466,12 @@ export function createLivePreviewPlugin(
     provide: (f) => EditorView.decorations.from(f),
   });
 
-  return [layoutVersionField, Prec.highest(field), makeRowScrollOnUndo(field)];
+  return [
+    layoutVersionField,
+    Prec.highest(field),
+    makeRowScrollOnUndo(field),
+    createMobileStackPlugin(getOptions),
+  ];
 }
 
 /** A resolved drag/drop target under the cursor. `findDropTarget` always

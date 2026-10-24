@@ -380,7 +380,7 @@ export function isImageOnlyBlock(block: HTMLElement | null): boolean {
  * Only the immediate siblings count: anything further along the paragraph is
  * prose the embed is not sitting in.
  */
-function touchesProse(embed: HTMLElement): boolean {
+export function touchesProse(embed: HTMLElement): boolean {
   for (const node of [embed.previousSibling, embed.nextSibling]) {
     if (!node) continue;
     if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim()) return true;

@@ -1,7 +1,7 @@
 import { CLASSES, DIVIDER_WIDTH, RESIZE_HANDLE_SIZE, DEFAULT_SETTINGS, SINGLE_IMAGE_MIN_WIDTH, SingleImageSizeMode, computeInterItemSpace, isVideo } from "../constants";
 import { isMediaVideo, mediaLoaded, mediaNaturalSize, type MediaElement } from "../imageMedia/mediaElement";
 import { ImageMeta, RowGroup } from "../imageParse/imageDetector";
-import { RowImage, write as writeRowImage } from "../imageParse/rowParams";
+import { RowImage, isSingleFormSizing, write as writeRowImage } from "../imageParse/rowParams";
 import { DIVIDER_MIN_GROW, computeFlexGrows, computeUniformHeight, computeRowHeight, computeImageContentRect, computeDividerEquilibrium, computeGlobalEquilibrium, computeScaleBasedHeights, computeScaleBasedHeightsContinuous, computeSingleImageWidth, computePairEquilibrium, computePairHeights, drawnHeightCoefficient } from "../imageLayout/layoutEngine";
 import { alignmentToCSS, isNarrowViewport, onNarrowViewportChange, setStyleImportant } from "../utils";
 import { logger } from "../logger";
@@ -142,6 +142,8 @@ export interface ImageRowOptions {
   singleImageWidth: number;
   getResourcePath: (fileName: string) => string;
   sourcePath: string;
+  /** Mobile: render row images stacked and page-wide instead of side by side. */
+  mobileStack?: boolean;
 }
 
 /**
@@ -295,6 +297,12 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
    *  deliberately NOT marked — it is derived, and claiming it would stamp this
    *  widget's measurement over a turn that has already written its own. */
   _sizingDirtyImages: Set<number> = new Set();
+  /** Whether this row was assembled by joining lines that were separate rows
+   *  (a blank line deleted between two images, or a single row merged into a
+   *  multi row).  The members were reset to "unsized" at construction; the row
+   *  is then balanced once by the seed equilibrium, after the media reports its
+   *  dimensions.  Cleared by that solve so it never re-triggers. */
+  private pendingMergeEquilibrium = false;
 
   private dividerController: DividerController;
   private resizeController: ResizeHandleController;
@@ -307,6 +315,47 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     this.dividerController = new DividerController(this);
     this.resizeController = new ResizeHandleController(this);
     this.dragReorderController = new DragReorderController(this);
+    this.normalizeCrossGrammarRow();
+  }
+
+  /**
+   * Reset a row assembled from lines of the single grammar to "unsized".
+   *
+   * A member line still carrying the single row's `|S|W` tail means the lines
+   * were separate rows a moment ago (the usual cause is deleting the blank line
+   * between two images).  Under the multi grammar the same numbers read as a
+   * near-zero share and an out-of-range fill, so the row would paint as
+   * collapsed slivers — and `hasSizing` being set keeps every auto-equilibrium
+   * path from firing.  There is no split worth honouring here: each line's
+   * numbers described its own former row, not this one.  So the whole row is
+   * marked unsized and re-derived at its equilibrium once the media can be
+   * measured.  Orientation stays with each image; the alignment word goes with
+   * the row kind it was written for.
+   */
+  private normalizeCrossGrammarRow(): void {
+    const images = this.group.images;
+    if (images.length < 2) return;
+    const crossed = images.map((img) => isSingleFormSizing(img.raw));
+    if (!crossed.some(Boolean)) return;
+
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (crossed[i]) {
+        img.alignment = undefined;
+        this._alignmentDirtyImages.add(i);
+      }
+      img.hasSizing = false;
+      if (img.display.kind === "multi") {
+        img.display.share = 1;
+        img.display.fill = null;
+      }
+    }
+    this.pendingMergeEquilibrium = true;
+    log.info("ImageRowWidget cross-grammar row reset for equilibrium", {
+      lineStart: this.group.lineStart,
+      images: images.length,
+      crossed,
+    });
   }
 
   onReorder(cb: ReorderCallback): void {
@@ -1754,6 +1803,19 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
     }
 
     if (allLoaded) {
+      // A row formed by joining separate rows carries numbers the multi grammar
+      // cannot express; `normalizeCrossGrammarRow` reset it to "unsized" at
+      // construction.  Balance it here, once, through the same seed path a
+      // freshly merged row uses — before the preserved-size cache, which would
+      // otherwise restore the geometry of the rows this one was made from.
+      // The items guard matters because a cached image reports its size from
+      // inside `buildImageItem`, before the item it belongs to is registered:
+      // the solve must wait until every member has a cell to be sized.
+      if (this.pendingMergeEquilibrium && this.itemEls.length === this.group.images.length) {
+        this.recalculateRowHeight();
+        return;
+      }
+
       // ── Restore preserved multi-image dimensions first (before any
       // other layout path), so corner-handle per-image height adjustments
       // survive widget recreation (e.g. alignment change).
@@ -2242,6 +2304,10 @@ export class ImageRowWidget implements DividerHost, ResizeHost, DragReorderHost 
           if (mi.display.kind === "multi") mi.display.share = g;
         }
         log.debug("ImageRowWidget seedNewRowEquilibrium", { totalGrow, seeded: [...grows] });
+        // The row assembled from separate rows has now been balanced; the
+        // persisted shares leave no single-form tail behind, so the reset must
+        // not run again on the rebuild that write triggers.
+        this.pendingMergeEquilibrium = false;
       }
       // Auto-backfill: persist newly-computed flexGrows and scales.
       if (someMissing || this.group.images.some(img => this.fillOf(img) == null)) {
