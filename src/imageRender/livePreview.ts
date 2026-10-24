@@ -1238,7 +1238,13 @@ function buildDecorations(
           Decoration.replace({
             widget: new StaticImageRowWidget(group, options),
             block: true,
-            inclusive: true,
+            inclusiveStart: true,
+            // Must stay exclusive: with an inclusive end (endSide > 0), CM6's
+            // ContentBuilder.posCovered() reports the position after the widget
+            // as covered, so the newline right after the row is folded into the
+            // widget (breakAfter) and the first blank line below it gets no
+            // LineView — invisible and impossible to place a cursor on.
+            inclusiveEnd: false,
           })
         );
         decorationAdded = true;

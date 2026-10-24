@@ -43,7 +43,11 @@ function vaultFile(path: string, extension: string): object {
 interface Harness {
   app: App;
   target: Element;
-  editor: { replaceSelection: ReturnType<typeof vi.fn> };
+  editor: {
+    replaceSelection: ReturnType<typeof vi.fn>;
+    getCursor: ReturnType<typeof vi.fn>;
+    getLine: ReturnType<typeof vi.fn>;
+  };
   preventDefault: ReturnType<typeof vi.fn>;
   stopPropagation: ReturnType<typeof vi.fn>;
 }
@@ -51,12 +55,20 @@ interface Harness {
 function harness(options: {
   mode?: string;
   destination?: object | null;
+  line?: string;
+  ch?: number;
 } = {}): Harness {
   const containerEl = createDiv();
   const target = createSpan();
   containerEl.appendChild(target);
 
-  const editor = { replaceSelection: vi.fn() };
+  const line = options.line ?? '';
+  const ch = options.ch ?? 0;
+  const editor = {
+    replaceSelection: vi.fn(),
+    getCursor: vi.fn(() => ({ line: 0, ch })),
+    getLine: vi.fn(() => line),
+  };
   const view = Object.assign(new MarkdownView(), {
     editor,
     file: { path: 'notes/note.md' },
@@ -161,6 +173,30 @@ describe('handleReferencePaste', () => {
     const h = harness({ destination: image });
     const stray = { workspace: { getLeavesOfType: () => [] } } as unknown as App;
     expect(handleReferencePaste(stray, paste(h, '![[img/a.png]]'))).toBe(false);
+  });
+
+  it('parks the reference on its own line when pasted at the end of a line', () => {
+    const h = harness({ destination: image, line: 'text', ch: 4 });
+    handleReferencePaste(h.app, paste(h, '![[img/a.png]]'));
+    expect(h.editor.replaceSelection).toHaveBeenCalledWith('\n![[img/a.png]]');
+  });
+
+  it('parks the reference on its own line when pasted at the start of a line', () => {
+    const h = harness({ destination: image, line: 'text', ch: 0 });
+    handleReferencePaste(h.app, paste(h, '![[img/a.png]]'));
+    expect(h.editor.replaceSelection).toHaveBeenCalledWith('![[img/a.png]]\n');
+  });
+
+  it('breaks the line on both sides when pasted mid-line', () => {
+    const h = harness({ destination: image, line: 'ab', ch: 1 });
+    handleReferencePaste(h.app, paste(h, '![[img/a.png]]'));
+    expect(h.editor.replaceSelection).toHaveBeenCalledWith('\n![[img/a.png]]\n');
+  });
+
+  it('treats whitespace neighbours as no content at all', () => {
+    const h = harness({ destination: image, line: '   ', ch: 3 });
+    handleReferencePaste(h.app, paste(h, '![[img/a.png]]'));
+    expect(h.editor.replaceSelection).toHaveBeenCalledWith('![[img/a.png]]');
   });
 });
 

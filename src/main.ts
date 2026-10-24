@@ -32,6 +32,7 @@ import {
 import { findMarkdownViewForElement } from "./imageMenu/imageSource";
 import type { MediaElement } from "./imageMedia/mediaElement";
 import { installReferencePaste } from "./imageMenu/referencePaste";
+import { installPasteNormalizer } from "./imagePaste/pasteNormalizer";
 import { logger } from "./logger";
 import { setLanguage } from "./i18n/language";
 import { combinedMediaExtensions } from "./constants";
@@ -331,6 +332,15 @@ export default class DragImageAutoArrangePlugin
 
     // 库内粘贴一张「复制图像」得到的图时，落成引用而不是新建附件。
     this.register(installReferencePaste(this.app));
+    // 粘贴后校正：粘在现有行首/行尾的嵌入可能拼成一行，按「一嵌入一行」拆开
+    // 并归正参数形态。原生附件粘贴不经过插件的插入路径，只能事后校正。
+    this.register(
+      installPasteNormalizer(this.app, () => ({
+        maxImagesPerRow: this.settings.maxImagesPerRow,
+        imageExtensions: this.settings.imageExtensions,
+        videoExtensions: this.settings.videoExtensions,
+      }))
+    );
   }
 
   onunload(): void {

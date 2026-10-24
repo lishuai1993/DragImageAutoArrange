@@ -92,8 +92,11 @@ function singleAlign(tokens: string[], offset: number): Alignment | undefined {
 
 /** Offset of the first numeric slot, past the orientation word and the align
  *  word. The two are positionally ordered (orientation, then alignment) and
- *  each may be absent, so the offset is a two-step prefix — never a fixed 1. */
-function slotOffset(tokens: string[]): number {
+ *  each may be absent, so the offset is a two-step prefix — never a fixed 1.
+ *  Exported so a line-level policy (the paste normaliser) can tell a form
+ *  mismatch apart without re-deriving the slot order — the same reason
+ *  `setAlignment` lives here. */
+export function slotOffset(tokens: string[]): number {
   let offset = isOrientationWord(tokens[0]) ? 1 : 0;
   if (ALIGN_WORDS.has(tokens[offset])) offset += 1;
   return offset;

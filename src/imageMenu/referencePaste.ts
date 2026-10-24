@@ -62,12 +62,27 @@ function referenceForPaste(event: ClipboardEvent): string | null {
     return recalled && embedLinkTarget(recalled) ? recalled.trim() : null;
 }
 
-/** Take the paste over: park the reference in place of whatever the editor would
- *  have done with the bitmap. */
+/**
+ * Take the paste over: park the reference in place of whatever the editor would
+ * have done with the bitmap.
+ *
+ * The reference must end up alone on its line — a row is exactly one embed per
+ * line, and `![[a]]![[b]]` is not a row at all. Landing at the start or end of
+ * a line that still carries text would concatenate them, and since the caret
+ * stays at the insertion point, every further paste would lengthen the same
+ * line. A newline is added only for non-whitespace neighbours: whitespace
+ * around an embed is legal, so an already-clean line keeps its shape.
+ */
 function insertReference(event: ClipboardEvent, editor: Editor, reference: string): void {
     event.preventDefault();
     event.stopPropagation();
-    editor.replaceSelection(reference);
+    const from = editor.getCursor('from');
+    const to = editor.getCursor('to');
+    const before = editor.getLine(from.line).slice(0, from.ch);
+    const after = editor.getLine(to.line).slice(to.ch);
+    const prefix = before.trim() === '' ? '' : '\n';
+    const suffix = after.trim() === '' ? '' : '\n';
+    editor.replaceSelection(prefix + reference + suffix);
 }
 
 /**

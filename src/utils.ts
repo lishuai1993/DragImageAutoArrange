@@ -1,5 +1,8 @@
 import { MarkdownView, type App, type TAbstractFile } from "obsidian";
 import { t } from "./i18n/language";
+import { logger } from "./logger";
+
+const log = logger.channel("trashFile");
 
 /**
  * Compile-time exhaustiveness guard for discriminated unions. Put it in the
@@ -183,18 +186,46 @@ interface TrashCapableVault {
 /**
  * 删除文件，并尊重用户的「删除 / 移到回收站」偏好：新版走 FileManager，旧版
  * 退回 Vault（system = true 表示按系统方式移到回收站）。
+ *
+ * 回收链本身会误报：macOS 上 Vault.trash 以 adapter.trashSystem 的返回值判定
+ * 系统回收是否成功，而该 IPC 在文件已经移入废纸篓后仍可能返回假值，于是继续
+ * 走本地回收——对一个已经不在的源文件 rename 到 .trash，抛 ENOENT。文件其实
+ * 已经进了回收站，这个异常是假的。因此这里以「文件是否真的还在」为准：不在
+ * 即视为回收完成，仍在才把异常交回调用方。
  */
 export async function trashFile(app: App, file: TAbstractFile): Promise<void> {
+  /** 回收调用抛错后，用文件系统的现状判定它是否其实已经完成。 */
+  const movedDespiteError = async (error: unknown): Promise<boolean> => {
+    try {
+      if (await app.vault.adapter.exists(file.path)) return false;
+    } catch {
+      // 连存在性都读不到时按真失败处理，提示留给调用方。
+      return false;
+    }
+    log.warn("TRASH_MOVED_DESPITE_ERROR", { file: file.path, error: String(error) });
+    return true;
+  };
+
   const fileManager = app.fileManager as unknown as TrashCapableFileManager;
   if (typeof fileManager.trashFile === "function") {
-    await fileManager.trashFile(file);
-    return;
+    try {
+      await fileManager.trashFile(file);
+      return;
+    } catch (error) {
+      if (await movedDespiteError(error)) return;
+      throw error;
+    }
   }
 
   const vault = app.vault as unknown as TrashCapableVault;
   if (typeof vault.trash === "function") {
-    await vault.trash(file, true);
-    return;
+    try {
+      await vault.trash(file, true);
+      return;
+    } catch (error) {
+      if (await movedDespiteError(error)) return;
+      throw error;
+    }
   }
 
   throw new Error(
