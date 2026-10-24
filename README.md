@@ -8,12 +8,14 @@ Automatically arrange consecutive image embeds into side-by-side rows — like F
 - **Drag to reorder** — drag an image within a row, or onto another row, to move it.
 - **Draggable dividers** — drag the divider between two images to shift the width split.
 - **Height equalizer** — double-click the row's top balance line to make every image in a multi-image row the same height. Dragging an image's own top or bottom edge snaps it to an equal-height neighbour and lights that side's balance bar.
+- **Automatic balance after a merge** — deleting the blank lines between image lines forms a multi-image row, or joins a single-image row to an existing one, and that row is balanced once automatically: every member is drawn at the same height from its own aspect ratio, rotated members included.
 - **Corner handles** — drag a handle on an image's corner to change its size. In a multi-image row, dragging outward stops once the image exactly fills its cell, and near full width it snaps silently to full: past that point neither the image nor the row height moves, and the note is not written.
 - **Alignment** — align an image left, center, or right within its row.
 - **Rotate / flip** — rotate by 90° / 180° and flip horizontally or vertically. The orientation is stored as a parameter on the note line (a readable word such as `r90` / `fv`), so the image file itself is never re-encoded and each change is a single undoable edit. Reset returns the image to its original orientation.
 - **Undo** — every operation on a single- or multi-image row is written back to the note as an editor transaction, so `cmd+z` reverts it: resize, divider drag, drag reorder, cross-row moves, alignment, and rotate / flip, with the picture returning alongside the note. One gesture leaves one undo entry.
 - **Right-click menu** — one unified menu for alignment, rotation, resizing, copy, cut, and file operations. Copy and cut put the bitmap on the clipboard together with the image's in-vault reference: pasting inside this vault lands as a `![[…]]` link instead of minting a duplicate attachment, while pasting into another vault or app yields the image itself — PNG and JPEG files go over byte-for-byte, lossy formats are re-encoded as JPEG. Cut additionally removes that one reference, and deletes the local file only when nothing else in the vault points at it. The whole menu has a master switch in the settings tab: turn it off and images go back to Obsidian and to any other image plugin, with the command that turns it back on copied to your clipboard.
 - **Reading Mode support** — rows render in Reading Mode too, including each image's rotate/flip orientation; editing operations are greyed out.
+- **Mobile display** — on phones and tablets every row becomes one image per line, fitted to the page width and never enlarged, with no gaps between images; rotation and flip still apply. Drag, dividers, the balance bar, and the right-click menu are left out on mobile, and desktop behavior is unchanged.
 - **Interface language** — the settings tab and the image right-click menu switch between Chinese and English from one control at the top of the settings tab; English is the default. Command names are registered in both languages, so the command palette finds them whichever one you use.
 - **Vault-wide maintenance** — two passes in the settings tab: clear everything the plugin wrote out of every note, or normalise every line it can host into the standard parameter form. Both scan the vault and show you the exact scope before writing.
 
@@ -74,6 +76,14 @@ Releases are built and published by the workflow in `.github/workflows/release.y
 
 ## Changelog
 
+### 1.1.0
+
+1. Added: mobile (phone and tablet) display. Each row becomes one image per line, fitted to the page width and never enlarged, with no gaps between images; rotation and flip still apply. Drag, dividers, the balance bar, and the right-click menu are not offered on mobile, and desktop behavior is unchanged.
+2. Added: automatic balance after a row is merged. Deleting the blank lines between image lines — forming a multi-image row, or joining a single-image row to an existing row — balances that row once, at equal drawn heights from the images' own aspect ratios, with rotated members solved by their displayed orientation.
+   2.1 The single-image sizing and alignment parameters are dropped together with the row kind they were written for; orientation is kept. The balance runs once and does not re-trigger.
+
+### 1.0.7
+
 1. Added: video media support.
    1.1 Videos (mp4, webm, mov, and others) join image rows for drag, resize, rotate, align, and undo.
    1.2 Aligning a single-video row no longer shifts the viewport, and aligning one image in a multi-image row no longer flickers.
@@ -94,12 +104,14 @@ MIT — see [LICENSE](LICENSE).
 - **拖拽排序**：可在行内拖动图片，也可拖到另一行，实现位置调整。
 - **可拖拽分隔条**：拖动两张图之间的分隔条，即可改变宽度分配。
 - **顶部均衡线**：双击多图行顶部的均衡线，即可快速让行内各图高度对齐；拖拽图片自身的上下边框时，会与等高的邻居吸附，并点亮该侧的均衡条。
+- **合并后自动均衡**：删除图片行之间的空行，把单图行拼成多图行、或把单图行并入已有 多图行时，该行会自动执行一次均衡 —— 各成员按自身宽高比取得等高显示，含旋转成员时按旋转后的朝向求解。
 - **角点手柄**：拖拽图像角点手柄即可改变图像大小。在多图行中，向外拖到图片恰好铺满本格即止，接近满格时会静默吸到满格；越过该点后图片与行高都不再变化，笔记也不会被写入。
 - **对齐**：可将图片在所在行内左对齐、居中或右对齐。
 - **旋转 / 翻转**：支持 90° / 180° 旋转与水平、垂直翻转。朝向以行参数的形式写回笔记（可读词，如 `r90` / `fv`），原图文件自始至终不被重编码，每次操作都是一步可撤销的编辑；重置后回到原始朝向。
 - **撤销**：单图行与多图行上的操作都以编辑器事务写回笔记，`cmd+z` 即可回退 —— 缩放、拖拽分隔条、行内排序、跨行拖拽、对齐、旋转 / 翻转都可撤销，画面随笔记一同还原；一次手势只留一条撤销记录。
 - **右键菜单**：对齐、旋转、缩放、复制、剪切与文件操作收敛在同一个菜单中。复制与剪切会把位图写入剪贴板，并一并带上该图在库内的引用：在本库粘贴落成 `![[…]]` 链接，而不是另存出一份重复附件；粘到其它仓库或 App 则落成图像本身 —— png / jpg 原样写入，webp、avif 等有损格式转码为 JPEG。剪切还会移除该处引用，并且仅当全库再无其他引用时才删除本地文件。整个菜单在设置页有总开关：关闭后图片交还 Obsidian 与其他图片插件处理，同时把重新开启的命令复制到剪贴板。
 - **阅读模式支持**：多图行在阅读模式下同样渲染，旋转 / 翻转朝向一并呈现，编辑类操作置灰。
+- **移动端显示**：手机、平板上每一行改为一行一张图片，按页面宽度等比适配且不放大，图片之间不留缝隙；旋转、翻转同样生效。移动端不提供拖拽、分隔线、均衡栏与右键菜单，桌面端行为保持不变。
 - **界面语言**：设置页最上方一个切换控件即可在中文与 English 之间切换设置页与图片右键菜单的语言，默认英文。命令名中英并排注册，命令面板在哪种语言下都能搜到。
 - **全库格式维护**：设置页提供两个全库动作 —— 把插件写入的参数从全部笔记中清除，或把所有可托管的图片行归一化为标准参数格式。两者都先扫描、把改动范围显示给你，确认之后才写入。
 
@@ -159,6 +171,14 @@ npm test        # 单元测试
 发布由 `.github/workflows/release.yml` 中的工作流完成：推送任意 Tag 即触发构建，并把 `main.js`、`manifest.json`、`styles.css` 作为附件上传到新建的 Release。
 
 ## 更新日志
+
+### 1.1.0
+
+1. 新增：移动端（手机、平板）显示。每一行改为一行一张图片，按页面宽度等比适配且不放大，图片之间不留缝隙；旋转、翻转在移动端同样生效。移动端不提供拖拽、分隔线、均衡栏与右键菜单，桌面端行为保持不变。
+2. 新增：图片行合并后的自动均衡。删除图片行之间的空行、把单图行拼成多图行，或把单图行并入已有 多图行时，该行会自动执行一次均衡，各成员按自身宽高比取得等高显示；含旋转成员时按旋转后的朝向求解。
+   2.1 单图身份的尺寸与对齐参数随行身份一并作废，旋转保留；均衡只执行一次，不会反复触发。
+
+### 1.0.7
 
 1. 新增：支持视频媒体。
    1.1 视频（mp4、webm、mov 等）可像图片一样成行、拖拽、缩放、旋转、对齐与撤销。
