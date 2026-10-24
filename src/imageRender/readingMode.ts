@@ -35,7 +35,7 @@ import {
   areEmbedsConsecutive, touchesProse,
   waitForImagesThenWrap, makeImagesDraggable,
 } from "./rmFlexRow";
-import { queryMedia } from "../imageMedia/mediaElement";
+import { queryAllMedia, queryMedia } from "../imageMedia/mediaElement";
 import { layoutMobileEmbed } from "./mobileStack";
 
 /**
@@ -226,6 +226,37 @@ export function suppressRowFlash(): void {
     FLASH_SWEEP_MS
   );
   window.setTimeout(stopFlashWatch, FLASH_WATCH_MS);
+}
+
+/**
+ * Clear the spacing Reading Mode leaves around a stacked mobile embed.
+ *
+ * The stylesheet carries the same clearance by marker class, but a theme rule
+ * or a body without Obsidian's `is-mobile` class can miss or outrank it, and
+ * the stacked layout must stay tight either way.  Inline is the one form that
+ * outranks both without `!important`.  A quarter turn keeps `flex`: its box is
+ * wider than the page and has to be centred inside the drawn rectangle.
+ */
+function clearMobileStackSpacing(embed: HTMLElement, host: HTMLElement | null): void {
+  if (host) {
+    host.style.setProperty("margin-block", "0");
+    host.style.setProperty("padding-block", "0");
+    for (const br of Array.from(host.querySelectorAll("br"))) {
+      br.style.setProperty("display", "none");
+    }
+  }
+  const turned = embed.classList.contains(CLASSES.mobileTurned);
+  embed.style.setProperty("display", turned ? "flex" : "block");
+  embed.style.setProperty("margin", "0");
+  embed.style.setProperty("padding", "0");
+  if (turned) {
+    embed.style.setProperty("justify-content", "center");
+    embed.style.setProperty("align-items", "center");
+  }
+  for (const media of queryAllMedia(embed)) {
+    media.style.setProperty("display", "block");
+    media.style.setProperty("margin", "0");
+  }
 }
 
 /**
@@ -489,9 +520,11 @@ export function createReadingModeProcessor(
         if (!parsed) continue;
         const embed = imageEmbeds[i];
         if (touchesProse(embed)) continue;
-        embed.parentElement?.classList.add(CLASSES.mobileRow);
+        const host = embed.parentElement;
+        host?.classList.add(CLASSES.mobileRow);
         embed.classList.add(CLASSES.mobileEmbed);
         layoutMobileEmbed(embed);
+        clearMobileStackSpacing(embed, host);
       }
     } else {
       // Apply alignment to standalone single images

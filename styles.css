@@ -275,8 +275,8 @@
 
 /* Reading Mode stacks the matched images as blocks.  Live Preview overrides
    this below and keeps the embed inline-level. */
-body.is-mobile .diaa-mobile-row .internal-embed,
-body.is-mobile .diaa-mobile-embed {
+.diaa-mobile-row .internal-embed,
+.diaa-mobile-embed {
   display: block;
   padding: 0;
   margin: 0;
@@ -285,8 +285,8 @@ body.is-mobile .diaa-mobile-embed {
 /* Live Preview renders the embed as an inline widget inside a `.cm-line`.
    Making it block splits that line's inline flow, and CodeMirror's 1em-tall
    widget buffers then show up as an empty line above and below every picture. */
-body.is-mobile .cm-line.diaa-mobile-row .internal-embed,
-body.is-mobile .cm-line.diaa-mobile-row .diaa-mobile-embed {
+.cm-line.diaa-mobile-row .internal-embed,
+.cm-line.diaa-mobile-row .diaa-mobile-embed {
   display: inline-flex;
   vertical-align: top;
 }
@@ -294,14 +294,14 @@ body.is-mobile .cm-line.diaa-mobile-row .diaa-mobile-embed {
 /* A paragraph carrying a matched image drops the reading-view paragraph
    spacing, so blank source lines between images add no gap here.  Live
    Preview keeps them: unmarked lines are never touched. */
-body.is-mobile .diaa-mobile-row:not(.cm-line) {
+.diaa-mobile-row:not(.cm-line) {
   margin-block: 0;
 }
 
-body.is-mobile .diaa-mobile-row .internal-embed img,
-body.is-mobile .diaa-mobile-row .internal-embed video,
-body.is-mobile .diaa-mobile-embed img,
-body.is-mobile .diaa-mobile-embed video {
+.diaa-mobile-row .internal-embed img,
+.diaa-mobile-row .internal-embed video,
+.diaa-mobile-embed img,
+.diaa-mobile-embed video {
   display: block;
   margin: 0;
 }
@@ -309,7 +309,7 @@ body.is-mobile .diaa-mobile-embed video {
 /* A quarter turn paints the layout box on its side: the box is deliberately
    wider than the page, so the embed takes the drawn rectangle and centres the
    box inside it. */
-body.is-mobile .diaa-mobile-embed.diaa-mobile-turned {
+.diaa-mobile-embed.diaa-mobile-turned {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -317,18 +317,18 @@ body.is-mobile .diaa-mobile-embed.diaa-mobile-turned {
 
 /* Live Preview must stay inline-level even when turned, or the anonymous
    block above reappears around the rotated picture. */
-body.is-mobile .cm-line.diaa-mobile-row .diaa-mobile-embed.diaa-mobile-turned {
+.cm-line.diaa-mobile-row .diaa-mobile-embed.diaa-mobile-turned {
   display: inline-flex;
 }
 
-body.is-mobile .diaa-mobile-embed.diaa-mobile-turned img,
-body.is-mobile .diaa-mobile-embed.diaa-mobile-turned video {
+.diaa-mobile-embed.diaa-mobile-turned img,
+.diaa-mobile-embed.diaa-mobile-turned video {
   flex-shrink: 0;
 }
 
 /* Consecutive source lines render as one paragraph separated by <br>.  The
    embeds are block-level now, so those breaks would only add empty lines. */
-body.is-mobile .diaa-mobile-row br {
+.diaa-mobile-row br {
   display: none;
 }
 
