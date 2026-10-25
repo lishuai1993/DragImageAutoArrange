@@ -3,7 +3,7 @@
   "name": "Drag Image Auto Arrange",
   "version": "1.1.2",
   "minAppVersion": "1.5.0",
-  "description": "Auto-arrange consecutive images into side-by-side rows with drag-to-reorder, resize handles, and draggable dividers, similar to Feishu documents.",
+  "description": "Auto-arrange consecutive images into side-by-side rows with drag-to-reorder, resize handles, and draggable dividers, similar to Feishu documents. ",
   "author": "lishuai",
   "authorUrl": "https://github.com/lishuai1993",
   "isDesktopOnly": false
